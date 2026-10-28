@@ -1,0 +1,6 @@
+exit=0
+produced_output=yes
+3: function "f" missing return
+3: function "f" return lists are not the same size
+4: unknown function for
+4: variable "i" is not defined in the current scope

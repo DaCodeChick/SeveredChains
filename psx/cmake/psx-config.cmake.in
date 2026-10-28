@@ -1,0 +1,9 @@
+@PACKAGE_INIT@
+
+# psx — reusable PS1 library (C17 core + optional C++23 wrapper headers).
+# Consumers use psx::psx (the C core) and/or psx::cpp (the C++23 wrappers, which
+# link the core themselves). Nothing else is required: the library has no
+# third-party dependencies (psx-library.md, psx-c-api.md).
+include("${CMAKE_CURRENT_LIST_DIR}/psxTargets.cmake")
+
+check_required_components(psx)

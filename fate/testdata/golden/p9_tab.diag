@@ -1,0 +1,4 @@
+exit=0
+produced_output=yes
+line 4:0 token recognition error at: '\t'
+line 5:0 token recognition error at: '\t'

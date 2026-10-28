@@ -1,0 +1,7 @@
+
+
+f_x:
+data 0
+f:
+mov 1, inl[:f_x]
+return 

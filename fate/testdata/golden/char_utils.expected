@@ -1,0 +1,373 @@
+
+
+charIsInActiveParty_charIndex:
+data 0
+charIsInActiveParty_slot:
+data 0
+charIsInActiveParty__expr_0:
+data 0
+charIsInActiveParty__expr_1:
+data 0
+charIsInActiveParty__expr_2:
+data 0
+charIsInActiveParty__expr_3:
+data 0
+charIsInActiveParty:
+pop inl[:charIsInActiveParty_charIndex]
+mov 0, inl[:charIsInActiveParty_slot]
+_label_0:
+mov 17, inl[:charIsInActiveParty__expr_1]
+cmp !=, var[inl[:charIsInActiveParty__expr_1]][inl[:charIsInActiveParty_slot]], -1, inl[:charIsInActiveParty__expr_0]
+jmp_cmp ==, 0, inl[:charIsInActiveParty__expr_0], inl[:_label_1]
+mov 17, inl[:charIsInActiveParty__expr_3]
+cmp ==, var[inl[:charIsInActiveParty__expr_3]][inl[:charIsInActiveParty_slot]], inl[:charIsInActiveParty_charIndex], inl[:charIsInActiveParty__expr_2]
+jmp_cmp ==, 0, inl[:charIsInActiveParty__expr_2], inl[:_label_2]
+push inl[:charIsInActiveParty_slot]
+return 
+_label_2:
+incr inl[:charIsInActiveParty_slot]
+jmp inl[:_label_0]
+_label_1:
+push -1
+return 
+
+removeCharFromActiveParty_charIndex:
+data 0
+removeCharFromActiveParty_charSlot:
+data 0
+removeCharFromActiveParty__expr_4:
+data 0
+removeCharFromActiveParty__expr_5:
+data 0
+removeCharFromActiveParty__expr_6:
+data 0
+removeCharFromActiveParty:
+pop inl[:removeCharFromActiveParty_charIndex]
+_label_3:
+jmp_cmp ==, 0, 1, inl[:_label_4]
+push inl[:removeCharFromActiveParty_charIndex]
+gosub inl[:charIsInActiveParty]
+pop inl[:removeCharFromActiveParty__expr_4]
+mov inl[:removeCharFromActiveParty__expr_4], inl[:removeCharFromActiveParty_charSlot]
+cmp ==, inl[:removeCharFromActiveParty_charSlot], -1, inl[:removeCharFromActiveParty__expr_5]
+jmp_cmp ==, 0, inl[:removeCharFromActiveParty__expr_5], inl[:_label_5]
+return 
+_label_5:
+mov 17, inl[:removeCharFromActiveParty__expr_6]
+mov -1, var[inl[:removeCharFromActiveParty__expr_6]][inl[:removeCharFromActiveParty_charSlot]]
+jmp inl[:_label_3]
+_label_4:
+return 
+
+removeCharFromActivePartyAndReplaceWithNext_charIndex:
+data 0
+removeCharFromActivePartyAndReplaceWithNext_charSlot:
+data 0
+removeCharFromActivePartyAndReplaceWithNext__expr_7:
+data 0
+removeCharFromActivePartyAndReplaceWithNext__expr_8:
+data 0
+removeCharFromActivePartyAndReplaceWithNext__expr_9:
+data 0
+removeCharFromActivePartyAndReplaceWithNext_backfillIndex:
+data 0
+removeCharFromActivePartyAndReplaceWithNext__expr_10:
+data 0
+removeCharFromActivePartyAndReplaceWithNext__expr_11:
+data 0
+removeCharFromActivePartyAndReplaceWithNext__expr_12:
+data 0
+removeCharFromActivePartyAndReplaceWithNext__expr_13:
+data 0
+removeCharFromActivePartyAndReplaceWithNext__expr_14:
+data 0
+removeCharFromActivePartyAndReplaceWithNext__expr_15:
+data 0
+removeCharFromActivePartyAndReplaceWithNext__expr_16:
+data 0
+removeCharFromActivePartyAndReplaceWithNext__expr_17:
+data 0
+removeCharFromActivePartyAndReplaceWithNext_tempSlot:
+data 0
+removeCharFromActivePartyAndReplaceWithNext__expr_18:
+data 0
+removeCharFromActivePartyAndReplaceWithNext__expr_19:
+data 0
+removeCharFromActivePartyAndReplaceWithNext__expr_20:
+data 0
+removeCharFromActivePartyAndReplaceWithNext__expr_21:
+data 0
+removeCharFromActivePartyAndReplaceWithNext:
+pop inl[:removeCharFromActivePartyAndReplaceWithNext_charIndex]
+push inl[:removeCharFromActivePartyAndReplaceWithNext_charIndex]
+gosub inl[:charIsInActiveParty]
+pop inl[:removeCharFromActivePartyAndReplaceWithNext__expr_7]
+mov inl[:removeCharFromActivePartyAndReplaceWithNext__expr_7], inl[:removeCharFromActivePartyAndReplaceWithNext_charSlot]
+_label_6:
+cmp !=, inl[:removeCharFromActivePartyAndReplaceWithNext_charSlot], -1, inl[:removeCharFromActivePartyAndReplaceWithNext__expr_8]
+jmp_cmp ==, 0, inl[:removeCharFromActivePartyAndReplaceWithNext__expr_8], inl[:_label_7]
+mov 17, inl[:removeCharFromActivePartyAndReplaceWithNext__expr_9]
+mov -1, var[inl[:removeCharFromActivePartyAndReplaceWithNext__expr_9]][inl[:removeCharFromActivePartyAndReplaceWithNext_charSlot]]
+mov 0, inl[:removeCharFromActivePartyAndReplaceWithNext_backfillIndex]
+_label_8:
+mov 62, inl[:removeCharFromActivePartyAndReplaceWithNext__expr_11]
+cmp <, inl[:removeCharFromActivePartyAndReplaceWithNext_backfillIndex], var[inl[:removeCharFromActivePartyAndReplaceWithNext__expr_11]], inl[:removeCharFromActivePartyAndReplaceWithNext__expr_10]
+jmp_cmp ==, 0, inl[:removeCharFromActivePartyAndReplaceWithNext__expr_10], inl[:_label_9]
+push inl[:removeCharFromActivePartyAndReplaceWithNext_backfillIndex]
+gosub inl[:charIsInActiveParty]
+pop inl[:removeCharFromActivePartyAndReplaceWithNext__expr_14]
+cmp !=, inl[:removeCharFromActivePartyAndReplaceWithNext__expr_14], -1, inl[:removeCharFromActivePartyAndReplaceWithNext__expr_13]
+mov 115, inl[:removeCharFromActivePartyAndReplaceWithNext__expr_17]
+add inl[:removeCharFromActivePartyAndReplaceWithNext_backfillIndex], inl[:removeCharFromActivePartyAndReplaceWithNext__expr_17]
+mov var[inl[:removeCharFromActivePartyAndReplaceWithNext__expr_17]], inl[:removeCharFromActivePartyAndReplaceWithNext__expr_16]
+and 0x3, inl[:removeCharFromActivePartyAndReplaceWithNext__expr_16]
+cmp !=, inl[:removeCharFromActivePartyAndReplaceWithNext__expr_16], 0x3, inl[:removeCharFromActivePartyAndReplaceWithNext__expr_15]
+cmp ||, inl[:removeCharFromActivePartyAndReplaceWithNext__expr_13], inl[:removeCharFromActivePartyAndReplaceWithNext__expr_15], inl[:removeCharFromActivePartyAndReplaceWithNext__expr_12]
+jmp_cmp ==, 0, inl[:removeCharFromActivePartyAndReplaceWithNext__expr_12], inl[:_label_10]
+incr inl[:removeCharFromActivePartyAndReplaceWithNext_backfillIndex]
+jmp inl[:_label_11]
+_label_10:
+mov inl[:removeCharFromActivePartyAndReplaceWithNext_charSlot], inl[:removeCharFromActivePartyAndReplaceWithNext_tempSlot]
+_label_12:
+mov 17, inl[:removeCharFromActivePartyAndReplaceWithNext__expr_19]
+cmp !=, var[inl[:removeCharFromActivePartyAndReplaceWithNext__expr_19]][inl[:removeCharFromActivePartyAndReplaceWithNext_tempSlot]], -1, inl[:removeCharFromActivePartyAndReplaceWithNext__expr_18]
+jmp_cmp ==, 0, inl[:removeCharFromActivePartyAndReplaceWithNext__expr_18], inl[:_label_13]
+incr inl[:removeCharFromActivePartyAndReplaceWithNext_tempSlot]
+jmp inl[:_label_12]
+_label_13:
+mov 17, inl[:removeCharFromActivePartyAndReplaceWithNext__expr_20]
+mov inl[:removeCharFromActivePartyAndReplaceWithNext_backfillIndex], var[inl[:removeCharFromActivePartyAndReplaceWithNext__expr_20]][inl[:removeCharFromActivePartyAndReplaceWithNext_tempSlot]]
+jmp inl[:_label_9]
+_label_11:
+jmp inl[:_label_8]
+_label_9:
+push inl[:removeCharFromActivePartyAndReplaceWithNext_charIndex]
+gosub inl[:charIsInActiveParty]
+pop inl[:removeCharFromActivePartyAndReplaceWithNext__expr_21]
+mov inl[:removeCharFromActivePartyAndReplaceWithNext__expr_21], inl[:removeCharFromActivePartyAndReplaceWithNext_charSlot]
+jmp inl[:_label_6]
+_label_7:
+return 
+
+clearActivePartyBackup__expr_22:
+data 0
+clearActivePartyBackup__expr_23:
+data 0
+clearActivePartyBackup:
+_label_14:
+mov 63, inl[:clearActivePartyBackup__expr_23]
+cmp !=, var[inl[:clearActivePartyBackup__expr_23]], -1, inl[:clearActivePartyBackup__expr_22]
+jmp_cmp ==, 0, inl[:clearActivePartyBackup__expr_22], inl[:_label_15]
+jmp inl[:_label_14]
+_label_15:
+return 
+
+backupActiveParty_charSlot:
+data 0
+backupActiveParty__expr_24:
+data 0
+backupActiveParty__expr_25:
+data 0
+backupActiveParty__expr_26:
+data 0
+backupActiveParty__expr_27:
+data 0
+backupActiveParty:
+gosub inl[:clearActivePartyBackup]
+mov 0, inl[:backupActiveParty_charSlot]
+_label_16:
+mov 17, inl[:backupActiveParty__expr_25]
+cmp !=, var[inl[:backupActiveParty__expr_25]][inl[:backupActiveParty_charSlot]], -1, inl[:backupActiveParty__expr_24]
+jmp_cmp ==, 0, inl[:backupActiveParty__expr_24], inl[:_label_17]
+mov 63, inl[:backupActiveParty__expr_26]
+mov 17, inl[:backupActiveParty__expr_27]
+mov var[inl[:backupActiveParty__expr_27]][inl[:backupActiveParty_charSlot]], var[inl[:backupActiveParty__expr_26]]
+incr inl[:backupActiveParty_charSlot]
+jmp inl[:_label_16]
+_label_17:
+return 
+
+restoreActivePartyBackup_charIndex:
+data 0
+restoreActivePartyBackup__expr_28:
+data 0
+restoreActivePartyBackup_charSlot:
+data 0
+restoreActivePartyBackup__expr_29:
+data 0
+restoreActivePartyBackup__expr_30:
+data 0
+restoreActivePartyBackup__expr_31:
+data 0
+restoreActivePartyBackup:
+gosub inl[:removeAllCharsFromActiveParty]
+mov 63, inl[:restoreActivePartyBackup__expr_28]
+mov var[inl[:restoreActivePartyBackup__expr_28]], inl[:restoreActivePartyBackup_charIndex]
+mov 0, inl[:restoreActivePartyBackup_charSlot]
+_label_18:
+cmp !=, inl[:restoreActivePartyBackup_charIndex], -1, inl[:restoreActivePartyBackup__expr_29]
+jmp_cmp ==, 0, inl[:restoreActivePartyBackup__expr_29], inl[:_label_19]
+mov 17, inl[:restoreActivePartyBackup__expr_30]
+mov inl[:restoreActivePartyBackup_charIndex], var[inl[:restoreActivePartyBackup__expr_30]][inl[:restoreActivePartyBackup_charSlot]]
+mov 63, inl[:restoreActivePartyBackup__expr_31]
+mov var[inl[:restoreActivePartyBackup__expr_31]], inl[:restoreActivePartyBackup_charIndex]
+incr inl[:restoreActivePartyBackup_charSlot]
+jmp inl[:_label_18]
+_label_19:
+return 
+
+removeAllCharsFromActiveParty__expr_32:
+data 0
+removeAllCharsFromActiveParty__expr_33:
+data 0
+removeAllCharsFromActiveParty__expr_34:
+data 0
+removeAllCharsFromActiveParty__expr_35:
+data 0
+removeAllCharsFromActiveParty__expr_36:
+data 0
+removeAllCharsFromActiveParty:
+_label_20:
+mov 17, inl[:removeAllCharsFromActiveParty__expr_33]
+mov 0, inl[:removeAllCharsFromActiveParty__expr_34]
+cmp !=, var[inl[:removeAllCharsFromActiveParty__expr_33]][inl[:removeAllCharsFromActiveParty__expr_34]], -1, inl[:removeAllCharsFromActiveParty__expr_32]
+jmp_cmp ==, 0, inl[:removeAllCharsFromActiveParty__expr_32], inl[:_label_21]
+mov 17, inl[:removeAllCharsFromActiveParty__expr_35]
+mov 0, inl[:removeAllCharsFromActiveParty__expr_36]
+mov -1, var[inl[:removeAllCharsFromActiveParty__expr_35]][inl[:removeAllCharsFromActiveParty__expr_36]]
+jmp inl[:_label_20]
+_label_21:
+return 
+
+removeAllCharsFromParty_charIndex:
+data 0
+removeAllCharsFromParty__expr_37:
+data 0
+removeAllCharsFromParty__expr_38:
+data 0
+removeAllCharsFromParty__expr_39:
+data 0
+removeAllCharsFromParty:
+gosub inl[:removeAllCharsFromActiveParty]
+mov 0, inl[:removeAllCharsFromParty_charIndex]
+_label_22:
+cmp <, inl[:removeAllCharsFromParty_charIndex], 9, inl[:removeAllCharsFromParty__expr_37]
+jmp_cmp ==, 0, inl[:removeAllCharsFromParty__expr_37], inl[:_label_23]
+mov 115, inl[:removeAllCharsFromParty__expr_38]
+add inl[:removeAllCharsFromParty_charIndex], inl[:removeAllCharsFromParty__expr_38]
+mov 0x23, inl[:removeAllCharsFromParty__expr_39]
+not inl[:removeAllCharsFromParty__expr_39]
+and inl[:removeAllCharsFromParty__expr_39], var[inl[:removeAllCharsFromParty__expr_38]]
+incr inl[:removeAllCharsFromParty_charIndex]
+jmp inl[:_label_22]
+_label_23:
+return 
+
+temporarilyRemoveCharFromParty_charIndex:
+data 0
+temporarilyRemoveCharFromParty__expr_40:
+data 0
+temporarilyRemoveCharFromParty__expr_41:
+data 0
+temporarilyRemoveCharFromParty__expr_42:
+data 0
+temporarilyRemoveCharFromParty__expr_43:
+data 0
+temporarilyRemoveCharFromParty__expr_44:
+data 0
+temporarilyRemoveCharFromParty:
+pop inl[:temporarilyRemoveCharFromParty_charIndex]
+mov 115, inl[:temporarilyRemoveCharFromParty__expr_42]
+add inl[:temporarilyRemoveCharFromParty_charIndex], inl[:temporarilyRemoveCharFromParty__expr_42]
+mov var[inl[:temporarilyRemoveCharFromParty__expr_42]], inl[:temporarilyRemoveCharFromParty__expr_41]
+and 0x3, inl[:temporarilyRemoveCharFromParty__expr_41]
+cmp !=, inl[:temporarilyRemoveCharFromParty__expr_41], 0, inl[:temporarilyRemoveCharFromParty__expr_40]
+jmp_cmp ==, 0, inl[:temporarilyRemoveCharFromParty__expr_40], inl[:_label_24]
+mov 115, inl[:temporarilyRemoveCharFromParty__expr_43]
+add inl[:temporarilyRemoveCharFromParty_charIndex], inl[:temporarilyRemoveCharFromParty__expr_43]
+shl 8, var[inl[:temporarilyRemoveCharFromParty__expr_43]]
+mov 115, inl[:temporarilyRemoveCharFromParty__expr_44]
+add inl[:temporarilyRemoveCharFromParty_charIndex], inl[:temporarilyRemoveCharFromParty__expr_44]
+or 0x4, var[inl[:temporarilyRemoveCharFromParty__expr_44]]
+push inl[:temporarilyRemoveCharFromParty_charIndex]
+gosub inl[:removeCharFromActivePartyAndReplaceWithNext]
+_label_24:
+return 
+
+temporarilyRemoveAllCharsBut_charIndex:
+data 0
+temporarilyRemoveAllCharsBut_index:
+data 0
+temporarilyRemoveAllCharsBut__expr_45:
+data 0
+temporarilyRemoveAllCharsBut__expr_46:
+data 0
+temporarilyRemoveAllCharsBut:
+pop inl[:temporarilyRemoveAllCharsBut_charIndex]
+mov 0, inl[:temporarilyRemoveAllCharsBut_index]
+_label_25:
+cmp <, inl[:temporarilyRemoveAllCharsBut_index], 9, inl[:temporarilyRemoveAllCharsBut__expr_45]
+jmp_cmp ==, 0, inl[:temporarilyRemoveAllCharsBut__expr_45], inl[:_label_26]
+cmp !=, inl[:temporarilyRemoveAllCharsBut_index], inl[:temporarilyRemoveAllCharsBut_charIndex], inl[:temporarilyRemoveAllCharsBut__expr_46]
+jmp_cmp ==, 0, inl[:temporarilyRemoveAllCharsBut__expr_46], inl[:_label_27]
+push inl[:temporarilyRemoveAllCharsBut_index]
+gosub inl[:temporarilyRemoveCharFromParty]
+_label_27:
+incr inl[:temporarilyRemoveAllCharsBut_index]
+jmp inl[:_label_25]
+_label_26:
+return 
+
+temporarilyRemoveAllChars:
+push -1
+gosub inl[:temporarilyRemoveAllCharsBut]
+return 
+
+restoreCharIfTemporarilyRemoved_charIndex:
+data 0
+restoreCharIfTemporarilyRemoved__expr_47:
+data 0
+restoreCharIfTemporarilyRemoved__expr_48:
+data 0
+restoreCharIfTemporarilyRemoved__expr_49:
+data 0
+restoreCharIfTemporarilyRemoved__expr_50:
+data 0
+restoreCharIfTemporarilyRemoved__expr_51:
+data 0
+restoreCharIfTemporarilyRemoved__expr_52:
+data 0
+restoreCharIfTemporarilyRemoved:
+pop inl[:restoreCharIfTemporarilyRemoved_charIndex]
+mov 115, inl[:restoreCharIfTemporarilyRemoved__expr_49]
+add inl[:restoreCharIfTemporarilyRemoved_charIndex], inl[:restoreCharIfTemporarilyRemoved__expr_49]
+mov var[inl[:restoreCharIfTemporarilyRemoved__expr_49]], inl[:restoreCharIfTemporarilyRemoved__expr_48]
+and 0x4, inl[:restoreCharIfTemporarilyRemoved__expr_48]
+cmp !=, inl[:restoreCharIfTemporarilyRemoved__expr_48], 0, inl[:restoreCharIfTemporarilyRemoved__expr_47]
+jmp_cmp ==, 0, inl[:restoreCharIfTemporarilyRemoved__expr_47], inl[:_label_28]
+mov 115, inl[:restoreCharIfTemporarilyRemoved__expr_50]
+add inl[:restoreCharIfTemporarilyRemoved_charIndex], inl[:restoreCharIfTemporarilyRemoved__expr_50]
+shr 8, var[inl[:restoreCharIfTemporarilyRemoved__expr_50]]
+mov 115, inl[:restoreCharIfTemporarilyRemoved__expr_51]
+add inl[:restoreCharIfTemporarilyRemoved_charIndex], inl[:restoreCharIfTemporarilyRemoved__expr_51]
+mov 0x4, inl[:restoreCharIfTemporarilyRemoved__expr_52]
+not inl[:restoreCharIfTemporarilyRemoved__expr_52]
+and inl[:restoreCharIfTemporarilyRemoved__expr_52], var[inl[:restoreCharIfTemporarilyRemoved__expr_51]]
+_label_28:
+return 
+
+restoreAllTemporarilyRemovedChars_charIndex:
+data 0
+restoreAllTemporarilyRemovedChars__expr_53:
+data 0
+restoreAllTemporarilyRemovedChars:
+mov 0, inl[:restoreAllTemporarilyRemovedChars_charIndex]
+_label_29:
+cmp <, inl[:restoreAllTemporarilyRemovedChars_charIndex], 9, inl[:restoreAllTemporarilyRemovedChars__expr_53]
+jmp_cmp ==, 0, inl[:restoreAllTemporarilyRemovedChars__expr_53], inl[:_label_30]
+push inl[:restoreAllTemporarilyRemovedChars_charIndex]
+gosub inl[:restoreCharIfTemporarilyRemoved]
+incr inl[:restoreAllTemporarilyRemovedChars_charIndex]
+jmp inl[:_label_29]
+_label_30:
+return 

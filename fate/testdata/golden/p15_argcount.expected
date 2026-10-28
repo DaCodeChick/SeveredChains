@@ -1,0 +1,18 @@
+
+
+helper_a:
+data 0
+helper_b:
+data 0
+helper:
+pop inl[:helper_b]
+pop inl[:helper_a]
+return 
+
+f_a:
+data 0
+f:
+pop inl[:f_a]
+push inl[:f_a]
+gosub inl[:helper]
+return 

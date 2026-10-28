@@ -1,0 +1,24 @@
+# Line endings are a CI concern, not a preference: the `repo.format` gate runs
+# clang-format --dry-run --Werror over the source tree, and a Windows checkout
+# with core.autocrlf=true would turn every file into a formatting failure for
+# reasons that have nothing to do with style. Sources are LF everywhere.
+* text=auto
+
+*.c text eol=lf
+*.h text eol=lf
+*.hpp text eol=lf
+*.cpp text eol=lf
+*.cc text eol=lf
+*.cmake text eol=lf
+*.cmake.in text eol=lf
+CMakeLists.txt text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.yml text eol=lf
+*.json text eol=lf
+
+# Never run text/keyword filters or diffs over binary fixtures.
+*.tim binary
+*.png binary
+*.bin binary
+*.iso binary

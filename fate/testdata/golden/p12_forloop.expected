@@ -1,0 +1,13 @@
+
+
+f_a:
+data 0
+f__expr_0:
+data 0
+f:
+pop inl[:f_a]
+mov undefined, inl[:f__expr_0]
+push var[inl[:f__expr_0]]
+gosub inl[:for]
+incr undefined
+incr inl[:f_a]

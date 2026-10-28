@@ -1,0 +1,6 @@
+// Synthesized fixture (Severed Chains Native, no upstream origin).
+// Behaviour measured against Script-Recompiler 0.7.11 @ 3433e6f.
+def f() {
+	var x = 1;
+	return;
+}

@@ -1,0 +1,18 @@
+# Build trees (out-of-source by convention; the docs use ./build).
+build/
+build-*/
+out/
+
+# CTest artefacts written by a `ctest` run (some runs land at the repo root).
+Testing/
+
+# Editor / tooling droppings.
+.DS_Store
+__pycache__/
+*.pyc
+.idea/
+.vscode/
+.vs/
+.cache/
+CMakeUserPresets.json
+compile_commands.json

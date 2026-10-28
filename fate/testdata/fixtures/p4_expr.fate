@@ -1,0 +1,11 @@
+// Synthesized fixture (Severed Chains Native, no upstream origin).
+// Behaviour measured against Script-Recompiler 0.7.11 @ 3433e6f.
+def f(a, b) {
+  var x = a + b * 2 - 3 / 4 % 5;
+  var y = (a & 0xff) | (b ^ ~a);
+  var z = (a << 2) >> 1;
+  var w = (a > b) && (b != 0) || !(a < b);
+  x &&= 3;
+  y ||= 4;
+  return;
+}

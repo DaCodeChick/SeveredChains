@@ -1,0 +1,10 @@
+
+
+f_a:
+data 0
+f:
+pop inl[:f_a]
+call SMap::scriptScaleUniform, 0, inl[:f_a]
+push inl[:f_a]
+gosub inl[:mysteryFn]
+return 

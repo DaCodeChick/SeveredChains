@@ -1,0 +1,74 @@
+# Severed Chains Native — project-wide formatting
+# Baseline: LLVM, with the project overrides below. Run: clang-format -i <file>
+# Do NOT mass-reformat files you haven't touched.
+BasedOnStyle: LLVM
+IndentWidth: 2
+UseTab: Never
+TabWidth: 2
+ContinuationIndentWidth: 2
+ColumnLimit: 120
+AccessModifierOffset: -2
+AlignTrailingComments: true
+AllowAllArgumentsOnNextLine: true
+AllowAllConstructorInitializersOnNextLine: true
+AllowAllParametersOfDeclarationOnNextLine: true
+AllowShortBlocksOnASingleLine: Never
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortLambdasOnASingleLine: All
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AlwaysBreakTemplateDeclarations: Yes
+AlwaysBreakBeforeMultilineStrings: true
+BinPackArguments: true
+BinPackParameters: true
+BreakBeforeBinaryOperators: None
+BreakBeforeBraces: Allman
+BreakBeforeTernaryOperators: true
+BreakConstructorInitializers: BeforeComma
+BreakInheritanceList: BeforeComma
+BreakStringLiterals: true
+ConstructorInitializerAllOnOneLineOrOnePerLine: true
+Cpp11BracedListStyle: true
+DeriveLineEnding: true
+FixNamespaceComments: true
+IndentCaseLabels: true
+IndentExternBlock: NoIndent
+IndentPPDirectives: AfterHash
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1
+NamespaceIndentation: None
+PointerAlignment: Left
+ReflowComments: false  # keep Doxygen @param/@return blocks exactly as written
+# Single-statement if/else/for/while bodies carry no braces (docs/guidelines/cpp.md §6).
+# clang-format removes them and *keeps* them where removal would be unsafe or wrong:
+# a body that is itself a braced-less `if` (dangling-else), a body that declares a
+# variable, multi-statement bodies, and function/lambda bodies.
+# Needs clang-format >= 17; the name says LLVM because the option is only supported
+# for an LLVM-derived style, which this file is (BasedOnStyle: LLVM).
+RemoveBracesLLVM: true
+SortIncludes: true
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex: '^<sc/'
+    Priority: 2
+  - Regex: '^<psx/'
+    Priority: 3
+  - Regex: '^<(SDL[^.]*\.h|SDL3/)'
+    Priority: 4
+  - Regex: '^<(luau|lauxlib)\.h$'
+    Priority: 5
+  - Regex: '^<(GLM/|glm/)'
+    Priority: 6
+  - Regex: '^<entt/'
+    Priority: 7
+  - Regex: '^<[a-z_]+\.h>?$'
+    Priority: 10  # system headers (cstdint, vector, ...)
+  - Regex: "^['\"]"
+    Priority: 1  # project-local quoted includes (" or ') first
+SortUsingDeclarations: true
+SpaceAfterCStyleCast: false
+SpaceBeforeCpp11BracedList: false
+SpaceInEmptyParentheses: false
+Standard: Latest
+UseCRLF: false

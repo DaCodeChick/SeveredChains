@@ -1,0 +1,5 @@
+exit=0
+produced_output=no
+4: unimplemented op true
+Failed to compile:
+java.lang.NullPointerException

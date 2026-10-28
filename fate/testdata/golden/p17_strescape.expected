@@ -1,0 +1,16 @@
+
+
+f_a:
+data 0
+f__expr_0:
+data str[Say \"hi\"\n]
+f__expr_1:
+data str[Back\\slash]
+f__expr_2:
+data str[plain]
+f:
+pop inl[:f_a]
+call Text::scriptSetTextboxContents, 0, 1, inl[:f__expr_0]
+call Text::scriptSetTextboxContents, 0, 1, inl[:f__expr_1]
+call Text::scriptSetTextboxContents, 0, 1, inl[:f__expr_2]
+return 

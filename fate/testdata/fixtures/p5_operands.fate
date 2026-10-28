@@ -1,0 +1,10 @@
+// Synthesized fixture (Severed Chains Native, no upstream origin).
+// Behaviour measured against Script-Recompiler 0.7.11 @ 3433e6f.
+def f(a) {
+  var x = stor[5];
+  var y = stor[stor[0], 23];
+  var z = var[17][0];
+  var w = var[6];
+  var v = reg[3];
+  return;
+}

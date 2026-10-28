@@ -1,0 +1,17 @@
+
+
+f_a:
+data 0
+f__expr_0:
+data 0
+f:
+pop inl[:f_a]
+cmp ==, inl[:f_a], 1, inl[:f__expr_0]
+jmp_cmp ==, 0, inl[:f__expr_0], inl[:_label_0]
+push 2
+return 
+jmp inl[:_label_1]
+_label_0:
+push 3
+return 
+_label_1:

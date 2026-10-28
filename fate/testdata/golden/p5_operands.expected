@@ -1,0 +1,43 @@
+
+
+f_a:
+data 0
+f_x:
+data 0
+f__expr_0:
+data 0
+f_y:
+data 0
+f__expr_1:
+data 0
+f__expr_2:
+data 0
+f__expr_3:
+data 0
+f_z:
+data 0
+f__expr_4:
+data 0
+f__expr_5:
+data 0
+f_w:
+data 0
+f__expr_6:
+data 0
+f_v:
+data 0
+f:
+pop inl[:f_a]
+mov 5, inl[:f__expr_0]
+mov stor[inl[:f__expr_0]], inl[:f_x]
+mov 0, inl[:f__expr_1]
+mov stor[inl[:f__expr_1]], inl[:f__expr_2]
+mov 23, inl[:f__expr_3]
+mov stor[inl[:f__expr_2], inl[:f__expr_3]], inl[:f_y]
+mov 17, inl[:f__expr_4]
+mov 0, inl[:f__expr_5]
+mov var[inl[:f__expr_4]][inl[:f__expr_5]], inl[:f_z]
+mov 6, inl[:f__expr_6]
+mov var[inl[:f__expr_6]], inl[:f_w]
+mov reg[3], inl[:f_v]
+return 

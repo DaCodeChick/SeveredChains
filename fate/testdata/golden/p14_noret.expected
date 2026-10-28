@@ -1,0 +1,10 @@
+
+
+f_a:
+data 0
+f:
+pop inl[:f_a]
+jmp_cmp ==, 0, inl[:f_a], inl[:_label_0]
+push 5
+return 
+_label_0:

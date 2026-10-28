@@ -1,0 +1,86 @@
+
+
+f_a:
+data 0
+f_b:
+data 0
+f_x:
+data 0
+f__expr_0:
+data 0
+f__expr_1:
+data 0
+f__expr_2:
+data 0
+f__expr_3:
+data 0
+f__expr_4:
+data 0
+f_y:
+data 0
+f__expr_5:
+data 0
+f__expr_6:
+data 0
+f__expr_7:
+data 0
+f__expr_8:
+data 0
+f_z:
+data 0
+f__expr_9:
+data 0
+f__expr_10:
+data 0
+f_w:
+data 0
+f__expr_11:
+data 0
+f__expr_12:
+data 0
+f__expr_13:
+data 0
+f__expr_14:
+data 0
+f__expr_15:
+data 0
+f__expr_16:
+data 0
+f:
+pop inl[:f_b]
+pop inl[:f_a]
+mov inl[:f_b], inl[:f__expr_2]
+mul 2, inl[:f__expr_2]
+mov inl[:f_a], inl[:f__expr_1]
+add inl[:f__expr_2], inl[:f__expr_1]
+mov 3, inl[:f__expr_4]
+div 4, inl[:f__expr_4]
+mov inl[:f__expr_4], inl[:f__expr_3]
+mod 5, inl[:f__expr_3]
+mov inl[:f__expr_1], inl[:f__expr_0]
+sub inl[:f__expr_3], inl[:f__expr_0]
+mov inl[:f__expr_0], inl[:f_x]
+mov inl[:f_a], inl[:f__expr_6]
+and 0xff, inl[:f__expr_6]
+mov inl[:f_a], inl[:f__expr_8]
+not inl[:f__expr_8]
+mov inl[:f_b], inl[:f__expr_7]
+xor inl[:f__expr_8], inl[:f__expr_7]
+mov inl[:f__expr_6], inl[:f__expr_5]
+or inl[:f__expr_7], inl[:f__expr_5]
+mov inl[:f__expr_5], inl[:f_y]
+mov inl[:f_a], inl[:f__expr_10]
+shl 2, inl[:f__expr_10]
+mov inl[:f__expr_10], inl[:f__expr_9]
+shr 1, inl[:f__expr_9]
+mov inl[:f__expr_9], inl[:f_z]
+cmp >, inl[:f_a], inl[:f_b], inl[:f__expr_13]
+cmp !=, inl[:f_b], 0, inl[:f__expr_14]
+cmp &&, inl[:f__expr_13], inl[:f__expr_14], inl[:f__expr_12]
+cmp <, inl[:f_a], inl[:f_b], inl[:f__expr_16]
+cmp ==, inl[:f__expr_16], 0, inl[:f__expr_15]
+cmp ||, inl[:f__expr_12], inl[:f__expr_15], inl[:f__expr_11]
+mov inl[:f__expr_11], inl[:f_w]
+cmp &&, inl[:f_x], 3, inl[:f_x]
+cmp ||, inl[:f_y], 4, inl[:f_y]
+return 

@@ -1,0 +1,6 @@
+def f(a) {
+  Text::scriptSetTextboxContents(0, 1, "Say \"hi\"\n");
+  Text::scriptSetTextboxContents(0, 1, "Back\\slash");
+  Text::scriptSetTextboxContents(0, 1, "plain");
+  return;
+}

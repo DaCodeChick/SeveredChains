@@ -1,0 +1,23 @@
+
+
+f_a:
+data 0
+f__expr_0:
+data 0
+f__expr_1:
+data 0
+f__expr_2:
+data 0
+f__expr_3:
+data 0
+f:
+pop inl[:f_a]
+mov 10, inl[:f__expr_0]
+wait inl[:f__expr_0]
+mov inl[:f_a], inl[:f__expr_1]
+wait inl[:f__expr_1]
+mov 30, inl[:f__expr_2]
+sub 5, inl[:f__expr_2]
+mov inl[:f__expr_2], inl[:f__expr_3]
+wait inl[:f__expr_3]
+return 

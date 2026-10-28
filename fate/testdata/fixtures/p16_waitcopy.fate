@@ -1,0 +1,6 @@
+def f(a) {
+  wait(10);
+  wait(a);
+  wait(30 - 5);
+  return;
+}

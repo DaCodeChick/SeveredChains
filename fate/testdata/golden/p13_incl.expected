@@ -1,0 +1,10 @@
+
+#include char_utils.fate 
+
+g_a:
+data 0
+g:
+pop inl[:g_a]
+push inl[:g_a]
+gosub inl[:charIsInActiveParty]
+return 

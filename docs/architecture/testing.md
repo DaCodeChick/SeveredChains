@@ -1,0 +1,382 @@
+# Testing & Verification Strategy
+
+Requirement §17: cover engine init/shutdown, exception-policy enforcement,
+SDL3 GPU backends, shaders, resource lifetimes, asset decoding, gameplay
+calculations, addition timing, save/load, Luau, native ABI, plugin lifecycle,
+mod dependencies, cross-platform consistency, error handling. Use
+measurements; propose tools only when necessity is established.
+
+## 1. Test Framework
+
+- **Decision: use a minimal dependency-free in-repo test runner**
+  (`tests/framework/`): a ~200-line catch-like harness (test case
+  registration via static initializers, `CHECK`/`REQUIRE` macros, section
+  support, filter by tag, exit codes; the harness itself is throw-free *by
+  design* — checks are bool-based and failures abort the test case via
+  longjmp-free control flow (early returns), never `throw`. That is a harness
+  design choice, not a statement of the project exception policy
+  (AGENTS.md §4). Rationale: the approved stack has no test
+  framework; adding Catch2/GTest is a new dependency requiring approval for
+  zero gameplay-specific benefit; our needs (unit + golden + fuzz harnesses)
+  fit a small in-repo harness. *If the team disagrees, the fallback is
+  Catch2 (BSD) — flagged for approval in dependencies.md review.*
+- One test binary per area (`sc_tests_engine`, `sc_tests_ps1`,
+  `sc_tests_game`, `sc_tests_abi`, ...) so areas build/run independently;
+  a `ctest`-style driver (CMake `add_test`) runs all.
+- **No network, no game data in CI by default:** unit tests use synthetic
+  fixtures (hand-built byte buffers for every format) + tiny generated
+  assets. Data-dependent integration tests (real ISO) run locally / in a
+  separate CI lane with a secret-provided sample (opt-in).
+
+## 2. Per-Area Strategy
+
+### 2.1 Engine init/shutdown & error handling
+- Unit: each subsystem `init/deinit` round-trips; deinit-idempotency;
+  partial-init failure (injected) → clean teardown + correct Status;
+  **every Status code reachable** (error-path coverage table in the report).
+- Exception-policy probe (build-system.md §2): when `SC_ENABLE_EXCEPTIONS=OFF`,
+  a `throw` TU must not compile; with the default ON policy the probe is
+  skipped.
+- Crash-path test: terminate handler writes crash log (temp dir).
+
+### 2.2 SDL3 GPU device & backend selection
+- Headless-ish smoke on CI where possible (Linux: Vulkan via CI GPU or
+  `vulkan-1` softpipe? — softpipe supports Vulkan; run pipeline-creation
+  test); macOS: Metal in CI runner (hardware available); Windows: D3D12 in
+  CI runner.
+- Tests: `SDL_CreateGPUDevice` succeeds with our shader-format mask on each
+  CI platform; device name enumeration; **pipeline-creation matrix**: create
+  every pipeline variant of every backend (shader-migration §6) — this is
+  the "Vulkan, Metal, D3D12 rendering" verification for Milestone 3.
+- Backend fallback: if one backend init fails, error reporting is correct
+  (no silent fallback).
+
+### 2.3 Shader compilation & loading
+- Build-time: all shaders compile on all three targets (glslang/spirv-cross/
+  dxc) — CI gates on zero warnings-as-errors (configurable).
+- Cache: content-hash invalidation test (touch source → rebuild; unchanged
+  → no rebuild).
+- Runtime load: artifact load + pipeline create per backend; shader reload
+  (dev mode) swaps pipelines without crash.
+
+### 2.4 Resource lifetimes
+- Unit: RAII wrapper null-state safety; deferred-delete ordering (resource
+  used in frame N is destroyed ≥ frame N+2 — test with fence callbacks);
+  cycling transfer buffer correctness (write while bound → cycles, no
+  corruption — golden data check); stress: 10k create/destroy cycles.
+- TSAN run of the audio thread + async loader (dedicated CI job).
+
+### 2.5 Asset decoding (psx/ formats — `psx` library, standalone)
+- Runs in the standalone psx suite (`sc_tests_psx`, links `psx` only — the full
+  suite, incl. GTE/GS goldens, is §2.11). **Round-trip tests per decoder**
+  with synthetic + reference fixtures:
+  BPE (compress→decompress identity on known data; the decompressor on a
+  captured real BPE segment from a user-provided disc, opt-in lane), MRG
+  (incl. virtual entries + sector-aligned), DEFF, TIM (all BPPs, CLUT/no
+  CLUT), TMD (all primitive types: lit/unlit, textured/untextured,
+  gouraud/flat, tri/quad, translucent), CTMD (scale application), ANM
+  (sequence/sprite metrics), CContainer (frames + CLUT animations),
+  MCQ, SShd/SSSq (subfile extraction), XA (decode a captured block →
+  compare PCM against the Java `XaTranscoder`/`XaAdpcm` output — **golden <!-- naming-allow: Java class names cited verbatim -->
+  PCM fixtures generated from the Java reference**, committed), Tag
+  (serialize/deserialize identity + a real V10 save round-trip, opt-in
+  lane), ISO9660 tree build (synthetic disc image fixture).
+- Malformed input: truncation/corruption at every offset class → specific
+  Status code (fuzz — see §3).
+
+### 2.6 Gameplay calculations & combat
+- **Golden-value tests**: port the damage/SP formulas (`combat/formula`
+  package) as unit tests with the reference values (computed from the Java
+  code paths on fixed inputs — generated during Phase 1 by running the
+  Java reference in a harness; values committed as fixtures).
+- **Addition timing** (the critical one): the timing-square evaluator is a
+  pure state machine — property tests: (a) press at frame
+  [lower..upper] → success; (b) before lower → fail-early; (c) after upper
+  → fail-late; (d) wrong action → fail-wrong; (e) timing-window multiplier
+  config scales bounds exactly (parity with Java `getHitProperty`);
+  (f) auto modes (tutorial/auto) skip input. **Frame-exact**: run the
+  battle state machine with a recorded input script and compare full
+  sim-state snapshots (entity positions, turn order, HP, effects timeline)
+  against Java reference snapshots (opt-in data lane; a small battle
+  scenario suffices for the first cut).
+- RNG: LCG sequence identity (port test: N steps from a seed == Java
+  output fixture).
+- Turn order, stat growth, level-up, encounter tables: unit tests from
+  reference tables.
+
+### 2.7 Save/load
+- Tag V10 byte-exact: serialize(Java-deserialized data) == original bytes
+  (fixtures: minimal save + a real save, opt-in lane).
+- Migration chain V8→V9→V10 on fixtures; corrupt save → InvalidSaveResult;
+  memcard import (synthetic DABA fixture + real `.mcr`, opt-in);
+  crash-recovery save generation (injected mid-game crash → save loads);
+  mod `modData` slot isolation (two mods' data survive a save/load; a mod
+  removal leaves orphan data, not corruption).
+
+### 2.8 Luau
+- VM: per-mod isolation (one VM's error doesn't affect another);
+  protected-call error paths (runtime error → Result with message, no
+  exception); memory cap trigger; instruction budget trigger; stdlib
+  reduction (no `os`/`io`/`debug` — negative test).
+- API: each registered capability (character template, addition, item,
+  event, config) round-trips through the registry and is visible to the
+  game (integration tests with a script mod fixture); combat evaluator
+  seam (a Luau button-sequence evaluator drives a mock battle hit — the
+  Playable-Lloyd class scenario).
+- Bytecode cache: version-keyed (Luau version bump → cache miss → recompile).
+- Performance: per-frame hook overhead budget test (<50µs typical, p99).
+
+### 2.9 Native plugin API & plugin lifecycle (C++23)
+- **ABI stability tests** (the "native ABI compatibility" requirement,
+  native-api.md §9.4): sample plugin compiled against SDK v1 (same
+  toolchain) loads against engine vN and passes functional tests; interface
+  versioning (`api.Table<T>()` — unknown id/version → nullopt, known →
+  works); **frozen-layout probe** — `static_assert`s on size/offset of every
+  frozen SDK type, compiled against the SDK *and* the previous engine's SDK
+  headers (CI catches drift); string lifetime rules (engine doesn't hold
+  plugin strings past the call — ASAN detectable).
+- **Toolchain-parity tests**: a plugin built with a *different* compiler
+  family than the engine (toolchain hash mismatch) is **refused at load**
+  with a clear diagnostic (negative test, per platform matrix); the SDK
+  compile probes (throw / dynamic_cast TUs must fail to compile) run on the
+  SDK headers with every CI compiler.
+- **Lifecycle tests**: discover (entry symbol lookup V-max..V1) → validate
+  (bad manifest, missing dep, version mismatch, toolchain mismatch, cycle)
+  → load → init (`OnLoad` success + failure injection) → ready → shutdown
+  (handle-leak check) → unload; plugin crash isolation is *documented not
+  testable in-process* (covered by the contract tests + the out-of-process
+  future work).
+- **Fuzzing** (dedicated `lod-fuzz` binary, libFuzzer): every plugin API
+  surface exercised through a fuzz-host plugin with random args; every
+  decoder with random/truncated buffers; Tag parser; config parser; unified-
+  diff applier (fuzzed patch text). Run in CI (time-boxed) + ASAN/UBSAN.
+
+### 2.10 Mod dependency resolution
+- Unit: semver range matching (port Java's `^x.y.z` semantics — golden-test
+  against semver4j NPM-mode fixtures: `^`, `~`, comparators, prerelease
+  edge cases; mod-loader.md §2), dependency closure, cycles, missing deps
+  (→ skip + report), duplicate ids, load order determinism (alphabetical +
+  dependency order, golden test).
+
+### 2.11 PSX library (`psx`) — standalone golden suite
+
+The `psx` suite links **`psx` only** (no engine/SDL/Qt) — the fastest test surface in the
+repo, and the parity backbone (psx-library.md, psx-c-api.md §8). Four targets, because the
+C17 core has four distinct consumers:
+
+| Target / CTest entries | What it guarantees |
+|---|---|
+| `sc_tests_psx` — `psx.psx`, `psx.bpe`, `psx.tim`, `psx.archive`, `psx.wrapper`, `psx.clinkage` | Format behaviour through the C++23 wrappers (41 cases), wrapper delegation/move-semantics/RAII/error-propagation/span-borrowing, and that the C header is usable from C++ under `extern "C"` |
+| `psx.c_consumer` (`sc_psx_c_consumer`) | A **pure C17** program (C compiler only, `-Wall -Wextra -Wshadow -Wconversion -Wmissing-prototypes -Wstrict-prototypes -pedantic`) exercises every entry point, every documented error code, NULL-argument rejection and the malformed-input contract: 261 checks. This is the target that answers "is the API really usable without C++?" |
+| `psx.abi.symbols` | Export-surface audit: exactly the documented symbols are exported, none undocumented, no C++ mangled symbol exported *or* referenced. Reads the symbol table with `nm` on ELF/Mach-O and the **PE export table** (`objdump -p`/`dumpbin /EXPORTS`) on a `.dll` — the method follows the artifact, so a cross-built Windows DLL is auditable from any host. Runs for both shared and static builds |
+| `psx.differential` (`-DPSX_ENABLE_DIFFERENTIAL_TEST=ON`) | Old-vs-new equivalence against the frozen pre-migration C++ implementation over a deterministic corpus incl. boundary probing (psx-c-api.md §10) |
+
+Malformed input is a first-class corpus, not an afterthought: truncation at every length,
+per-byte flips, random noise, and every 2-/4-byte window loaded with threshold values,
+compared between the two implementations.
+
+One ABI property is checked in C only, deliberately: an out-of-range error code
+(`psx_error_name(12345)`, `(psx_error_t)-7`) is representable at the C boundary and
+undefined behaviour in C++ (an enum load outside its declared range). So the C++
+linkage test pins the compile-time shape (`is_enum`, `sizeof == sizeof(int)`) and the
+pure-C consumer pins the runtime behaviour.
+
+The whole suite also runs under AddressSanitizer + UndefinedBehaviorSanitizer —
+`-DSC_ENABLE_ASAN=ON -DSC_ENABLE_UBSAN=ON` locally, which is what the sanitizer legs
+of `ci.yml` pass (three of the seventeen). `ScToolchain` adds
+`-fno-sanitize-recover=all` and the CI test step sets `halt_on_error=1`, so the first
+violation fails the binary instead of logging it and passing. Leak detection runs only
+on the Linux legs (macOS ASan aborts on `detect_leaks=1`). That lane is what proved
+the C++ version of the enum probe was UB rather than a test: the case printed `OK`
+while sanitizer reported the bad loads, which is how a passing-but-invalid test gets
+caught.
+
+Decoding expectations:
+- **GTE math**: every op (RTPS/NCLIP/NCCS/AVSZ/MAC3/... ) against Java
+  `Gte` outputs for a fixed input matrix (exact 32-bit integer equality —
+  GTE is integer-fixed-point; no float tolerance needed); flag accumulation
+  sequences; the camera-matrix derivations used by submap/battle cameras.
+- **Software GS (psx::gpu)**: render a fixture scene → **byte-identical**
+  to the Java `Gpu`/`Graphics` output (the parity oracle, rendering-
+  analysis.md): ordering-table draws, top-left rule, every blend mode
+  (incl. B+1/4F), per-primitive constant depth, CLUT/chroma-key paths.
+- **Decoders**: BPE (compress→decompress identity + captured real segment),
+  MRG (virtual entries, sector alignment), DEFF, TIM/DABA (all BPPs),
+  TMD/CTMD (all primitive classes + `ctmdFlags`), ANM, XA (**sample-exact
+  PCM vs the Java `XaAdpcm`/`XaTranscoder` fixtures, incl. the 312 pre-skip**), <!-- naming-allow: Java class names cited verbatim -->
+  SShd/SSSq parse, ISO9660 tree (synthetic disc fixture), Tag
+  (serialize/deserialize identity + real save bytes, opt-in lane).
+- Malformed input: truncation/corruption at every offset class → the
+  specific `psx_error_t` / `psx::Error` code (fuzzed — §3), asserted identically from
+  C and C++.
+
+### 2.12 Script tooling (psx::script + fate)
+- **Round-trip**: disassemble→assemble == identity (byte-exact) on the full
+  retail script set (opt-in data lane) + a synthetic-script corpus in-repo
+  covering every op/param type, pointer-table overruns, LodStrings, fork/jmp
+  tables.
+- **Translator/Tokenizer**: text format round-trip (bytes → text → bytes),
+  canonical-form stability (the patch contract — a re-run of translate on
+  already-patched output is a no-op).
+- **Unified diff component**: generate/apply/undo on fixture text (3 context
+  lines, fuzz tolerance = none, failure → specific error); `call`-normalization
+  (index↔name via meta) golden tests; the full reference patch corpus
+  (`patches/scripts.csv` + all `.diff`/`.txt`) applies to the unpatched
+  scripts and produces **byte-identical output to the Java unpacker's
+  patched tree** (opt-in data lane — the strongest fate-pipeline proof).
+- **Fate compiler** (hand-rolled, per Q-SCR-1 recommendation): differential test against
+  **generated** goldens produced by running the Java `FateCompiler` (see
+  `docs/research/fate-toolchain-phase1.md` §8 and §12 — the oracle harness must exist before the
+  compiler does; it now does, as `tools/fate_oracle.py`). The reference `patches/**/*.txt` files
+  are **assembly text, not Fate source** and cannot be fed to `compile`: none of them contains a
+  `def`, and `player_combat_script.txt` begins with `entrypoint :ENTRYPOINT_0_MAIN`. They are
+  inputs for `assemble`/`decompile` and semantic cross-checks only. The real Fate corpus is two
+  files (`char_utils.fate`, `queen_fury.fate`), which together cover only a fraction of the
+  grammar.
+- **Fate corpus status (F2, 2026-10-28).** `fate/testdata/` holds 19 fixtures — the two real
+  files plus 17 synthesized probes — each with a byte-exact `.expected` produced by the reference
+  and a `.diag` recording its exit code and diagnostics. `python3 tools/fate_oracle.py check`
+  re-runs the oracle and fails on drift; it exits **77 (skip)** with a visible message when the
+  oracle cannot run, so a machine without a JDK never reports a pass it did not earn. Comparison
+  is byte-exact by design: leading blank line, trailing space on zero-parameter ops, and per-file
+  scratch/label counters are all observable. Still missing from the corpus: unterminated string,
+  opcode-name collision, and a missing `-L` directory (measured to abort the reference with exit
+  1, unlike a missing include file, which is exit 0 with no output).
+- **Fate differential harness.** `fate/testdata/run_golden.py` is the acceptance test — one CTest
+  entry, `fate.compile.golden`, registered by `fate/CMakeLists.txt` and **on by default**
+  (`-DFATE_ENABLE_GOLDEN_TEST=OFF` opts out; a default build that registers zero fate tests is
+  not acceptable coverage). It runs the compiled `fate` binary per fixture and compares bytes; it
+  never runs Java, never touches the network, and skips with exit 77 when the binary, the goldens
+  or the meta bundle are absent. The test sets `SKIP_RETURN_CODE 77` — without it CTest reads any
+  non-zero exit as a failure, and a machine with no meta bundle would report a broken compiler
+  instead of an absent fixture. Because the meta CSVs are not committed, a runner without them
+  compiles the tool and compares nothing; the CI step prints `NOT VERIFIED` in that case rather
+  than reporting coverage. Current local state: 18/19 fixtures byte-match, 1 pinned deviation.
+- **Fate CI lane (written, never executed).** `.github/workflows/ci.yml` has a dedicated
+  `fate-toolchain` job (macOS arm64, Linux x86-64 GCC, Linux x86-64 Clang) while the engine
+  matrix passes `-DSC_ENABLE_FATE=OFF`. Compiler selection is by measured feature support: the
+  `auto x = 1;` probe must compile under `-std=c23`/`-std=c2x` **and** fail under
+  `-std=c17 -Werror -pedantic-errors`, so a toolchain that ignores the standard flag cannot
+  qualify; if no candidate qualifies the job fails with instructions rather than downgrading.
+  The repository is not under version control, so **no leg of this workflow has ever run** — that
+  remains the M1 gap tracked separately, not a claim of cross-platform verification.
+
+### 2.13 Mogul Dabas minigame (scdabas)
+- **Console semantics**: timer/RTC/interrupt/power/DAC behavior unit tests
+  (fixed-step host-driven ticks per dig-dabas.md Q-DAB-2 decision);
+  32×32 1bpp framebuffer inversion parity with the Java host adapter.
+- **RNG**: LCG+mix32 sequence identity (N draws from seed 1 == Java
+  `dabas.core.Random` fixture — generated from the reference; distinct from
+  the main-game RNG test).
+- **Save byte-exactness**: `Save60` + tile grid (0x260 blob, grid layout per
+  Q-DAB-4) serialize/parse identity + a Java-produced save round-trip.
+- **Game logic**: a scripted input tape (5 buttons over N ticks) drives a
+  fresh dig → rewards (gold/items/special) compared to a Java-session
+  fixture (opt-in data); crash-isolation: an injected VM fault returns an
+  error result and the host continues (parity with the Java
+  try/catch-shutdown — the native error-path analog).
+
+### 2.14 Cross-platform consistency
+- **Golden output tests**: (a) BPE/MRG/TIM/TMD decode → byte-identical
+  across OS/ABI (fixtures in repo); (b) GTE math → identical floats
+  (32-bit arithmetic, no FMA contraction — compile with `-ffp-contract=off`
+  where the reference math is GTE-quantized, documented); (c) Tag
+  serialization bytes; (d) RNG sequence; (e) shader compile → identical
+  SPIR-V hash across OS (tool pinned).
+- CI matrix runs the golden suite on Win/Linux/macOS (arm64).
+- **Memory safety**: three of the seventeen legs build the whole tree under ASan +
+  UBSan (macOS arm64, Linux x86_64 GCC and Clang). The Linux pair also enables Leak
+  Sanitizer, which has never run anywhere yet — see build-system.md §8.
+- **Current state (pre-Milestone 2)**: `.github/workflows/ci.yml` covers four
+  runner families across three CPU architectures — macOS arm64 (Apple Silicon,
+  the priority platform), Linux x86_64, Linux arm64 on native ARM runners, and
+  Windows x86_64/MSVC. The golden-decode suite of item (a) is only partly
+  present: `psx.differential` compares the C17 decoders against the frozen
+  pre-migration implementation over a deterministic corpus, and it runs on three
+  of those legs (macOS arm64, Linux x86_64, Linux arm64), so a decode that
+  differed by architecture or by OS would fail somewhere rather than only on the
+  machine that produced it. What is still missing for (a) is committed golden
+  fixture bytes, and TMD/GTE/RNG coverage, which have no implementation yet; when
+  they land they join these legs rather than needing new ones.
+- **Local parity checking** (this repo is not under version control, so no runner
+  has executed the workflow): the four Apple-Silicon legs were executed locally
+  with the exact argument strings the workflow assembles (28/28, 28/28, 29/29 and
+  29/29 CTest entries, each with the standalone `psx` project at 8/8, `arm64` binaries
+  confirmed). The macOS dependency step was run against current SDL3, an
+  deliberately too-old SDL3, and no SDL3 at all. The PE export audit was tested
+  against a real cross-built `libpsx.dll` using both GNU and LLVM objdump, plus a
+  deliberately-bad DLL to confirm it reports stray/C++ exports instead of passing
+  vacuously. Unexecuted: the eight Linux x86_64 legs, the three Linux arm64 legs and
+  the two Windows legs — see build-system.md §8 for what each would be the first
+  to check.
+
+### 2.15 Rendering fidelity (measurement, not assumption)
+- **Golden screenshots** (Milestone 7): fixed camera poses + fixed RNG +
+  fixed clock → render N frames → compare against Java reference captures
+  (per-scene: title, field (legacy + HQ projection), battle menu, addition
+  overlay active, battle with PS1-depth CTMDs, translucent-heavy scene,
+  CRT post on/off, 4:3 letterbox, widescreen submap). Metric: per-pixel
+  diff with a tolerance (allow ±1/31 in 5-bit channel quantization, 0
+  tolerance on geometry edges — reviewed visually when exceeded).
+- **Timing tests**: sim tick rate measurement (vsyncMode 1 & 2, speed
+  multiplier 1/2/4/16) against expected tick counts over a wall-clock
+  window (±2%); addition window frame counts (deterministic sim → exact).
+- **Audio measurement** (Milestone 5+): synth output PCM vs Java reference
+  PCM for a fixed sequence/seed (spectral + sample diff), SFX voice
+  timing (key-on latency), XA stream alignment (pre-skip 312 parity).
+
+### 2.16 Input (state machine + SDL boundary)
+
+Two tiers, because `lod::InputManager` is deliberately SDL-free (design:
+engine-design.md §4.7) and the translation layer is the only place SDL input
+types appear (cpp.md §9.1):
+
+- **Tier A — SDL-free state machine** (`tests/engine/test_input.cpp`, CTest
+  group `input`): deadzone curve including the degenerate-region quirks, binding
+  dispatch, key-repeat cadence, focus/background gating, the Steam Input guard,
+  device removal, axis max-combine. Cases drive `BeginFrame`/`EndFrame` with an
+  injected clock, so repeat timing is exact rather than wall-clock dependent.
+- **Tier B — SDL boundary** (`tests/engine/test_input_sdl.cpp`, same group):
+  real `SDL_Event`s pushed through `Platform::PollFrame()`, plus SDL's *virtual
+  joystick* (`SDL_AttachVirtualJoystick` + `SDL_SetJoystickVirtualButton/Axis`)
+  for controller open, hold and unplug. Injected virtual input is published by
+  SDL's own polling thread, so a case sleeps 60 ms after writing it (a poll that
+  happens immediately may legitimately see nothing); cases skip rather than fail
+  when the gamepad subsystem is unavailable, and a fixture asserts its platform
+  initialised instead of running against a half-built one.
+
+Headless rule: a headless `Platform` sets the dummy video-driver hint before
+`SDL_Init`, so the suite needs no display server; a gamepad-subsystem failure
+degrades to keyboard-only (logged) rather than failing init. A dummy-driver host
+reports "has keyboard focus", otherwise every headless run would silently disable
+input. Verified headless on macOS with `SDL_VIDEODRIVER=dummy` and no `DISPLAY`.
+
+Not covered by design: real hardware mappings (roadmap Cross-Milestone Notes
+item 6) and pointer *delivery* (no UI consumer exists yet).
+
+## 3. Fuzzing & Profiling Tools (proposed, necessity-established)
+
+| Tool | Necessity |
+|---|---|
+| libFuzzer (Clang) / AFL++ (GCC) | established: 6+ external-format parsers + plugin API surface + unified-diff applier |
+| ASAN/UBSAN/TSAN (compiler) | established: audio thread + async loader + plugin boundary |
+| RenderDoc capture (Windows/Linux) + Xcode Metal capture (macOS) + D3D12 debug layer + Vulkan validation layers | established: SDL3 GPU debugging (per SDL docs; no new dependency — platform SDK facilities) |
+| `perf`/Instruments/WTProfiler (platform profilers) | established: measurement-based performance work |
+| **No** additional GUI/test profilers proposed in v1 (nothing else has demonstrated necessity yet) |
+
+## 4. Verification Gating (milestone acceptance)
+
+- Every milestone (roadmap.md) lists its concrete test gates; a milestone
+  is not done until its gates pass on all three platforms (or the
+  platform-specific gap is documented + user-acknowledged).
+- Nightly: full unit + golden + fuzz (time-boxed) on the matrix.
+
+## 5. Gaps / Open
+
+- Java reference test harness for golden value generation: the reference
+  repo's tests are excluded from its build (`test { exclude '**/*' }`) —
+  generating goldens from Java requires running it (with a user's disc) in
+  a dev harness; documented as a Phase 1 task (no CI dependency).
+- D3D12 headless CI: limited; rely on the Windows runner's hardware.
+- Audio golden fixtures: generate from the Java reference during Phase 1
+  (same harness as gameplay goldens).

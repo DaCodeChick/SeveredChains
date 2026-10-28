@@ -1,0 +1,10 @@
+// Synthesized fixture (Severed Chains Native, no upstream origin).
+// Behaviour measured against Script-Recompiler 0.7.11 @ 3433e6f.
+def f(a) {
+  do {
+    if(a == 1) { break; }
+    a--;
+  } while(a > 0);
+  while(a < 5) { continue; }
+  return;
+}

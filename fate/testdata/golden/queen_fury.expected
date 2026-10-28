@@ -1,0 +1,153 @@
+
+#include char_utils.fate
+submapObjectIndices:
+data 0x1
+data 0x8
+data 0x3
+data 0x5
+data 0x6
+data 0x4
+data 0x2
+data 0x8
+data 0x7
+
+characterScales:
+data 0x1000
+data 0x1000
+data 0x1000
+data 0x1000
+data 0x1000
+data 0x1000
+data 0xd00
+data 0x1000
+data 0x1000
+
+partyComps:
+data 0x2
+data 0xffffffff
+data 0x0
+data 0xffffffff
+data 0x3
+data 0xffffffff
+data 0x4
+data 0xffffffff
+data 0x7
+data 0xffffffff
+data 0x5
+data 0xffffffff
+data 0x6
+data 0xffffffff
+data 0x0
+data 0x6
+
+
+updateParty_index:
+data 0
+updateParty__expr_0:
+data 0
+updateParty__expr_1:
+data 0
+updateParty__expr_2:
+data 0
+updateParty__expr_3:
+data 0
+updateParty__expr_4:
+data 0
+updateParty__expr_5:
+data 0
+updateParty__expr_6:
+data 0
+updateParty__expr_7:
+data 0
+updateParty__expr_8:
+data 0
+updateParty__expr_9:
+data 0
+updateParty__expr_10:
+data 0
+updateParty__expr_11:
+data 0
+updateParty__expr_12:
+data 0
+updateParty__expr_13:
+data 0
+updateParty__expr_14:
+data 0
+updateParty__expr_15:
+data 0
+updateParty__expr_16:
+data 0
+updateParty__expr_17:
+data 0
+updateParty__expr_18:
+data 0
+updateParty__expr_19:
+data 0
+updateParty:
+pop inl[:updateParty_index]
+cmp !=, inl[:updateParty_index], 8, inl[:updateParty__expr_0]
+jmp_cmp ==, 0, inl[:updateParty__expr_0], inl[:_label_0]
+mov 6, inl[:updateParty__expr_1]
+mov 20, inl[:updateParty__expr_2]
+mov inl[:submapObjectIndices][inl[:updateParty_index]], var[inl[:updateParty__expr_1]][inl[:updateParty__expr_2]]
+gosub inl[:removeAllCharsFromParty]
+mul 2, inl[:updateParty_index]
+push inl[:updateParty_index]
+push 0
+gosub inl[:addChar]
+mov inl[:updateParty_index], inl[:updateParty__expr_3]
+add 1, inl[:updateParty__expr_3]
+push inl[:updateParty__expr_3]
+push 1
+gosub inl[:addChar]
+jmp inl[:_label_1]
+_label_0:
+mov 6, inl[:updateParty__expr_6]
+mov 20, inl[:updateParty__expr_7]
+cmp <, var[inl[:updateParty__expr_6]][inl[:updateParty__expr_7]], 1, inl[:updateParty__expr_5]
+mov 6, inl[:updateParty__expr_9]
+mov 20, inl[:updateParty__expr_10]
+cmp >, var[inl[:updateParty__expr_9]][inl[:updateParty__expr_10]], 8, inl[:updateParty__expr_8]
+cmp ||, inl[:updateParty__expr_5], inl[:updateParty__expr_8], inl[:updateParty__expr_4]
+jmp_cmp ==, 0, inl[:updateParty__expr_4], inl[:_label_2]
+mov 6, inl[:updateParty__expr_11]
+mov 20, inl[:updateParty__expr_12]
+mov 8, var[inl[:updateParty__expr_11]][inl[:updateParty__expr_12]]
+_label_2:
+_label_1:
+mov 24, inl[:updateParty__expr_13]
+mov 6, inl[:updateParty__expr_14]
+mov 20, inl[:updateParty__expr_15]
+call SMap::scriptLoadSobjModelAndAnimation, stor[inl[:updateParty__expr_13]], var[inl[:updateParty__expr_14]][inl[:updateParty__expr_15]]
+mov 24, inl[:updateParty__expr_16]
+mov 6, inl[:updateParty__expr_17]
+mov 20, inl[:updateParty__expr_18]
+mov var[inl[:updateParty__expr_17]][inl[:updateParty__expr_18]], inl[:updateParty__expr_19]
+call SMap::scriptScaleUniform, stor[inl[:updateParty__expr_16]], inl[:characterScales][inl[:updateParty__expr_19]]
+return 
+
+addChar_index:
+data 0
+addChar_charSlot:
+data 0
+addChar_charIndex:
+data 0
+addChar__expr_20:
+data 0
+addChar__expr_21:
+data 0
+addChar__expr_22:
+data 0
+addChar:
+pop inl[:addChar_charSlot]
+pop inl[:addChar_index]
+mov inl[:partyComps][inl[:addChar_index]], inl[:addChar_charIndex]
+mov 17, inl[:addChar__expr_20]
+mov inl[:addChar_charIndex], var[inl[:addChar__expr_20]][inl[:addChar_charSlot]]
+cmp !=, inl[:addChar_charIndex], -1, inl[:addChar__expr_21]
+jmp_cmp ==, 0, inl[:addChar__expr_21], inl[:_label_3]
+mov 115, inl[:addChar__expr_22]
+add inl[:addChar_charIndex], inl[:addChar__expr_22]
+or 0x23, var[inl[:addChar__expr_22]]
+_label_3:
+return 

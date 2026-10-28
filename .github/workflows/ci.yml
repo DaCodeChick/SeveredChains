@@ -1,0 +1,611 @@
+name: CI
+
+# Implements the CI plan of docs/architecture/build-system.md §8 for the target
+# set that exists today (psx + engine + game + host + tests). The later jobs of
+# that plan (SDK compile probes, oldest-plugin matrix, shader golden compile,
+# headless GPU smoke) have no targets yet and are deliberately not stubbed here.
+#
+# Verification reach, which is what the matrix order expresses: the development
+# machine is one Apple Silicon Mac, so macOS/arm64 legs are the ones that mirror
+# what gets built and run by hand; Linux (x86_64 + native arm64) and Windows
+# legs exist to cover targets that no local run can reach, and are listed in
+# decreasing order of that need rather than in order of convenience.
+#
+# Every leg runs the same three things a developer can run locally:
+#   cmake --build       (with -DSC_WERROR=ON: warnings are errors in CI)
+#   ctest               (the in-tree suite, including repo.naming/repo.format)
+#   psx as its own project (extractability + the ABI symbol audit)
+#
+# Nothing here depends on a developer machine: no /opt/homebrew paths, no
+# reference-repo checkout (the authentic-asset case reports SKIP), no
+# machine-specific asset directory.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BUILD_TYPE: RelWithDebInfo
+  # Where SDL3 comes from: "system" (platform package) or "source" (pinned
+  # FetchContent build). Overridden per leg by the Linux prerequisites step.
+  DEP_MODE: system
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        # bash on every platform (git-bash on Windows) so one command set works.
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # -----------------------------------------------------------------
+          # Priority order, not alphabetical or cost order. Apple Silicon is the
+          # development machine, so macOS/arm64 legs come first and carry the
+          # widest coverage (both exception policies plus the differential
+          # oracle); the Linux x86_64 lane keeps the Vulkan target honest, the
+          # arm64 Linux lane covers the same CPU family as the development
+          # machine under a different OS, and Windows/D3D12 comes last because
+          # it is the target no local check can ever reach.
+          # -----------------------------------------------------------------
+
+          # --- macOS / arm64 (Apple Silicon, Metal host: priority one). ---
+          # macos-15 rather than macos-latest: the latter is a moving label, and
+          # "arm64" is the property being tested here, so it is pinned by name.
+          - name: macos-arm64-exceptions-on
+            os: macos-15
+            exceptions: "ON"
+            cmake_extra: ""
+          - name: macos-arm64-exceptions-off
+            os: macos-15
+            exceptions: "OFF"
+            cmake_extra: ""
+          # Decoder equivalence (C17 core vs the frozen pre-migration C++) on
+          # the priority architecture. Decoding is byte-exact work, so an
+          # architecture-dependent divergence is a real possibility and this is
+          # the only leg that would see it on arm64/Apple.
+          - name: macos-arm64-differential-exceptions-on
+            os: macos-15
+            exceptions: "ON"
+            cmake_extra: "-DPSX_ENABLE_DIFFERENTIAL_TEST=ON"
+          # Memory-safety lane on the priority platform. These three legs are the
+          # only place the suite runs under sanitizers, and they earn their place:
+          # the first local run of this configuration caught undefined behaviour in
+          # a *passing* test (an out-of-range enum load, testing.md §2.11), which no
+          # other leg can see. macOS runs ASan for memory errors only — leak
+          # detection is unsupported there (it aborts), hence the per-platform
+          # ASAN_OPTIONS in the Tests step, and the Linux legs keep it on so leak
+          # checking actually happens somewhere.
+          - name: macos-arm64-clang-sanitizers
+            os: macos-15
+            exceptions: "ON"
+            cmake_extra: "-DSC_ENABLE_ASAN=ON -DSC_ENABLE_UBSAN=ON"
+
+          # --- Linux x86_64: the Vulkan/SPIR-V target's home, later on. ---
+          # `compiler` names the flavour the leg exists to test; the exact
+          # version is resolved in Prerequisites because only some of the
+          # toolchains on the image carry a C++23 library (see that step).
+          - name: linux-x64-gcc-exceptions-on
+            os: ubuntu-24.04
+            compiler: gcc
+            exceptions: "ON"
+            cmake_extra: ""
+          - name: linux-x64-gcc-exceptions-off
+            os: ubuntu-24.04
+            compiler: gcc
+            exceptions: "OFF"
+            cmake_extra: ""
+          # A second Linux toolchain (project rule: the policy is switchable and
+          # the tree must build under both, on more than one compiler).
+          - name: linux-x64-clang-exceptions-on
+            os: ubuntu-24.04
+            compiler: clang
+            exceptions: "ON"
+            cmake_extra: ""
+          - name: linux-x64-clang-exceptions-off
+            os: ubuntu-24.04
+            compiler: clang
+            exceptions: "OFF"
+            cmake_extra: ""
+          # The hermetic dependency path: SDL3 built from source, statically.
+          # Keeps the FetchContent fallback exercised instead of merely written.
+          - name: linux-x64-source-deps-exceptions-on
+            os: ubuntu-24.04
+            compiler: gcc
+            exceptions: "ON"
+            cmake_extra: "-DSC_DEPS_FETCHCONTENT=ON"
+          - name: linux-x64-differential-exceptions-on
+            os: ubuntu-24.04
+            compiler: gcc
+            exceptions: "ON"
+            cmake_extra: "-DPSX_ENABLE_DIFFERENTIAL_TEST=ON"
+          # Sanitizers on Linux, where LeakSanitizer exists: this is the lane that
+          # turns "leak checking is not performed on macOS" (milestone-2 report §7)
+          # into an executed check. Unexecuted so far, and it may legitimately go red
+          # the first time it runs — a reported leak would be a real finding, not a
+          # harness fault, and the option strings are deliberately identical to the
+          # macOS leg's so the only variable is the platform.
+          - name: linux-x64-gcc-sanitizers
+            os: ubuntu-24.04
+            compiler: gcc
+            exceptions: "ON"
+            cmake_extra: "-DSC_ENABLE_ASAN=ON -DSC_ENABLE_UBSAN=ON"
+          - name: linux-x64-clang-sanitizers
+            os: ubuntu-24.04
+            compiler: clang
+            exceptions: "ON"
+            cmake_extra: "-DSC_ENABLE_ASAN=ON -DSC_ENABLE_UBSAN=ON"
+
+          # --- Linux arm64: same CPU family as the development machine. ---
+          # Native arm64 runners (not QEMU emulation), so this is cheap as well
+          # as useful: 16-byte alignment, NEON-assumption and implicit-cast
+          # problems that an x86_64 leg cannot show, checked on both exception
+          # policies. It is also the Linux host that the later Vulkan lane will
+          # share.
+          - name: linux-arm64-gcc-exceptions-on
+            os: ubuntu-24.04-arm
+            compiler: gcc
+            exceptions: "ON"
+            cmake_extra: ""
+          - name: linux-arm64-gcc-exceptions-off
+            os: ubuntu-24.04-arm
+            compiler: gcc
+            exceptions: "OFF"
+            cmake_extra: ""
+          - name: linux-arm64-differential-exceptions-on
+            os: ubuntu-24.04-arm
+            compiler: gcc
+            exceptions: "ON"
+            cmake_extra: "-DPSX_ENABLE_DIFFERENTIAL_TEST=ON"
+
+          # --- Windows x86_64: MSVC. SDL3 from source (no system package). ---
+          # Kept even though it is the least locally-checkable lane: it is the
+          # only place the D3D12 backend will ever be compiled, and the only one
+          # that audits a PE export table.
+          - name: windows-x64-msvc-exceptions-on
+            os: windows-latest
+            exceptions: "ON"
+            cmake_extra: "-DSC_DEPS_FETCHCONTENT=ON"
+          - name: windows-x64-msvc-exceptions-off
+            os: windows-latest
+            exceptions: "OFF"
+            cmake_extra: "-DSC_DEPS_FETCHCONTENT=ON"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # DEP_MODE decides whether SDL3 comes from a package ("system") or from
+      # source ("source"). It is computed, not assumed: a package older than the
+      # pinned minimum would fail configure at find_package(SDL3 3.2), which is a
+      # red CI run caused by packaging rather than by code.
+      - name: Prerequisites (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          set -eux -o pipefail
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
+          apt_get_install_ok=1
+          sudo apt-get install -y libsdl3-dev || apt_get_install_ok=0
+          dep_mode=system
+          if [ "$apt_get_install_ok" -eq 0 ]; then
+            dep_mode=source
+          else
+            ver="$(dpkg-query -W -f='${Version}' libsdl3-dev 2>/dev/null || echo 0)"
+            ver="${ver%%+*}"                       # 3.2.30+ds -> 3.2.30
+            if ! printf '%s\n%s\n' "3.2" "$ver" | sort -V -C; then
+              echo "System SDL3 $ver is older than the pinned minimum 3.2; building from source."
+              dep_mode=source
+            fi
+          fi
+          echo "DEP_MODE=$dep_mode" >> "$GITHUB_ENV"
+
+      # Toolchain selection, measured rather than assumed. The project requires
+      # <expected> and <print> and hard-fails configure without them
+      # (ScToolchain probe 1), and Ubuntu 24.04's default compiler is GCC 13,
+      # whose libstdc++ has no <print> — so "install nothing and use the default
+      # cc" would red every Linux leg for a packaging reason. Candidates are
+      # probed with the same source the configure probe uses, newest first.
+      # There is deliberately no cross-flavour fallback: a clang leg that quietly
+      # compiled with GCC would be a green check that tested nothing.
+      - name: Pick a C++23-complete toolchain (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          set -uo pipefail
+          cat > /tmp/cxx23_probe.cpp <<'PROBE'
+          #include <expected>
+          #include <print>
+          int main() { std::println("{}", 1); return 0; }
+          PROBE
+          flavour="${{ matrix.compiler }}"
+          # g++-N pulls in libstdc++-14-dev, which is also what makes the clang
+          # candidates viable (clang picks up the newest installed libstdc++).
+          sudo apt-get install -y "g++-14" >/dev/null 2>&1 || true
+          # Newest first, whatever the image happens to ship — a hard-coded
+          # version list would silently ignore a newer toolchain that works.
+          if [ "$flavour" = "clang" ]; then
+            cands="$(ls /usr/bin/clang++-* /usr/bin/clang++ 2>/dev/null | sort -Vr)"
+          else
+            cands="$(ls /usr/bin/g++-* /usr/bin/g++ 2>/dev/null | sort -Vr)"
+          fi
+          if [ -z "$cands" ]; then
+            echo "FAIL: no $flavour compiler found on this image at all."
+            exit 1
+          fi
+          chosen=""
+          for cxx in $cands; do
+            if "$cxx" -std=c++23 /tmp/cxx23_probe.cpp -o /tmp/cxx23_probe 2>/dev/null; then
+              chosen="$cxx"
+              break
+            fi
+            echo "not usable (cannot compile std::expected + std::print): $cxx"
+          done
+          if [ -z "$chosen" ]; then
+            echo "FAIL: no $flavour toolchain on this image compiles the C++23"
+            echo "facilities this project requires. Not switching to another"
+            echo "compiler: that would report a pass for a toolchain this leg does"
+            echo "not test (build-system.md §1)."
+            exit 1
+          fi
+          base="$(basename "$chosen")"
+          case "$base" in
+            clang++*) cc="/usr/bin/clang${base#clang++}" ;;
+            g++*)     cc="/usr/bin/gcc${base#g++}" ;;
+            *)        echo "FAIL: unexpected compiler name: $base"; exit 1 ;;
+          esac
+          if [ ! -x "$cc" ]; then
+            echo "FAIL: no C compiler paired with $chosen (looked for $cc)."
+            echo "The psx C17 core must be built by a C compiler, not by the C++ one."
+            exit 1
+          fi
+          echo "CXX_PATH=$chosen" >> "$GITHUB_ENV"
+          echo "CC_PATH=$cc" >> "$GITHUB_ENV"
+          "$chosen" --version | head -1
+          "$cc" --version | head -1
+
+      - name: Prerequisites (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -uo pipefail
+          # Same rule as Linux, applied to Homebrew: take the package SDL3 only
+          # if it is at least the pinned minimum, otherwise build it from source.
+          # The check is a measurement (brew reports the installed version), not
+          # an assumption that CI images and the development machine agree.
+          ver="$(brew list --versions sdl3 2>/dev/null | awk '{print $2}')"
+          if [ -z "$ver" ]; then
+            brew install sdl3
+            ver="$(brew list --versions sdl3 2>/dev/null | awk '{print $2}')"
+          fi
+          dep_mode=system
+          if [ -z "$ver" ]; then
+            echo "No SDL3 from Homebrew; building from source."
+            dep_mode=source
+          elif ! printf '%s\n%s\n' "3.2" "$ver" | sort -V -C; then
+            echo "Homebrew SDL3 $ver is older than the pinned minimum 3.2; building from source."
+            dep_mode=source
+          else
+            echo "Homebrew SDL3 $ver accepted."
+          fi
+          echo "DEP_MODE=$dep_mode" >> "$GITHUB_ENV"
+
+      - name: Prerequisites (Windows — MSVC developer environment)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Toolchain report
+        run: |
+          set -x
+          cmake --version
+          ninja --version
+          # Report what the Configure step will actually do, not the default
+          # DEP_MODE: the Windows legs select SDL3-from-source through
+          # cmake_extra, and a log line saying "system package" there would
+          # describe a dependency path the leg never took.
+          effective="$DEP_MODE"
+          case "${{ matrix.cmake_extra }}" in
+            *FETCHCONTENT*) effective="source" ;;
+          esac
+          if [ "$effective" = "source" ]; then
+            echo "SDL3: built from source (static)"
+          else
+            echo "SDL3: system package"
+          fi
+
+      - name: Configure
+        run: |
+          set -eux -o pipefail
+          args="-B build -G Ninja -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DSC_WERROR=ON -DSC_ENABLE_EXCEPTIONS=${{ matrix.exceptions }}"
+          # fate is deliberately off here. It needs a C compiler with working C23,
+          # which is a different requirement from the engine's, and building it on
+          # every leg would make a toolchain gap in the toolchain read as a failure
+          # of psx and the engine. It gets its own job (fate-toolchain), where the
+          # standard is probed before it is used.
+          args="$args -DSC_ENABLE_FATE=OFF"
+          if [ "$DEP_MODE" = "source" ]; then
+            args="$args -DSC_DEPS_FETCHCONTENT=ON"
+          fi
+          # The macOS legs are named *-arm64 because Apple Silicon is the
+          # priority platform; pin the architecture so the name is a constraint
+          # on the build and not a comment about the runner image.
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            args="$args -DCMAKE_OSX_ARCHITECTURES=arm64"
+          fi
+          # Where a specific toolchain was chosen above, it is actually used.
+          # Without these two flags `matrix.compiler` is a label, not a test.
+          if [ -n "${CC_PATH:-}" ]; then
+            args="$args -DCMAKE_C_COMPILER=$CC_PATH -DCMAKE_CXX_COMPILER=$CXX_PATH"
+          fi
+          if [ -n "${{ matrix.cmake_extra }}" ]; then
+            args="$args ${{ matrix.cmake_extra }}"
+          fi
+          # shellcheck disable=SC2086
+          cmake $args
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Tests (in-tree suite)
+        env:
+          # No display on a runner. Prefer a real X11 server when the image has
+          # one (xvfb), so the windowed smoke test exercises a real video driver;
+          # otherwise force SDL's dummy driver, which still creates a window.
+          SDL_VIDEO_DRIVER: dummy
+          # Only read by a sanitizer build; inert otherwise. halt_on_error makes the
+          # first violation fail the test instead of logging it and passing.
+          # detect_leaks has to be off on macOS — verified: ASan aborts the process
+          # with "detect_leaks is not supported on this platform", so a single
+          # value for all platforms would red every macOS sanitizer leg before
+          # running a single test. Leak checking therefore happens on Linux.
+          ASAN_OPTIONS: ${{ runner.os == 'macOS' && 'detect_leaks=0:halt_on_error=1' || 'detect_leaks=1:halt_on_error=1' }}
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          set -eux -o pipefail
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            # Shared build artefacts (libpsx.dll) are not on a CTest process's
+            # default DLL search path; add every directory that holds one.
+            for dir in $(find build -name '*.dll' | sed 's|/[^/]*$||' | sort -u); do
+              export PATH="$dir:$PATH"
+            done
+          fi
+          if [ "$RUNNER_OS" = "Linux" ] && command -v xvfb-run >/dev/null 2>&1; then
+            unset SDL_VIDEO_DRIVER
+            xvfb-run -a ctest --test-dir build --output-on-failure
+          else
+            ctest --test-dir build --output-on-failure
+          fi
+
+      # The psx library is a self-contained subproject that may be extracted into
+      # its own repository, so it is also built and tested that way: standalone
+      # configure, no engine, no SDL, and the exported-symbol audit against the
+      # library that build produced (build-system.md §8).
+      - name: psx standalone subproject
+        run: |
+          set -eux -o pipefail
+          # Same toolchain as the parent build, and for the same reason: the psx
+          # test runners are C++ and use <print>, so a default GCC 13 would fail
+          # here for a packaging reason rather than a code reason.
+          standalone_args=""
+          if [ -n "${CC_PATH:-}" ]; then
+            standalone_args="-DCMAKE_C_COMPILER=$CC_PATH -DCMAKE_CXX_COMPILER=$CXX_PATH"
+          fi
+          # shellcheck disable=SC2086
+          cmake -S psx -B build-psx -G Ninja -DCMAKE_BUILD_TYPE="$BUILD_TYPE" $standalone_args
+          cmake --build build-psx
+          for dir in $(find build-psx -name '*.dll' 2>/dev/null | sed 's|/[^/]*$||' | sort -u); do
+            export PATH="$dir:$PATH"
+          done
+          ctest --test-dir build-psx --output-on-failure
+
+      # On PE the export table *is* the ABI. The CTest entry skips itself when no
+      # export reader exists; this step refuses that, so the Windows legs cannot
+      # pass without having checked what the DLL actually exports.
+      - name: psx ABI audit must actually run (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          set -eux -o pipefail
+          dll="$(find build -name 'libpsx*.dll' | head -1)"
+          if [ -z "$dll" ]; then
+            echo "FAIL: no libpsx DLL in the build tree — nothing was audited"
+            exit 1
+          fi
+          tool="$(command -v objdump || command -v llvm-objdump || true)"
+          if [ -z "$tool" ]; then
+            tool="$(find "/c/Program Files/Microsoft Visual Studio/2022" \
+                      -name dumpbin.exe -path '*Hostx64/x64*' 2>/dev/null | head -1)"
+          fi
+          if [ -z "$tool" ]; then
+            echo "FAIL: no PE export reader (objdump / llvm-objdump / dumpbin)."
+            echo "The ABI audit would have skipped silently; that is not a pass."
+            exit 1
+          fi
+          # git-bash paths are not understood by the Windows tools or by cmake -P.
+          dll_win="$(cygpath -w "$dll")"
+          tool_win="$(cygpath -w "$tool")"
+          if ! out="$(cmake -D "PSX_LIBRARY=$dll_win" -D "PSX_EXPORT_TOOL=$tool_win" \
+                            -P psx/tests/abi_symbols.cmake 2>&1)"; then
+            echo "$out"
+            echo "FAIL: exported-symbol audit failed"
+            exit 1
+          fi
+          if ! echo "$out" | grep -q "psx ABI audit (pe)"; then
+            echo "FAIL: the audit did not read the PE export table"
+            exit 1
+          fi
+
+  # Static gates that need no compiler, run once so a style/naming regression
+  # reports in one place with the full tree available.
+  repo-gates:
+    name: naming + formatting
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Naming lint
+        run: python3 tools/check_naming.py
+      - name: Formatting gate
+        run: |
+          set -x
+          # Use a current clang-format when the image has one; otherwise the
+          # script reports that it fell back to its structural brace scan.
+          clang-format --version || true
+          python3 tools/check_format.py
+
+  # ---------------------------------------------------------------------------
+  # fate - the C23 command-line toolchain, built as its own subproject.
+  #
+  # Why a separate job: `fate` asks for something the engine does not, namely a C
+  # compiler that implements C23. The engine legs configure with
+  # -DSC_ENABLE_FATE=OFF so that a toolchain without C23 still reports on psx and
+  # the engine, rather than stopping at fate's configure probe; this job selects
+  # toolchains that can do C23 and checks that before building.
+  #
+  # What is actually known about the C23 requirement, measured on the development
+  # machine: all seven fate sources also compile clean under -std=c17, so nothing
+  # in the code needs C23 today. The probe guards the declared standard rather
+  # than a present dependency, so that a later use of `auto`, nullptr or
+  # designated initialisers cannot be silently compiled as an older dialect on a
+  # machine that does not support them.
+  #
+  # No Windows leg yet. MSVC's C23 support has not been measured, and the project
+  # rule is not to claim coverage that no reachable check can provide. A Windows
+  # fate leg needs a measurement first.
+  # ---------------------------------------------------------------------------
+  fate-toolchain:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Apple Silicon first, same reason as the engine matrix: it is the
+          # development platform, so a failure here is a failure the development
+          # machine would have reproduced.
+          - name: macos-arm64-fate
+            os: macos-15
+            compiler: clang
+          - name: linux-x64-gcc-fate
+            os: ubuntu-24.04
+            compiler: gcc
+          - name: linux-x64-clang-fate
+            os: ubuntu-24.04
+            compiler: clang
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prerequisites (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          set -eux -o pipefail
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
+          # Same reasoning as the engine matrix: Ubuntu 24.04's default compiler is
+          # GCC 13, and "use whatever cc is" would decide the leg on packaging
+          # rather than on code. The probe below still has to pass - installing a
+          # newer compiler is offering candidates, not assuming they work.
+          sudo apt-get install -y "g++-14" >/dev/null 2>&1 || true
+          sudo apt-get install -y "clang" >/dev/null 2>&1 || true
+
+      # Two things are checked, not one: that some candidate compiler accepts the
+      # probe, and that the same probe FAILS under -std=c17. Without the second
+      # half a compiler that ignores an unsupported -std flag would report a C23
+      # pass while compiling C17, which is the vacuous-probe failure mode this
+      # project has already been bitten by once (see the psx ABI audit gate).
+      #
+      # -std=c23 and -std=c2x are both tried because they are two spellings of the
+      # same dialect, not two dialects; whichever the toolchain answers with is
+      # printed, so the log says what was really compiled.
+      - name: Check for a C23-capable C compiler
+        run: |
+          set -uo pipefail
+          cat > /tmp/c23_probe.c <<'PROBE'
+          int main(void) { auto x = 1; return x - 1; }
+          PROBE
+          if [ "$(uname)" = "Linux" ]; then
+            if [ "${{ matrix.compiler }}" = "clang" ]; then
+              cands="$(ls /usr/bin/clang-* /usr/bin/clang 2>/dev/null | sort -Vr)"
+            else
+              cands="$(ls /usr/bin/gcc-* /usr/bin/gcc 2>/dev/null | sort -Vr)"
+            fi
+          else
+            cands="$(command -v cc || true)"
+          fi
+          if [ -z "$cands" ]; then
+            echo "FAIL: no ${{ matrix.compiler }} C compiler on this image at all."
+            exit 1
+          fi
+          chosen=""; chosen_flag=""
+          for cc in $cands; do
+            [ -x "$cc" ] || continue
+            for flag in -std=c23 -std=c2x; do
+              if "$cc" $flag /tmp/c23_probe.c -o /tmp/c23_probe >/dev/null 2>&1 \
+                 && ! "$cc" -std=c17 -Werror -pedantic-errors /tmp/c23_probe.c -o /dev/null >/dev/null 2>&1; then
+                chosen="$cc"; chosen_flag="$flag"
+                break 2
+              fi
+              echo "not usable: $cc $flag"
+            done
+          done
+          if [ -z "$chosen" ]; then
+            echo "FAIL: no ${{ matrix.compiler }} toolchain here compiles the C23 probe"
+            echo "(and the probe does fail under -std=c17, so the flag is meaningful)."
+            echo "Not falling back to another compiler, and not compiling fate as C17:"
+            echo "either would print a pass for a dialect this job does not test."
+            exit 1
+          fi
+          echo "CC_PATH=$chosen" >> "$GITHUB_ENV"
+          echo "C23_FLAG=$chosen_flag" >> "$GITHUB_ENV"
+          "$chosen" --version | head -1
+          echo "using $chosen with $chosen_flag"
+
+      - name: Configure (fate standalone subproject)
+        run: |
+          set -eux -o pipefail
+          args="-S fate -B build-fate -G Ninja -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DSC_WERROR=ON"
+          if [ -n "${CC_PATH:-}" ]; then
+            args="$args -DCMAKE_C_COMPILER=$CC_PATH"
+          fi
+          # shellcheck disable=SC2086
+          cmake $args
+
+      - name: Build
+        run: cmake --build build-fate
+
+      # The golden corpus is committed; the metadata bundle is not, so on a runner
+      # with nothing to read the test skips with 77 rather than pretending. That is
+      # the right shape for a missing input, but it does mean this step can be green
+      # having executed nothing, so the skip is called out instead of buried: the
+      # differential only really runs where a meta bundle exists.
+      - name: Tests (fate compile, golden differential)
+        run: |
+          set -uo pipefail
+          out="$(ctest --test-dir build-fate --output-on-failure 2>&1)"
+          status=$?
+          echo "$out"
+          if [ "$status" -ne 0 ]; then
+            exit "$status"
+          fi
+          if echo "$out" | grep -q "Not Run\|Skipped"; then
+            echo ""
+            echo "NOT VERIFIED: the golden-differential test did not execute on this runner"
+            echo "(no metadata bundle to read). The steps above show the sources compiled"
+            "as $C23_FLAG by $CC_PATH; they say nothing about emitted output."
+          fi

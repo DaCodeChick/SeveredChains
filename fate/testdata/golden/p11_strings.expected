@@ -1,0 +1,7 @@
+
+
+f_a:
+data 0
+f:
+pop inl[:f_a]
+return 

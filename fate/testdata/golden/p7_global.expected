@@ -1,0 +1,16 @@
+
+tbl:
+data 0x1
+data 0x2
+data 0x3
+
+scalar:
+data 0x10
+
+
+f_i:
+data 0
+f:
+pop inl[:f_i]
+push inl[:tbl][inl[:f_i]]
+return 

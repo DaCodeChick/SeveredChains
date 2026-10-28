@@ -1,0 +1,7 @@
+// Synthesized fixture (Severed Chains Native, no upstream origin).
+// Behaviour measured against Script-Recompiler 0.7.11 @ 3433e6f.
+include char_utils.fate ;
+def g(a) {
+  charIsInActiveParty(a);
+  return;
+}
