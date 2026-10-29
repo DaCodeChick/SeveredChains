@@ -98,10 +98,10 @@
    "id": "p9_tab",
    "kind": "synthesized",
    "args": [],
-   "expect": "diagnostics",
+   "expect": "warnings",
    "parity": "match",
    "ruling": "R1 2026-10-27",
-   "note": "Tab is not in the WHITESPACE class, so the lexer reports `token recognition error` per tab; compilation continues and the emitted code is unaffected by indentation. Ruling R1: match \u2014 emit the same per-tab message on stderr and keep compiling, exit 0 (these are not errors-list entries)."
+   "note": "Tab is not in the WHITESPACE class, so the lexer reports `token recognition error` per tab; compilation continues and the emitted code is unaffected by indentation. Ruling R1: match \u2014 emit the same per-tab message on stderr and keep compiling, exit 0 (these are not errors-list entries). `expect` is `warnings` rather than `diagnostics` because the native contract keys exit 3 off the errors list, and these never enter it."
   },
   {
    "id": "p10_truefalse",
@@ -130,7 +130,9 @@
    "ruling": "R1 2026-10-27, refined 2026-10-28 (decision 1)",
    "note": "`for` is not a keyword and `for(...)` matches no parser rule, so this input is NOT valid Fate. The reference's 152-byte output is a by-product of ANTLR's default error recovery: it recovers `for(...) {` as a call to a function named `for` and emits `gosub inl[:for]`, which would assemble into a non-working script. Per ruling R1 refined by decision 1, recovery artefacts on invalid source are documented, not reproduced. Pinned properties: diagnosed failure (exit 3), no crash, output differs. The reference itself exits 0 with errors; the native 0/1/2/3 contract is not overridden by R1, so exit 3 is intended, not a deviation from the contract.",
    "valid_source": false,
-   "diag_count": 4
+   "diag_count": 4,
+   "diag": "unpinned",
+   "diag_note": "The reference logs four diagnostics here; the tool logs two (`3: function \"f\" missing return` and `4: variable \"i\" is not defined in the current scope`). The missing pair is `3: function \"f\" return lists are not the same size` and `4: unknown function for`, and both exist only because ANTLR recovers `for(...) {` as a call to a function named `for`. That is the recovery by-product decision 1 keeps out of scope, so the harness reports this fixture's diagnostics as NOT VERIFIED instead of comparing them."
   },
   {
    "id": "p13_incl",

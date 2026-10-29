@@ -36,6 +36,10 @@ typedef struct Job
   Meta meta;
   Emit emit;
   Diag diag;
+
+  /** Rendered lexer complaints, printed before @ref Job::diag. Kept apart because the
+   *  reference does not count them as errors: a tab-indented file still exits 0. */
+  Buf warn;
   const char* includeDirs[FATE_MAX_INCLUDE_DIRS];
   int includeDirCount;
 } Job;
@@ -128,7 +132,12 @@ static const char* resolveInclude(Job* job, const char* name, const char* relati
   return NULL;
 }
 
-/** Parse one translation unit from a file. */
+/** Parse one translation unit from a file.
+ *
+ *  Lexical complaints are recorded while the unit is read. They go to `job->warn`
+ *  rather than to the diagnostic list: the reference prints them from its tokenizer,
+ *  they do not enter the errors list, and a file that only has them still compiles and
+ *  exits 0. The recorded text is already escaped for display (a tab prints as `\t`). */
 static Status parseUnit(Job* job, Source* src, const char* displayName)
 {
   Str text;
@@ -140,6 +149,14 @@ static Status parseUnit(Job* job, Source* src, const char* displayName)
 
   if (lex_run(&job->arena, text, &lx) != ST_OK)
     return ST_IO;
+
+  for (int i = 0; i < lx.errorCount; i++)
+  {
+    const LexerError* le = &lx.errors[i];
+
+    buf_printf(&job->warn, "line %d:%d token recognition error at: '%.*s'\n", le->line, le->col, le->text.len,
+               le->text.p ? le->text.p : "");
+  }
 
   if (parse_translationUnit(&job->arena, &lx, src, &job->diag) != ST_OK)
     return ST_COMPILE;
@@ -224,6 +241,8 @@ int main(int argc, char** argv)
 
   job.diag.buf.arena = &job.arena;
 
+  buf_init(&job.warn, &job.arena);
+
   job.emit.arena = &job.arena;
   job.emit.meta = &job.meta;
   job.emit.diag = &job.diag;
@@ -249,7 +268,13 @@ int main(int argc, char** argv)
   /* Breadth-first include loading. A filename token that does not end exactly in
    * `.fate` is emitted but never loaded, which is what the reference's
    * `name.endsWith(".fate")` gate does — and p13 depends on it, because its
-   * `include char_utils.fate ;` leaves a trailing space inside the token. */
+   * `include char_utils.fate ;` leaves a trailing space inside the token.
+   *
+   * The gate reads the *verbatim* token for that reason. Waiting until the loop below
+   * to trim would open the file, resolve `charIsInActiveParty`, and drop the
+   * `5: unknown function charIsInActiveParty` line that p13's golden carries; the
+   * emitted `gosub inl[:charIsInActiveParty]` is the same either way, which is exactly
+   * why the missing message needed a differential to be seen at all. */
   static char pending[FATE_MAX_UNITS + 1][256];
   static char done[FATE_MAX_UNITS + 1][256];
 
@@ -257,12 +282,25 @@ int main(int argc, char** argv)
   int doneCount = 0;
 
   for (int i = 0; i < units[0].includeCount; i++)
-    if (units[0].includes[i].name && pendingCount < (int)(sizeof(pending) / sizeof(pending[0])))
-      snprintf(pending[pendingCount++], sizeof(pending[0]), "%s", units[0].includes[i].name);
+    if (units[0].includes[i].raw && pendingCount < (int)(sizeof(pending) / sizeof(pending[0])))
+      snprintf(pending[pendingCount++], sizeof(pending[0]), "%s", units[0].includes[i].raw);
 
   for (int head = 0; head < pendingCount && unitCount < FATE_MAX_UNITS; head++)
   {
-    const char* name = pending[head];
+    char token[256];
+
+    snprintf(token, sizeof(token), "%s", pending[head]);
+
+    /* The lookup form: the same token with its trailing blanks removed, used for the
+     * directory search and for the "already loaded" check. */
+    char name[256];
+
+    snprintf(name, sizeof(name), "%s", token);
+
+    size_t name_len = strlen(name);
+
+    while (name_len > 0 && (name[name_len - 1] == ' ' || name[name_len - 1] == '\t'))
+      name[--name_len] = '\0';
 
     if (name[0] == '\0')
       continue;
@@ -279,7 +317,7 @@ int main(int argc, char** argv)
     if (doneCount < (int)(sizeof(done) / sizeof(done[0])))
       snprintf(done[doneCount++], sizeof(done[0]), "%s", name);
 
-    if (!str_ends_with(str_of(name, strlen(name)), ".fate"))
+    if (!str_ends_with(str_of(token, strlen(token)), ".fate"))
       continue;
 
     const char* path = resolveInclude(&job, name, NULL);
@@ -295,7 +333,10 @@ int main(int argc, char** argv)
     Source* unit = &units[unitCount];
 
     *unit = (Source){0};
-    unit->displayName = name;
+
+    /* Copied into the arena because `name` lives on this iteration's stack and
+     * `displayName` outlives the loop (it is the unit's "as it appeared" path). */
+    unit->displayName = arena_dup(&job.arena, name, strlen(name));
 
     if (parseUnit(&job, unit, path) != ST_OK)
     {
@@ -308,9 +349,11 @@ int main(int argc, char** argv)
     emit_scan(&job.emit, unit, unitCount, "");
     unitCount++;
 
+    /* Nested includes are queued in the same verbatim form, so they meet the same
+     * gate as the top-level ones. */
     for (int i = 0; i < unit->includeCount && pendingCount < (int)(sizeof(pending) / sizeof(pending[0])); i++)
-      if (unit->includes[i].name)
-        snprintf(pending[pendingCount++], sizeof(pending[0]), "%s", unit->includes[i].name);
+      if (unit->includes[i].raw)
+        snprintf(pending[pendingCount++], sizeof(pending[0]), "%s", unit->includes[i].raw);
   }
 
   /* Globals live in the scope every function starts from. */
@@ -328,6 +371,12 @@ int main(int argc, char** argv)
   }
 
   const Status st = emit_source(&job.emit, &units[0]);
+
+  /* Stream order follows the reference: tokenizer complaints are emitted while the
+   * source is read, so they come out above the compile diagnostics. Neither group is
+   * separated from the other by a banner, and neither is indented. */
+  if (job.warn.len > 0)
+    fwrite(job.warn.data, 1, job.warn.len, stderr);
 
   if (job.diag.count > 0 && job.diag.buf.len > 0)
     fwrite(job.diag.buf.data, 1, job.diag.buf.len, stderr);
@@ -362,8 +411,10 @@ int main(int argc, char** argv)
   if (job.emit.aborted)
   {
     /* p10 class: the reference aborts before writing anything. Matching it means no
-     * output file at all, not an empty one. */
-    fprintf(stderr, "compile aborted\n");
+     * output file at all, not an empty one, and nothing further is printed: what the
+     * reference prints on its way out is a JVM stack trace, which ruling R1 keeps out
+     * of the goldens. The diagnostic that caused the abort is already on stderr, and
+     * exit 3 plus the missing output file carry the rest. */
     return 3;
   }
 

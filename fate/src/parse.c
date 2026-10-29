@@ -1271,6 +1271,11 @@ Status parse_translationUnit(Arena* arena, Lexer* lx, Source* src, Diag* diag)
 
     if (kindAt(p, 0) == TK_DEF)
     {
+      /* The definition line, not the body's: `missing return` is reported against the
+       * function, and the reference takes the line its function rule starts on, which
+       * is the `def` keyword. Without this the diagnostic has no line prefix at all. */
+      Token* defTok = here(p);
+
       advance(p);
       Token* nameTok = here(p);
 
@@ -1286,6 +1291,8 @@ Status parse_translationUnit(Arena* arena, Lexer* lx, Source* src, Diag* diag)
 
       if (!f)
         return ST_OOM;
+
+      f->line = defTok->line;
 
       if (accept(p, TK_LPAREN))
       {

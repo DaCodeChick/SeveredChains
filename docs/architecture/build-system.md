@@ -372,7 +372,9 @@ when the image provides it, otherwise `SDL_VIDEO_DRIVER=dummy`, so no Linux run
 exercises a real windowing backend yet.
 
 **Verification status of the workflow itself:** as of writing the repository is
-still not under version control, so no GitHub runner has executed this file. What
+still unverified as to execution. The repository has been under git since 2026-10-28 18:19 with a
+remote configured, so a runner *could* execute this file — a push would trigger it — but no run has
+been observed, so no claim below rests on CI having run. What
 *has* been executed is the content of the four Apple-Silicon legs, run locally on
 an M5 Max with the exact argument strings the workflow builds: exceptions ON,
 exceptions OFF, the differential leg, and the sanitizer leg — 28/28, 28/28, 29/29

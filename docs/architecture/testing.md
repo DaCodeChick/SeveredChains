@@ -245,21 +245,30 @@ Decoding expectations:
 - **Fate differential harness.** `fate/testdata/run_golden.py` is the acceptance test — one CTest
   entry, `fate.compile.golden`, registered by `fate/CMakeLists.txt` and **on by default**
   (`-DFATE_ENABLE_GOLDEN_TEST=OFF` opts out; a default build that registers zero fate tests is
-  not acceptable coverage). It runs the compiled `fate` binary per fixture and compares bytes; it
+  not acceptable coverage). It runs the compiled `fate` binary per fixture and compares **three
+  axes** — emitted bytes, emitted diagnostics (stderr against the message lines of `<id>.diag`,
+  order-insensitive but multiset-strict, with the reference's own crash lines filtered out), and
+  exit status against the manifest's `expect` class; it
   never runs Java, never touches the network, and skips with exit 77 when the binary, the goldens
   or the meta bundle are absent. The test sets `SKIP_RETURN_CODE 77` — without it CTest reads any
   non-zero exit as a failure, and a machine with no meta bundle would report a broken compiler
   instead of an absent fixture. Because the meta CSVs are not committed, a runner without them
   compiles the tool and compares nothing; the CI step prints `NOT VERIFIED` in that case rather
-  than reporting coverage. Current local state: 18/19 fixtures byte-match, 1 pinned deviation.
+  than reporting coverage. It also fingerprints every fixture/golden before the sweep and fails
+  if a run mutates one, because two probes in this project's history truncated fixtures while the
+  suite stayed green. Current local state (re-measured 2026-10-28): 18/19 fixtures byte-match,
+  1 pinned deviation; 17 diagnostics exact, 2 reported NOT VERIFIED (`p10` crash filter, `p12`
+  unpinned recovery by-product); 19/19 exit statuses.
 - **Fate CI lane (written, never executed).** `.github/workflows/ci.yml` has a dedicated
   `fate-toolchain` job (macOS arm64, Linux x86-64 GCC, Linux x86-64 Clang) while the engine
   matrix passes `-DSC_ENABLE_FATE=OFF`. Compiler selection is by measured feature support: the
   `auto x = 1;` probe must compile under `-std=c23`/`-std=c2x` **and** fail under
   `-std=c17 -Werror -pedantic-errors`, so a toolchain that ignores the standard flag cannot
   qualify; if no candidate qualifies the job fails with instructions rather than downgrading.
-  The repository is not under version control, so **no leg of this workflow has ever run** — that
-  remains the M1 gap tracked separately, not a claim of cross-platform verification.
+  **No leg of this workflow has been observed running** — that remains the M1 gap tracked
+  separately, not a claim of cross-platform verification. It is no longer blocked by the absence of
+  a repository: the tree has been under git since 2026-10-28 18:19 with a remote configured, so a
+  push would trigger a run; whether that has ever happened is unverified.
 
 ### 2.13 Mogul Dabas minigame (scdabas)
 - **Console semantics**: timer/RTC/interrupt/power/DAC behavior unit tests
@@ -298,8 +307,9 @@ Decoding expectations:
   machine that produced it. What is still missing for (a) is committed golden
   fixture bytes, and TMD/GTE/RNG coverage, which have no implementation yet; when
   they land they join these legs rather than needing new ones.
-- **Local parity checking** (this repo is not under version control, so no runner
-  has executed the workflow): the four Apple-Silicon legs were executed locally
+- **Local parity checking** (no runner has been observed executing the workflow — see §2.12 for
+  why that is now a push question rather than a missing-repository question): the four
+  Apple-Silicon legs were executed locally
   with the exact argument strings the workflow assembles (28/28, 28/28, 29/29 and
   29/29 CTest entries, each with the standalone `psx` project at 8/8, `arm64` binaries
   confirmed). The macOS dependency step was run against current SDL3, an

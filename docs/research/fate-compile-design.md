@@ -790,8 +790,11 @@ Per D1, the mechanical gates must see the C tool:
   `-DSC_ENABLE_FATE=OFF` so the two suites stay independent). Its compiler gate requires the
   `auto x = 1;` probe to compile under `-std=c23`/`-std=c2x` **and** to fail under
   `-std=c17 -Werror -pedantic-errors`, so a toolchain that merely ignores the flag cannot qualify.
-  **No CI leg has executed**: the repository is not under version control and no runner is
-  available, so this is written-and-locally-dry-run evidence only (the macOS step sequence was
+  **No CI leg has executed as far as anyone has verified.** The tree has been under git since
+  2026-10-28 18:19 with a remote configured, so a push is what would trigger a run; whether the
+  remote was ever pushed to, and whether any Actions run exists, is unverified. Earlier revisions
+  of the docs said CI could not run because there was no repository — that reason is void, so
+  this remains written-and-locally-dry-run evidence only (the macOS step sequence was
   executed locally; runner behaviour, including whether an image has a meta bundle, is unknown).
 
 ---
@@ -852,10 +855,15 @@ comparison that would prove it is not implemented.
    of output. Committing a small *synthetic* (non-retail) meta bundle under
    `fate/testdata/local-meta/` would make those legs actually test output; that needs an explicit
    decision about fixture licensing, so it has not been done unilaterally.
-5. **Diagnostic format is still `file:line: message`** (F2). §14 of the phase-1 doc asks for
-   column + stable code (e.g. `FATE-E0002`); `.diag` files also do not record the reference's
-   stderr `token recognition error at: '\t'` warnings, so p9's warning is untested. Neither is
-   blocking the byte-match acceptance, both are open.
+5. **Diagnostic format.** Compile diagnostics are `line: message` (e.g. `3: function "f"
+  missing return`), which is what the reference writes into the `.diag` captures; lexer
+  complaints keep the reference's own shape, `line <L>:<C> token recognition error at: '<c>'`,
+  go to stderr, do **not** enter the errors list and therefore do not affect the exit code
+  (that is why `p9` exits 0). Implemented 2026-10-28 and compared by the harness. §14 of the
+  phase-1 doc also asks for column numbers on compile diagnostics and stable codes
+  (e.g. `FATE-E0002`): still open, and note that **no `.diag` in the corpus contains a code
+  or a compile-diagnostic column**, so adding either would be a new divergence from the
+  oracle rather than a conformance fix under ruling R1.
 
 ---
 
