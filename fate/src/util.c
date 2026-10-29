@@ -227,3 +227,19 @@ bool path_is_dir(const char* path)
   return stat(buf, &st) == 0 && S_ISDIR(st.st_mode);
 #endif
 }
+
+bool path_is_regular_file(const char* path)
+{
+  if (path == NULL || path[0] == '\0')
+    return false;
+
+  /* No trailing-separator trim here, unlike path_is_dir: an output path never carries
+   * one, and `stat` on a name with a trailing `/` fails on every platform anyway. */
+#if defined(_MSC_VER)
+  struct _stat st;
+  return _stat(path, &st) == 0 && (st.st_mode & _S_IFMT) == _S_IFREG;
+#else
+  struct stat st;
+  return stat(path, &st) == 0 && S_ISREG(st.st_mode);
+#endif
+}

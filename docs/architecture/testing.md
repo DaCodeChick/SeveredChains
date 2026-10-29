@@ -243,8 +243,12 @@ Decoding expectations:
   and opcode-name collision. The missing `-L` directory case is covered, but by the
   **`cli_contract`** table rather than by a golden: the reference aborts there (exit 1, stack
   trace), so there is nothing to match byte-for-byte, and the native 0/1/2/3 contract is not
-  overridden by ruling R1. A missing *include file* is a different shape again (reference: exit 0,
-  no output) and is open — design doc §14 item 6.
+  overridden by ruling R1. A missing *include file* is now decided the same way (owner ruling
+  2026-10-28): fatal, exit 2, no output, pinned by `c4`–`c8`. The reference agrees that the
+  compile aborts — `Include.resolve` throws `IncludeFailedException`, which escapes the
+  `catch (IOException)` in `FateCompiler.compile` that would otherwise log and continue — but
+  it prints a stack trace and then exits 0 with no output, which is the pairing the contract
+  forbids ("a failure that also produces a deliverable"). Design doc §9.2 and §14 item 6.
 - **Fate differential harness.** `fate/testdata/run_golden.py` is the acceptance test — one CTest
   entry, `fate.compile.golden`, registered by `fate/CMakeLists.txt` and **on by default**
   (`-DFATE_ENABLE_GOLDEN_TEST=OFF` opts out; a default build that registers zero fate tests is
@@ -260,17 +264,42 @@ Decoding expectations:
   than reporting coverage. It also fingerprints every fixture/golden before the sweep and fails
   if a run mutates one, because two probes in this project's history truncated fixtures while the
   suite stayed green. A second, smaller table — `cli_contract` — pins the **native** CLI contract
-  (three `-L` cases: missing directory, file-as-directory, and a valid-directory control); those
-  entries have no golden, are reported on their own line as *not derived from the oracle*, and put
-  `-o` inside a private temporary directory so they cannot write into the tree.
-  Current local state (re-measured 2026-10-28 after the `-L` work): 18/19 fixtures byte-match, 1
-  pinned deviation; 17 diagnostics exact, 2 reported NOT VERIFIED (`p10` crash filter, `p12`
-  unpinned recovery by-product); 19/19 exit statuses; 3/3 native CLI-contract checks.
-- **Test gates were proven non-vacuous, twice.** With a compiler built from HEAD (no `-L` guard),
-  `c1`/`c2` fail on all three axes and the harness exits 1; with `p12` flipped back to `parity:
-  match` in a **copy** of `testdata`, the harness fails on bytes and diagnostics, and a truncated
-  valid fixture fails too. A check that cannot fail is not evidence — new checks need a
-  deliberately-wrong compiler or a deliberately-wrong expectation, not just a green run.
+  in nine entries: two for `-L` handling (missing directory, file-as-directory), one control that
+  a valid `-L` still compiles, three for the unresolvable-include abort (with `-L`, without `-L`,
+  and one where the include sits between two valid `def`s so the failure happens only after real
+  statements have been parsed), and three controls around it (the trailing-space include gate, a
+  stale output file being discarded, and `-o` naming the input being refused). Those entries have no golden, are reported on their own
+  line as *not derived from the oracle*, and put `-o` inside a private temporary directory so they
+  cannot write into the tree — `c8`, the input-as-output case, runs on a **copy** of a fixture for
+  the same reason.
+  Current local state (re-measured 2026-10-28 after the include-abort work, fresh configure at the
+  repository root, 30/30 CTest): 18/19 fixtures byte-match, 1 pinned deviation; 17 diagnostics
+  exact, 2 reported NOT VERIFIED (`p10` crash filter, `p12` unpinned recovery by-product); 19/19
+  exit statuses; 9/9 native CLI-contract checks.
+- **Test gates were proven non-vacuous, twice.** The second time, on 2026-10-28, against **two**
+  baselines rather than one impression: a binary built from the pre-`-L` working tree, where every
+  entry of the then-eight-entry table failed (20 assertion failures); and, re-run the same day
+  against the current nine-entry table, a binary built from `dd58586`, which already has the `-L`
+  guard — there exactly the four pre-existing checks pass (`c1`, `c2`, `c3`, `c6`) and exactly the
+  five new ones fail, 18 assertion failures, including `c8`: *"the input file was modified"*, which
+  is the data-loss path the two new guards close. The `dd58586` run is the informative shape: it
+  separates the new checks from the old, so it shows the new checks can fail **and** that the old
+  ones did not silently regress. Its `c9` output is also the clearest picture of what the abort
+  replaced — 170 bytes of assembly emitted beside `unknown function helper` and `unknown function
+  other`, a deliverable whose call targets have no definitions.
+  Separately, with `p12` flipped back to `parity: match` in a **copy** of `testdata`, the
+  harness fails on bytes and diagnostics, and a truncated valid fixture fails too.
+  A check that cannot fail is not evidence — new checks need a deliberately-wrong compiler or a
+  deliberately-wrong expectation, not just a green run.
+- **How to get a baseline binary.** `git archive HEAD fate | tar -x -C <dir>` then configure that
+  directory standalone (`cmake -S <dir>/fate -B <build>`). Build **in-tree** is not reusable here:
+  the local `build/` tree (gitignored — repo content is unaffected) was configured while the tree
+  lived at a different path, so its cached source dir
+  (`/Users/schala/Documents/severedchains`) resolves to a directory with no `CMakeLists.txt` and
+  every `cmake --build` there fails. That failure reads like a project defect when it is only a
+  stale cache, so check `CMAKE_HOME_DIRECTORY` in `CMakeCache.txt` before believing it. The
+  whole-project 30/30 figure quoted above came from a fresh configure at `/tmp/scb`, not from
+  `build/`.
 - **Fate CI lane (written, never executed).** `.github/workflows/ci.yml` has a dedicated
   `fate-toolchain` job (macOS arm64, Linux x86-64 GCC, Linux x86-64 Clang) while the engine
   matrix passes `-DSC_ENABLE_FATE=OFF`. Compiler selection is by measured feature support: the

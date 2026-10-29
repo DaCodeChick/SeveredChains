@@ -42,6 +42,13 @@ typedef struct Job
   Buf warn;
   const char* includeDirs[FATE_MAX_INCLUDE_DIRS];
   int includeDirCount;
+
+  /** Set when an `include` could not be loaded. That is fatal, not a diagnostic to
+   *  collect and carry on past: see the abort branch in @ref main. */
+  bool includeFailed;
+
+  /** The one line printed instead of `diag` when @ref Job::includeFailed is set. */
+  char fatalMsg[600];
 } Job;
 
 /** Options after the `compile` subcommand. */
@@ -92,34 +99,29 @@ static char* readFileToArena(Arena* a, const char* path, Str* out)
   return buf;
 }
 
-/** @brief Resolve an include filename against the -L directories, then the directory of
- *  the file that asked for it.
+/** @brief Resolve an include filename against the `-L` directories, in argument order.
  *
- *  @return A path owned by the job, or NULL when the file is nowhere to be found. */
-static const char* resolveInclude(Job* job, const char* name, const char* relativeTo)
+ *  The directory of the file that asked for the include is deliberately **not** searched:
+ *  the reference searches only `-L` (design doc §5.1), re-measured on 2026-10-28 with the
+ *  built oracle — a `.fate` sitting beside the source it is included from still reports
+ *  `Could not resolve include … in include paths []` and writes no output. An earlier
+ *  version took a `relativeTo` directory and searched it; nothing ever passed anything but
+ *  NULL, so that branch was dead *and* a standing invitation to diverge. It is gone rather
+ *  than dormant.
+ *
+ *  @param job  Supplies the include search path (`includeDirs`, `includeDirCount`).
+ *  @param name The include name with trailing blanks already removed.
+ *  @return A path in this function's static buffer, valid until the next call, or NULL
+ *          when the name resolves nowhere.
+ *  @note Thread: not thread-safe — the probe buffer is function-static; one compile is
+ *        one job. */
+static const char* resolveInclude(Job* job, const char* name)
 {
   static char path[1024];
-  static char tried[FATE_MAX_INCLUDE_DIRS + 1][1100];
-  int triedCount = 0;
 
   for (int i = 0; i < job->includeDirCount; i++)
   {
     snprintf(path, sizeof(path), "%s/%s", job->includeDirs[i], name);
-    FILE* f = fopen(path, "rb");
-
-    if (f)
-    {
-      fclose(f);
-      return path;
-    }
-
-    if (triedCount < (int)(sizeof(tried) / sizeof(tried[0])))
-      snprintf(tried[triedCount++], sizeof(tried[0]), "%s", path);
-  }
-
-  if (relativeTo && relativeTo[0] != '\0')
-  {
-    snprintf(path, sizeof(path), "%s/%s", relativeTo, name);
     FILE* f = fopen(path, "rb");
 
     if (f)
@@ -162,6 +164,88 @@ static Status parseUnit(Job* job, Source* src, const char* displayName)
     return ST_COMPILE;
 
   return ST_OK;
+}
+
+/** One queued `include` directive, with enough context to say where it came from.
+ *
+ *  The queue used to hold bare filename strings, which was enough while an unresolvable
+ *  include was a diagnostic and the compile carried on. It is not enough once the run
+ *  stops: the operator needs the file and the line that asked for the missing one. */
+typedef struct IncludeReq
+{
+  char token[256];      /**< verbatim filename token, trailing space preserved */
+  int line;             /**< line the directive appeared on, 0 when unknown */
+  const char* fromUnit; /**< file that asked for it; NULL for the script named on the command line */
+} IncludeReq;
+
+/** @brief Stop the compile because an include could not be loaded.
+ *
+ *  @param job The job; `includeFailed` is set, which ends the load loop and skips emission.
+ *  @param req The queued directive that failed, used for the `line: ` prefix.
+ *  @param what The message, already naming the include file.
+ *
+ *  @note Thread: single-threaded; writes only @ref Job fields. */
+static void includeFatal(Job* job, const IncludeReq* req, const char* what)
+{
+  job->includeFailed = true;
+
+  if (req->line > 0)
+    snprintf(job->fatalMsg, sizeof(job->fatalMsg), "%d: %s", req->line, what);
+  else
+    snprintf(job->fatalMsg, sizeof(job->fatalMsg), "%s", what);
+}
+
+/** @brief Name of the file the emitted assembly would go to.
+ *
+ *  @param opt Parsed options; @ref Options::output wins when given.
+ *  @param buf Destination for the derived default name.
+ *  @param cap Size of @p buf.
+ *  @return The path to write to, either @p opt's output or @p buf.
+ *
+ *  The default is the input path with its extension replaced by `.txt`, which is what the
+ *  reference does and what the goldens were taken with. Kept as one function because the
+ *  abort paths need the same name as the write, to decide what to do with a file already
+ *  sitting there. */
+static const char* resolveOutputPath(const Options* opt, char* buf, size_t cap)
+{
+  if (opt->output != NULL)
+    return opt->output;
+
+  snprintf(buf, cap, "%s", opt->input);
+
+  char* dot = strrchr(buf, '.');
+  char* slash = strrchr(buf, '/');
+
+  if (dot && slash && dot < slash)
+    dot = NULL;
+
+  if (dot)
+    *dot = '\0';
+
+  strncat(buf, ".txt", cap - strlen(buf) - 1);
+  return buf;
+}
+
+/** @brief Remove a pre-existing output file when this run produces none.
+ *
+ *  @param outPath Where the assembly text would have been written, or NULL.
+ *
+ *  A failed compile that leaves the previous run's output behind is worse than one that
+ *  removes it: anything packaging whatever `-o` names ships a stale program and reports
+ *  success. Deleting the file and saying so keeps the failure visible where it can still
+ *  be acted on. Only a regular file is removed: a directory, a device such as
+ *  `/dev/null`, or a socket is not "the previous run's output", and deleting one of those
+ *  would be a bug rather than a cleanup. The caller guarantees that @p outPath is not the
+ *  input file — @ref main settles that before anything is read or written.
+ *
+ *  @note Thread: single-threaded; touches the filesystem. */
+static void discardStaleOutput(const char* outPath)
+{
+  if (outPath == NULL || !path_is_regular_file(outPath))
+    return;
+
+  if (remove(outPath) == 0)
+    fprintf(stderr, "removed stale output %s (this run produced no output)\n", outPath);
 }
 
 int main(int argc, char** argv)
@@ -236,6 +320,22 @@ int main(int argc, char** argv)
     return 1;
   }
 
+  /* The output name is needed before anything is read: the abort paths below have to
+   * decide what to do with a file already sitting at it, and a `.txt` source would
+   * otherwise resolve to its own name as the default output. */
+  char defaultOut[1024];
+
+  const char* outPath = resolveOutputPath(&opt, defaultOut, sizeof(defaultOut));
+
+  if (strcmp(outPath, opt.input) == 0)
+  {
+    /* Reached by `-o <the source itself>`, and by a `.txt` source whose default output
+     * name is the source itself. Checked before the file is opened for reading, so no
+     * run can damage the program text it was asked to compile. */
+    fprintf(stderr, "refusing to write the output file: %s is also the input file\n", outPath);
+    return 2;
+  }
+
   /* The metadata bundle is a required input, not an optional extra: an engine call's
    * emitted name comes out of it, so compiling without it would invent output. */
   if (meta_load(&job.meta, &job.arena, opt.metaDir) != ST_OK)
@@ -257,7 +357,7 @@ int main(int argc, char** argv)
    * makes the same check for the same reason - `Shell.readIncludeDirs` (Shell.java:273-286)
    * throws `IncludeFailedException("Include dir <path> does not exist")`, and it throws
    * outside the compile `try`, so nothing is caught and nothing is written. Pinned by
-   * `c1_missing_incdir` / `c2_incdir_is_file`, with `c3_incdir_ok` as the control that a
+   * `c1_missing_incdir` / `c2_incdir_is_file`, with `c3_valid_include_control` as the control that a
    * usable `-L` still compiles (fate/testdata/manifest.json, `cli_contract`). */
   for (int i = 0; i < job.includeDirCount; i++)
   {
@@ -297,28 +397,42 @@ int main(int argc, char** argv)
   /* Breadth-first include loading. A filename token that does not end exactly in
    * `.fate` is emitted but never loaded, which is what the reference's
    * `name.endsWith(".fate")` gate does — and p13 depends on it, because its
-   * `include char_utils.fate ;` leaves a trailing space inside the token.
+   * `include char_utils.fate ;` leaves a trailing space inside the token. That is also
+   * why the "missing include" rule below does not fire for p13: `char_utils.fate ` is
+   * not read as a file include at all, and `char_utils.fate` exists beside the fixture.
    *
    * The gate reads the *verbatim* token for that reason. Waiting until the loop below
    * to trim would open the file, resolve `charIsInActiveParty`, and drop the
    * `5: unknown function charIsInActiveParty` line that p13's golden carries; the
    * emitted `gosub inl[:charIsInActiveParty]` is the same either way, which is exactly
    * why the missing message needed a differential to be seen at all. */
-  static char pending[FATE_MAX_UNITS + 1][256];
+  static IncludeReq pending[FATE_MAX_UNITS + 1];
   static char done[FATE_MAX_UNITS + 1][256];
 
   int pendingCount = 0;
   int doneCount = 0;
 
   for (int i = 0; i < units[0].includeCount; i++)
-    if (units[0].includes[i].raw && pendingCount < (int)(sizeof(pending) / sizeof(pending[0])))
-      snprintf(pending[pendingCount++], sizeof(pending[0]), "%s", units[0].includes[i].raw);
-
-  for (int head = 0; head < pendingCount && unitCount < FATE_MAX_UNITS; head++)
   {
+    if (!units[0].includes[i].raw || pendingCount >= (int)(sizeof(pending) / sizeof(pending[0])))
+      continue;
+
+    /* The token keeps its trailing space for the gate above; the line and the origin are
+     * recorded so a failure can name both. */
+    snprintf(pending[pendingCount].token, sizeof(pending[0].token), "%s", units[0].includes[i].raw);
+    pending[pendingCount].line = units[0].includes[i].line;
+    pending[pendingCount].fromUnit = NULL;
+    pendingCount++;
+  }
+
+  /* One failed include ends the loop: `includeFailed` is part of the condition, so a
+   * queued include behind the failed one is never opened either. */
+  for (int head = 0; head < pendingCount && unitCount < FATE_MAX_UNITS && !job.includeFailed; head++)
+  {
+    const IncludeReq* req = &pending[head];
     char token[256];
 
-    snprintf(token, sizeof(token), "%s", pending[head]);
+    snprintf(token, sizeof(token), "%s", req->token);
 
     /* The lookup form: the same token with its trailing blanks removed, used for the
      * directory search and for the "already loaded" check. */
@@ -349,14 +463,27 @@ int main(int argc, char** argv)
     if (!str_ends_with(str_of(token, strlen(token)), ".fate"))
       continue;
 
-    const char* path = resolveInclude(&job, name, NULL);
+    const char* path = resolveInclude(&job, name);
 
     if (!path)
     {
-      char msg[512];
-      snprintf(msg, sizeof(msg), "Failed to load include %s", name);
-      diag_add(&job.diag, 0, msg);
-      continue;
+      /* Fatal, and the two clauses of the message are for the two ways to get here: the
+       * file is elsewhere (name the asker) or no search path was given at all. */
+      char tail[256];
+      char what[512];
+
+      tail[0] = '\0';
+
+      if (req->fromUnit != NULL)
+        snprintf(tail, sizeof(tail), " asked for by %s", req->fromUnit);
+
+      if (job.includeDirCount == 0)
+        snprintf(what, sizeof(what), "include file not found: %s%s - no include path given, pass -L <dir>", name, tail);
+      else
+        snprintf(what, sizeof(what), "include file not found: %s%s", name, tail);
+
+      includeFatal(&job, req, what);
+      break;
     }
 
     Source* unit = &units[unitCount];
@@ -369,10 +496,15 @@ int main(int argc, char** argv)
 
     if (parseUnit(&job, unit, path) != ST_OK)
     {
-      char msg[512];
-      snprintf(msg, sizeof(msg), "Failed to load include %s", name);
-      diag_add(&job.diag, 0, msg);
-      continue;
+      /* Found but unreadable or unparseable. The file exists, so this is not "not
+       * found", and its functions are still missing from the table, which makes the
+       * program exactly as unbuildable; the same treatment, with a message that does not
+       * tell the operator to look for a file they can see. */
+      char what[512];
+
+      snprintf(what, sizeof(what), "include file could not be read: %s", name);
+      includeFatal(&job, req, what);
+      break;
     }
 
     emit_scan(&job.emit, unit, unitCount, "");
@@ -381,8 +513,38 @@ int main(int argc, char** argv)
     /* Nested includes are queued in the same verbatim form, so they meet the same
      * gate as the top-level ones. */
     for (int i = 0; i < unit->includeCount && pendingCount < (int)(sizeof(pending) / sizeof(pending[0])); i++)
-      if (unit->includes[i].raw)
-        snprintf(pending[pendingCount++], sizeof(pending[0]), "%s", unit->includes[i].raw);
+    {
+      if (!unit->includes[i].raw)
+        continue;
+
+      snprintf(pending[pendingCount].token, sizeof(pending[0].token), "%s", unit->includes[i].raw);
+      pending[pendingCount].line = unit->includes[i].line;
+      pending[pendingCount].fromUnit = unit->displayName;
+      pendingCount++;
+    }
+  }
+
+  /* An include the compiler could not load stops the run here, and nothing is emitted: a
+   * program whose calls into that file have no definitions is not a lesser program, it is
+   * a broken one (owner ruling 2026-10-28).
+   *
+   * The reference agrees that this aborts. `Include.resolve` throws
+   * `IncludeFailedException("Could not resolve include ...")` for a missing file and that
+   * throw is outside the `catch (IOException)` which would have logged and continued, so
+   * it reaches `Shell.java`'s `catch (Throwable)`, no output is written, and the run then
+   * exits 0. Two things are deliberately not copied: the stack trace, which ruling R1
+   * keeps out of the goldens, and the exit status, which the 0/1/2/3 contract puts at 2.
+   * Pinned by `c4_missing_include_with_path` and `c5_missing_include_no_path`, with
+   * `c3_valid_include_control` and `c6_trailing_space_gate` as the controls that a resolvable
+   * include and a non-`.fate` token still behave as before (manifest.json `cli_contract`).
+   *
+   * Only the abort reason is printed. `job.diag` can already hold `missing return` lines
+   * from the definition scan, and those describe a program this run refused to build. */
+  if (job.includeFailed)
+  {
+    fprintf(stderr, "%s\n", job.fatalMsg);
+    discardStaleOutput(outPath);
+    return 2;
   }
 
   /* Globals live in the scope every function starts from. */
@@ -410,30 +572,10 @@ int main(int argc, char** argv)
   if (job.diag.count > 0 && job.diag.buf.len > 0)
     fwrite(job.diag.buf.data, 1, job.diag.buf.len, stderr);
 
-  char defaultOut[1024];
-
-  const char* outPath = opt.output;
-
-  if (!outPath)
-  {
-    /* Default output name: the input path with its extension replaced by `.txt`. */
-    snprintf(defaultOut, sizeof(defaultOut), "%s", opt.input);
-    char* dot = strrchr(defaultOut, '.');
-    char* slash = strrchr(defaultOut, '/');
-
-    if (dot && slash && dot < slash)
-      dot = NULL;
-
-    if (dot)
-      *dot = '\0';
-
-    strcat(defaultOut, ".txt");
-    outPath = defaultOut;
-  }
-
   if (st == ST_OOM)
   {
     fprintf(stderr, "out of memory\n");
+    discardStaleOutput(outPath);
     return 2;
   }
 
@@ -444,6 +586,7 @@ int main(int argc, char** argv)
      * reference prints on its way out is a JVM stack trace, which ruling R1 keeps out
      * of the goldens. The diagnostic that caused the abort is already on stderr, and
      * exit 3 plus the missing output file carry the rest. */
+    discardStaleOutput(outPath);
     return 3;
   }
 

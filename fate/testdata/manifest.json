@@ -92,7 +92,7 @@
    "expect": "silent-wrong",
    "parity": "match",
    "ruling": "R1 2026-10-27",
-   "note": "`0xFF` lexes as `0` plus the identifier `xFF`; the reference emits `mov 0, ...` and reports nothing. Ruling R1: match the reference \u2014 replicate the lexer's hex-literal gap and emit `mov 0, ...` with no diagnostic, exit 0."
+   "note": "`0xFF` lexes as `0` plus the identifier `xFF`; the reference emits `mov 0, ...` and reports nothing. Ruling R1: match the reference — replicate the lexer's hex-literal gap and emit `mov 0, ...` with no diagnostic, exit 0."
   },
   {
    "id": "p9_tab",
@@ -101,7 +101,7 @@
    "expect": "warnings",
    "parity": "match",
    "ruling": "R1 2026-10-27",
-   "note": "Tab is not in the WHITESPACE class, so the lexer reports `token recognition error` per tab; compilation continues and the emitted code is unaffected by indentation. Ruling R1: match \u2014 emit the same per-tab message on stderr and keep compiling, exit 0 (these are not errors-list entries). `expect` is `warnings` rather than `diagnostics` because the native contract keys exit 3 off the errors list, and these never enter it."
+   "note": "Tab is not in the WHITESPACE class, so the lexer reports `token recognition error` per tab; compilation continues and the emitted code is unaffected by indentation. Ruling R1: match — emit the same per-tab message on stderr and keep compiling, exit 0 (these are not errors-list entries). `expect` is `warnings` rather than `diagnostics` because the native contract keys exit 3 off the errors list, and these never enter it."
   },
   {
    "id": "p10_truefalse",
@@ -110,7 +110,7 @@
    "expect": "crash",
    "parity": "match",
    "ruling": "R1 2026-10-27",
-   "note": "`true` reaches the emitter as `unimplemented op true`, then a NullPointerException aborts the run; no output file is written. Ruling R1: match the observable result \u2014 report `unimplemented op true` and write no output file; the NPE is a reference defect and is NOT reproduced, the C tool exits 3 cleanly."
+   "note": "`true` reaches the emitter as `unimplemented op true`, then a NullPointerException aborts the run; no output file is written. Ruling R1: match the observable result — report `unimplemented op true` and write no output file; the NPE is a reference defect and is NOT reproduced, the C tool exits 3 cleanly."
   },
   {
    "id": "p11_strings",
@@ -119,7 +119,7 @@
    "expect": "diagnostics",
    "parity": "match",
    "ruling": "R1 2026-10-27",
-   "note": "A call to an unknown scoped name drops the whole statement from the output instead of emitting a placeholder. Ruling R1: match \u2014 drop the statement, report `unknown engine call`, write the rest, exit 3."
+   "note": "A call to an unknown scoped name drops the whole statement from the output instead of emitting a placeholder. Ruling R1: match — drop the statement, report `unknown engine call`, write the rest, exit 3."
   },
   {
    "id": "p12_forloop",
@@ -132,7 +132,7 @@
    "valid_source": false,
    "diag_count": 4,
    "diag": "unpinned",
-   "diag_note": "The reference logs four diagnostics here; the tool logs two (`3: function \"f\" missing return` and `4: variable \"i\" is not defined in the current scope`). The missing pair is `3: function \"f\" return lists are not the same size` and `4: unknown function for`, and both exist only because ANTLR recovers `for(...) {` as a call to a function named `for`. That is the recovery by-product decision 1 keeps out of scope, so the harness reports this fixture's diagnostics as NOT VERIFIED instead of comparing them. Status 2026-10-28 (decision 3): this fixture is an OPEN issue, not an accepted deviation. Checking whether the deviation alters valid-source semantics showed that recovery rule 2 is not local - it consumes the rest of the function body, so statements that are individually valid after the bad one are dropped. Probe: `foo(a); for(var i = 0; i < 3; i++) { bar(a); } baz(a); return;` emits `gosub inl[:foo]` + `incr undefined` and stops, losing `bar(a)`, `baz(a)` and `return`; the reference emits the body statement. Semantic non-interference is therefore unproven - do not read this fixture as conformant. Reproducer and candidate fixes: docs/research/fate-compile-design.md \u00a74.2 and \u00a714 item 2."
+   "diag_note": "The reference logs four diagnostics here; the tool logs two (`3: function \"f\" missing return` and `4: variable \"i\" is not defined in the current scope`). The missing pair is `3: function \"f\" return lists are not the same size` and `4: unknown function for`, and both exist only because ANTLR recovers `for(...) {` as a call to a function named `for`. That is the recovery by-product decision 1 keeps out of scope, so the harness reports this fixture's diagnostics as NOT VERIFIED instead of comparing them. Status 2026-10-28 (decision 3): this fixture is an OPEN issue, not an accepted deviation. Checking whether the deviation alters valid-source semantics showed that recovery rule 2 is not local - it consumes the rest of the function body, so statements that are individually valid after the bad one are dropped. Probe: `foo(a); for(var i = 0; i < 3; i++) { bar(a); } baz(a); return;` emits `gosub inl[:foo]` + `incr undefined` and stops, losing `bar(a)`, `baz(a)` and `return`; the reference emits the body statement. Semantic non-interference is therefore unproven - do not read this fixture as conformant. Reproducer and candidate fixes: docs/research/fate-compile-design.md §4.2 and §14 item 2."
   },
   {
    "id": "p13_incl",
@@ -144,7 +144,7 @@
    "expect": "diagnostics",
    "parity": "match",
    "ruling": "R1 2026-10-27",
-   "note": "`include char_utils.fate ;` keeps the trailing space inside the filename token, so the include resolves but the included functions are not found. Ruling R1: match \u2014 filename token includes the trailing space, emitted `#include <token>` verbatim, functions load only when the token ends exactly in `.fate`, exit 3."
+   "note": "`include char_utils.fate ;` keeps the trailing space inside the filename token, so the include resolves but the included functions are not found. Ruling R1: match — filename token includes the trailing space, emitted `#include <token>` verbatim, functions load only when the token ends exactly in `.fate`, exit 3."
   },
   {
    "id": "p14_noret",
@@ -193,7 +193,7 @@
     "no such include directory: "
    ],
    "provenance": "native",
-   "note": "Owner ruling 2026-10-28 (decision 1): an explicitly supplied `-L` path that is not a readable directory is an I/O failure, reported at once with the path named, answering exit 2 and writing nothing. Before that ruling a missing include directory was ignored and degraded into `Failed to load include` plus a per-function `unknown function` at exit 3, which is the shape the exit contract forbids (malformed input must not decay into a lesser failure class). The reference aborts with exit 1 here; that status is deliberately NOT reproduced - ruling R1 covers diagnostics and emitted text, and it does not override the 0/1/2/3 contract. `$MISSING` expands to a path inside the run's private temporary directory that is never created, so the check does not depend on what happens to exist under /tmp."
+   "note": "Owner ruling 2026-10-28 (decision 1): an explicitly supplied `-L` path that is not a readable directory is an I/O failure, reported at once with the path named, answering exit 2 and writing nothing. Before that ruling a missing include directory was ignored and degraded into a per-function `unknown function` at exit 3, which is the shape the exit contract forbids. The reference aborts with exit 1 here; that status is deliberately NOT reproduced - ruling R1 covers diagnostics and emitted text, and it does not override the 0/1/2/3 contract. `$MISSING` expands to a path inside the run's private temporary directory that is never created."
   },
   {
    "id": "c2_incdir_is_file",
@@ -210,8 +210,47 @@
    "note": "The other way to fail the same guard: `-L` naming something that exists but is not a directory. One message covers both cases because the operator mistake and its fix are the same."
   },
   {
-   "id": "c3_incdir_ok",
+   "id": "c3_valid_include_control",
+   "source": "queen_fury.fate",
+   "args": [
+    "-L",
+    "$FIXTURES"
+   ],
+   "expect": "clean",
+   "writes_output": true,
+   "stderr_must_contain": [],
+   "provenance": "native",
+   "note": "Control for c4 and c5, and the reason they are trustworthy: a `.fate` include that DOES resolve must still be loaded, compiled and written. Without it, a change that aborted on every include would read as green. Also the control for the `-L` guard in c1/c2: a usable include path still compiles."
+  },
+  {
+   "id": "c4_missing_include_with_path",
    "source": "c1_noincdir.fate",
+   "args": [
+    "-L",
+    "$FIXTURES"
+   ],
+   "expect": "io-error",
+   "stderr_must_contain": [
+    "include file not found: missing_lib.fate"
+   ],
+   "provenance": "native",
+   "note": "An explicit `include` of a file that exists nowhere is a fatal error, not a diagnostic to collect and carry on past (owner ruling 2026-10-28): exit 2, no output file, no further statements compiled. Previously this run answered exit 3 and still wrote a program whose `gosub` targets had no definitions. The reference agrees that the compile aborts - `Include.resolve` throws `IncludeFailedException`, which is outside the `catch (IOException)` in `FateCompiler.compile` that would have logged and continued - but it prints a JVM stack trace and then exits 0. Neither is reproduced: R1 keeps the trace out, and the exit contract puts the status at 2."
+  },
+  {
+   "id": "c5_missing_include_no_path",
+   "source": "c1_noincdir.fate",
+   "args": [],
+   "expect": "io-error",
+   "stderr_must_contain": [
+    "include file not found: missing_lib.fate",
+    "no include path given"
+   ],
+   "provenance": "native",
+   "note": "Same source without any `-L`: the message says so, because forgetting the include path is the common way to reach this state and the fix is one flag. Pinned separately from c4 so the two shapes of advice cannot silently collapse into one."
+  },
+  {
+   "id": "c6_trailing_space_gate",
+   "source": "p13_incl.fate",
    "args": [
     "-L",
     "$FIXTURES"
@@ -219,11 +258,57 @@
    "expect": "diagnostics",
    "writes_output": true,
    "stderr_must_contain": [
-    "Failed to load include missing_lib.fate",
-    "11: unknown function helper"
+    "unknown function charIsInActiveParty"
    ],
    "provenance": "native",
-   "note": "Control for the two checks above: with a usable include path the same source must still compile, still report the unresolvable include and the unknown callee, and still write its output. Without this control, a guard that rejected every `-L` would read as green."
+   "note": "Control for the gate that decides what counts as a file include: `include char_utils.fate ;` keeps a trailing space inside the filename token, so it is NOT read as a file include even though `$FIXTURES` is supplied and the file is there. The run therefore reports the unresolved callee and still writes its output. Trimming the token before the `.fate` test would make the include resolve, delete that diagnostic and change the emitted bytes; this entry is what makes that mistake fail."
+  },
+  {
+   "id": "c7_stale_output_discarded",
+   "source": "c1_noincdir.fate",
+   "args": [
+    "-L",
+    "$FIXTURES"
+   ],
+   "expect": "io-error",
+   "preseed_output": true,
+   "writes_output": false,
+   "stderr_must_contain": [
+    "include file not found: missing_lib.fate",
+    "removed stale output"
+   ],
+   "provenance": "native",
+   "note": "A file already sitting at the output path is removed when the run produces nothing, and the removal is announced. Leaving it would let a script package yesterday's assembly text under a failing exit status, which is the failure mode owner ruling 2026-10-28 asks to be made impossible. The `stderr_must_contain` on the removal notice is what proves the file was really there beforehand: the check would also pass on a run that never had a file to remove, so the sentinel text and the notice together pin the behaviour."
+  },
+  {
+   "id": "c8_refuses_input_as_output",
+   "source": "p13_incl.fate",
+   "input_copy": "c8_copy.fate",
+   "output_is_input": true,
+   "expect": "io-error",
+   "preserve_input": true,
+   "stderr_must_contain": [
+    "is also the input file"
+   ],
+   "provenance": "native",
+   "note": "`-o` naming the file being compiled is refused before anything is read, so no failing compile can destroy its own source. Runs on a copy inside the private temporary directory rather than on the fixture, so a regression here damages a copy and not test data."
+  },
+  {
+   "id": "c9_include_after_valid_statements",
+   "source": "c9_midstream.fate",
+   "args": [
+    "-L",
+    "$FIXTURES"
+   ],
+   "expect": "io-error",
+   "preseed_output": true,
+   "writes_output": false,
+   "stderr_must_contain": [
+    "include file not found: missing_lib.fate",
+    "removed stale output"
+   ],
+   "provenance": "native",
+   "note": "The unresolvable include sits between two valid definitions, so the abort happens after real statements have already been parsed and the tool has callees with no definitions to resolve them against. The contract is that nothing is written in that state: a partial program whose `gosub`/`call` targets are undefined is exactly the deliverable that must not exist. c4/c5 fail at the first line, so neither of them covers this; c7 pins removal of a pre-existing file but also fails early."
   }
  ]
 }

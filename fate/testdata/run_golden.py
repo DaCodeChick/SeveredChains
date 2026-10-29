@@ -52,10 +52,18 @@ overrides it verbatim.
 
 A second, smaller table - `cli_contract` in manifest.json - pins the native command-line
 contract rather than reference output. Those entries have no `.expected`/`.diag` pair and
-are NOT oracle-derived: for the include-path case the reference does something different
-on purpose (it aborts with exit 1, which ruling R1 does not extend to, and the 0/1/2/3
-contract is not overridden by it). They are reported separately so nobody reads them as
-differential evidence about the reference.
+are NOT oracle-derived. Two families live there, both places where the native contract
+deliberately differs from the reference: an unreadable `-L` path (the reference aborts with
+exit 1) and an unresolvable `include` of a `.fate` file (the reference aborts with a stack
+trace and then exits 0). Neither status is reproduced - ruling R1 covers diagnostics and
+emitted text, and it does not override the 0/1/2/3 contract - so these are reported on
+their own line, marked as native-only, to stop anyone reading them as differential
+evidence about the reference.
+
+Arguments may use `$FIXTURES` (the fixtures directory, read-only) and `$MISSING` (a path
+inside the run's private temporary directory that is never created). Every entry runs with
+an explicit `-o` inside that same private directory, so a check cannot write into the
+fixture tree even when it fails.
 
 The metadata bundle is NOT committed. It is read from `$FATE_META_DIR` when set, and
 otherwise from a small list of local locations. If the goldens, the binary or the
@@ -71,6 +79,7 @@ import hashlib
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -213,6 +222,20 @@ def check_cli_contract(entry: dict, binary: pathlib.Path, meta: pathlib.Path,
     is the exit class, the message that must appear, and whether a file was written. The
     `$MISSING` token expands to a path inside a private temporary directory that is never
     created, so the check does not depend on what happens to exist under `/tmp`.
+
+    Everything a check writes goes inside that private directory: `-o` is always given
+    explicitly, and `input_copy` runs against a copy of the fixture rather than the
+    fixture. A fixture is an input and is never a place to put output.
+
+    Fields beyond `args`/`expect`/`stderr_must_contain`/`writes_output`:
+
+      `output`             output file name inside the private directory (default
+                           `out.txt`); `output_is_input` makes it the input file instead.
+      `input_copy`         copy the fixture to this name in the private directory and run
+                           on the copy.
+      `preseed_output`     write a sentinel at the output path first, so the check proves
+                           a stale file is discarded, not merely that none was created.
+      `preserve_input`     the input file must still exist with its original bytes.
     """
     cid = entry["id"]
     src = fixtures / entry.get("source", f"{cid}.fate")
@@ -222,10 +245,26 @@ def check_cli_contract(entry: dict, binary: pathlib.Path, meta: pathlib.Path,
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = pathlib.Path(tmp)
-        out = tmp_dir / "out.txt"
         missing = tmp_dir / "no-such-include-dir"
+
+        src_arg = src
+
+        if entry.get("input_copy"):
+            src_arg = tmp_dir / entry["input_copy"]
+            shutil.copyfile(src, src_arg)
+
+        src_text = src_arg.read_text() if entry.get("preserve_input") else ""
+
+        out = tmp_dir / entry.get("output", "out.txt")
+
+        if entry.get("output_is_input"):
+            out = src_arg
+
+        if entry.get("preseed_output"):
+            out.write_text("stale output from an earlier run\n")
+
         cmd = [str(binary), "compile", "-m", str(meta), *entry.get("args", []),
-               "-o", str(out), str(src)]
+               "-o", str(out), str(src_arg)]
         cmd = [a.replace("$FIXTURES", str(fixtures)).replace("$MISSING", str(missing))
                for a in cmd]
 
@@ -252,13 +291,20 @@ def check_cli_contract(entry: dict, binary: pathlib.Path, meta: pathlib.Path,
 
         wrote = out.is_file() and out.stat().st_size > 0
 
-        if entry.get("writes_output", False) and not wrote:
-            failures.append(f"{cid}: expected output to be written, none was "
-                            f"(rc={proc.returncode})")
+        # When the output path IS the input file the write checks do not apply; the
+        # behaviour pinned there is that the file is left alone, which `preserve_input`
+        # below is the one that actually observes.
+        if not entry.get("output_is_input"):
+            if entry.get("writes_output", False) and not wrote:
+                failures.append(f"{cid}: expected output to be written, none was "
+                                f"(rc={proc.returncode})")
 
-        if not entry.get("writes_output", False) and wrote:
-            failures.append(f"{cid}: expected no output, got {out.stat().st_size} bytes "
-                            f"(rc={proc.returncode})")
+            if not entry.get("writes_output", False) and wrote:
+                failures.append(f"{cid}: expected no output, got {out.stat().st_size} bytes "
+                                f"(rc={proc.returncode})")
+
+        if entry.get("preserve_input") and src_arg.read_text() != src_text:
+            failures.append(f"{cid}: the input file was modified")
 
         return failures, f"{cid}: exit {proc.returncode}"
 
@@ -401,13 +447,14 @@ def main(argv: list[str]) -> int:
     # here so that difference is tested, and reported as native-only.
     cli_checked = 0
     cli_ok = 0
+    contract_failures: list[str] = []
 
     for entry in doc.get("cli_contract", []):
         cli_checked += 1
         cli_fails, _note = check_cli_contract(entry, binary, meta, fixtures)
 
         if cli_fails:
-            failures.extend(cli_fails)
+            contract_failures.extend(cli_fails)
         else:
             cli_ok += 1
 
@@ -418,7 +465,7 @@ def main(argv: list[str]) -> int:
         failures.append("fixtures/goldens changed during the run - these are read-only "
                         "inputs, a probe has written over them: " + ", ".join(mutated))
 
-    for f in failures:
+    for f in failures + contract_failures:
         print(f"FAIL {f}")
 
     for n in notes:
@@ -428,9 +475,21 @@ def main(argv: list[str]) -> int:
         print(f"fate cli contract: {cli_ok}/{cli_checked} native check(s) passed "
               f"(pinned by the native contract, not derived from the oracle)")
 
-    if failures:
-        print(f"\n{len(failures)} check(s) did not match the oracle "
-              f"({len(entries)} fixture(s))")
+    if failures or contract_failures:
+        # Two counts, because the two tables answer to different authorities: the fixture
+        # count is a disagreement with the oracle, the contract count is a breach of the
+        # native CLI contract. Adding them into one number would imply both are
+        # differential evidence, and they are not.
+        parts = []
+
+        if failures:
+            parts.append(f"{len(failures)} oracle check(s) did not match "
+                         f"({len(entries)} fixture(s))")
+
+        if contract_failures:
+            parts.append(f"{len(contract_failures)} native contract check(s) failed")
+
+        print("\n" + "; ".join(parts))
         return 1
 
     strict = len(entries) - deviations

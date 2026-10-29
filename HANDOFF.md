@@ -103,7 +103,8 @@ write inside `~/Documents/GitHub/Script-Recompiler`** — read-only reference re
 | `emit.c/.h` | scope handling, scratch allocation, op-list emission, `entrypoint`, prologue/epilogue |
 | `main.c` | CLI + the **only** place `exit()` is called |
 
-`fate/testdata/` = `fixtures/` (19 `.fate`), `golden/` (19 `.expected` + 19 `.diag`),
+`fate/testdata/` = `fixtures/` (21 `.fate`: 19 with goldens + 2 CLI-contract sources),
+`golden/` (19 `.expected` + 19 `.diag`),
 `manifest.json`, `run_golden.py` (the harness), `README.md`.
 `tools/fate_oracle.py` = oracle driver. `.github/workflows/ci.yml` = 20 legs (17 engine + 3 fate).
 
@@ -120,10 +121,22 @@ non-directory `-L` prints `no such include directory: <path>`, exits `2`, writes
 that it decayed into `Failed to load include` + `unknown function` at exit `3`, which the contract
 forbids. More than 32 `-L` entries exits `1` (it used to be silently ignored).
 
-**Three tables in `manifest.json`**, not two: `fixtures` (19 oracle comparisons) and
-`cli_contract` (3 native checks, `c1`/`c2`/`c3`, no golden — reported on their own line as *not
-derived from the oracle*, because for the missing-directory case the reference deliberately
-behaves differently, exiting 1).
+**An unresolvable `.fate` include is fatal** (decision 4, 2026-10-28): exit `2`, nothing written,
+and a pre-existing file at the output path is *removed* so a failing run cannot package yesterday's
+assembly. An output path that names the input is refused before any file is opened. This replaces
+the earlier collect-a-diagnostic-and-continue behaviour, which wrote partial output and exited `3`.
+The gate is still "token ends exactly in `.fate`": `include other.txt;` and the trailing-space form
+stay verbatim `#include` lines. Measured reference behaviour and the citation chain are in design
+doc §9.2; the five pins are `c4`/`c5`/`c7`/`c8`/`c9` (`c9` is the include that sits *between* two
+valid `def`s, so it is the only pin where the failure happens after real statements are parsed).
+
+**Two tables in `manifest.json`.** `fixtures` (19 oracle comparisons) and `cli_contract` (9
+native checks, `c1`–`c9`, no golden — reported on their own line as *not derived from the oracle*,
+because in the two families they cover the reference deliberately behaves differently: it exits 1
+on an unreadable `-L`, and exits 0 on an unresolvable include). `c3_valid_include_control` and
+`c6_trailing_space_gate` exist so that a rule which aborted on *every* include could not read as
+green; `c8` compiles a **copy** of a fixture, because it pins "no failing run may damage its own
+input".
 
 **Two parity modes** in `manifest.json`: `"match"` (18) needs byte equality — that is the default
 for valid source; `"deviation"` (`p12`) needs exit 3 + no crash + output *differs*. Mismatches on
@@ -204,9 +217,11 @@ under `fate/testdata/local-meta/` would make them real. That is a licensing/scop
 
 ### 5.4 Nothing from these two sessions is committed
 
-`git status` is 8 modified files + 1 new fixture (`fate/testdata/fixtures/c1_noincdir.fate`), no
-commit made. HEAD contains the **pre-damage** fixtures, so
-`git checkout -- fate/testdata/fixtures` would have restored the corpus in one command. The manual
+`git status` is 11 modified tracked paths + 1 untracked new fixture
+(`fate/testdata/fixtures/c9_midstream.fate`), no commit made. `c1_noincdir.fate` is *not* new — it
+has been tracked since `dd58586`; only its header comment changed. HEAD contains the **pre-damage**
+fixtures, so `git checkout -- fate/testdata/fixtures` would have restored the corpus in one
+command. The manual
 restore from the `/tmp` snapshot happens to be byte-identical to HEAD (empty `git diff` against
 HEAD for all 19), which is the integrity proof — and also luck, not process. Committing is the
 user's call; no destructive git operation may be used to "fix" mistakes.
@@ -229,13 +244,18 @@ CLI surface: `--help`, argument validation, "missing required arg" messages, and
    `p12_forloop` stays an open issue and must not be described as conformant** (decision 3).
    Closing it needs either local recovery re-measured against the oracle, or an oracle-generated
    golden pinned as a permanent divergence.
-2. **Unresolvable `.fate` include: continue or abort?** `include missing_lib.fate;` with the file
-   absent currently gives `Failed to load include …` + `11: unknown function helper`, exit 3, with
-   output written. The reference writes no output and exits 0 (`Include.java:24-26` throws,
-   `Shell.java:236` catches it, and the write is inside the same `try`); the phase-1 design text
-   asked for exit 2 and no output. Design doc §9.2 now documents all three shapes instead of
-   pretending they agree, and `c3_incdir_ok` pins the current behaviour **as native**, so changing
-   it is a visible edit rather than silent drift.
+2. **Unresolvable `.fate` include: CLOSED 2026-10-28 — abort, exit 2, nothing written.** It used
+   to give `Failed to load include …` + `11: unknown function helper`, exit 3, output written. The
+   reference was then measured with the built oracle instead of read off the source: it also stops
+   and writes nothing (`Include.resolve` is called outside the read `try`, the `catch (final
+   Throwable t)` at `Shell.java:236` swallows the exception, and `Files.writeString` never runs),
+   but reports **exit 0**. Design doc §9.2 and §7.7 carry the measured output. Pinned as
+   `c4`–`c8`; the trailing-space gate that `p13` depends on is untouched and still verified by
+   `c6_trailing_space_gate`.
+   **What is NOT closed:** whether an *unreadable but resolvable* include (a `.fate` file that
+   exists and cannot be read) should keep the reference's collect-and-continue shape. That path is
+   unexercised — no fixture, no probe, no measurement — and the reference's `Failed to load include
+   <exception>` message for it is unverified. Do not "align" it without measuring first.
 
 ---
 
@@ -268,6 +288,15 @@ CLI surface: `--help`, argument validation, "missing required arg" messages, and
    issue is open (§5.6). Nothing in this ruling licenses expanding scope: implementing a
    `for`-loop desugaring, matching ANTLR recovery in general, and adding `FATE-E000x` strings are
    explicitly *not* authorised by it.
+10. **Ruling of 2026-10-28 (fatal include, implemented after measurement).** An unresolvable
+    `.fate` include aborts the compile: exit `2`, one message naming the missing file and the unit
+    that asked for it, no output written, and a pre-existing regular file at the output path is
+    removed. An output path that is also the input is refused with exit `2` before any file is
+    opened. The `.fate`-suffix gate is unchanged, so `include other.txt;` and `include x.fate ;`
+    are unaffected. The reference was measured first (built oracle, six probes — design doc §9.2):
+    it also writes nothing in every one of those cases, and the only thing not reproduced is its
+    exit status (`0` for an unresolved include, `1` for an unreadable `-L`), which the contract
+    treats as a failure class to be raised, not matched. Pins are `c4`–`c9` in `cli_contract`.
 
 ---
 
@@ -318,13 +347,20 @@ CLI surface: `--help`, argument validation, "missing required arg" messages, and
 
 ## 9. Suggested first moves for the next session
 
-1. **Commit the verified state** (the user's call). Eight modified files and one new fixture sit
-   uncommitted, including the `-L` guard, the harness changes and the manifest's `cli_contract`
-   table. Before committing, re-run both gates and `ctest` at the root — the 30/30 figure is
-   pre-edit evidence. Pushing to `origin` is what would make CI run for the first time, and that
-   is a separate decision from committing.
-2. **Ask the user about 5.2 / 5.3 / 5.4** (git + CI execution + synthetic meta) and **§5.6** (the
-   two open issues) before building anything that assumes an answer.
+1. **Commit the verified state** (the user's call). Twelve paths differ from `dd58586`: eleven
+   modified tracked files — `main.c`, `util.c`, `util.h`, `run_golden.py`, `manifest.json`,
+   `c1_noincdir.fate` (header comment only), `README.md`, `HANDOFF.md`, `testing.md`,
+   `fate-compile-design.md`, `progress.md` — plus the new untracked `c9_midstream.fate`. Together
+   they cover the fatal-include
+   abort, the two new guards, the six new `cli_contract` entries and the doc corrections.
+   Re-verified after all of it: `run_golden.py` exits 0 (18/19 + 1 deviation, 9/9 CLI), both repo
+   gates clean, whole-project CTest **30/30** from a fresh configure at `/tmp/scb`. That 30/30 is
+   now post-edit evidence; the in-tree `build/` directory cannot be used for it (stale cached
+   source path, see `testing.md`). Pushing to `origin` is what would make CI run for the first
+   time, and that is a separate decision from committing.
+2. **Ask the user about 5.2 / 5.3 / 5.4** (git + CI execution + synthetic meta) and about the two
+   issues in **§5.6** — the `p12` recovery non-locality is still open, and the include question
+   that was open beside it is now closed. Do not build anything that assumes an answer.
 3. Whatever you change: re-run `run_golden.py`, both gates, and `ctest` (expect 30/30). A
    change that makes 19/19 match is *suspicious*, not good — it means the p12 pin went stale.
    The harness now also fails if any input file changes during a run, so that check needs no

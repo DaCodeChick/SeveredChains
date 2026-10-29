@@ -408,7 +408,13 @@ test:
 ### 5.1 Include resolution and function table
 
 * Search **only** the `-L` include dirs, in order. Never search the including file's own
-  directory. (This is a behavioural fact: compiling `queen_fury.fate` without `-L` fails.)
+  directory. (This is a behavioural fact: compiling `queen_fury.fate` without `-L` fails. It was
+  re-measured on 2026-10-28 against the built oracle rather than read off the source: with
+  `char_utils.fate` sitting in the *same directory* as the compiling source and no `-L`, the
+  reference reports `Could not resolve include char_utils.fate in include paths []` and writes no
+  output. `Include.java:12-16` iterates `includePaths` in order and never adds the source
+  directory, so the search order is `includePaths` order — and the native tool agrees, because
+  `resolveInclude()` is handed the include dirs only.)
 * Process includes **breadth-first in discovery order** (the root file's includes first, then
   each included file's own includes as that file is processed), de-duplicated by exact token
   text. An include name is loaded **only if it ends exactly in `.fate`** (the `p13` gate); any
@@ -681,6 +687,20 @@ Could not resolve include <name> in include paths […]        # not line-prefix
 Match the exact wording, spacing, and punctuation of each. The `.diag` goldens are the
 authority; when in doubt, diff against them.
 
+**One entry in that list is not reachable as a diagnostic line.** `Could not resolve include <name>
+in include paths […]` is the message of an `IncludeFailedException` thrown from `Include.resolve`;
+nothing catches that exception, so on the CLI path it reaches the operator only inside
+`Failed to compile:` plus a stack trace — measured 2026-10-28 as `Exception in thread "main"
+org.legendofdragoon.scripting.IncludeFailedException: Could not resolve include
+missing_lib.fate in include paths []`. That is the class of output R1 treats as a defect, and
+`run_golden.py` does not compare it. The wording above therefore prescribes nothing for this case.
+The native tool prints a diagnostic of its own shape — `14: include file not found:
+missing_lib.fate`, with ` - no include path given, pass -L <dir>` when there is no `-L` and
+` asked for by <unit>` for a nested include — because copying a JVM exception message would put
+`include paths []` in front of users for a file they could go and create. That is a formatting
+choice under the two-layer rule (§8), not a parity claim: the case has no golden and is pinned by
+`cli_contract` instead.
+
 ### 7.8 Final name rewriting
 
 After the op list is complete:
@@ -764,21 +784,44 @@ message on **exit 1** (usage). Unknown subcommand → usage on **exit 1**.
 |---|---|
 | `0` | compiled, **no** diagnostics in the `errors` list, output written |
 | `1` | usage / CLI error (bad flags, missing required flag, unknown subcommand, unimplemented subcommand) |
-| `2` | I/O error that stops the run **before the program text is discussed**: missing or unreadable input, unwritable output, a missing or non-directory `-L` path, missing or malformed meta (no output written) |
-| `3` | compilation produced one or more diagnostics (output written **unless** the failure aborted emission, as in `p10`) |
+| `2` | a file the run needed could not be read, so nothing was compiled: missing or unreadable input, unwritable output, an output path that is also the input, a missing or non-directory `-L` path, missing or malformed meta, **or an unresolvable `include` of a `.fate` file** (no output written, and a pre-existing file at the output path is removed) |
+| `3` | compilation produced one or more diagnostics **and continued** (output written **unless** the failure aborted emission, as in `p10`) |
 
-**A diagnosed-but-continued compile is exit 3, not exit 2.** An include that cannot be resolved or
-read is a diagnostic and compilation continues: `FateCompiler.java:69-77` is
-`catch (final IOException e) { errors.add("Failed to load include " + e); continue; }`. The row
-above previously listed "an unresolvable `.fate` include (no output written)" under exit 2, which
-matched neither the implementation nor that code path; it was corrected on 2026-10-28 and the
-remaining difference is recorded rather than absorbed, because the reference's behaviour for a
-*clean* unresolvable include is a third thing again — `Include.java:24-26` throws
-`IncludeFailedException` from outside that `try`, `Shell.java:236` catches it, no output is
-written, and the run then **exits 0**, which is precisely the "malformed input degrading into a
-lesser failure class" that §8 prohibits. Whether the native tool keeps continuing (exit 3) or
-moves that case to exit 2 is open (§14 item 6); `c3_incdir_ok` pins the current behaviour as a
-*native* assertion, explicitly not as oracle-derived evidence.
+**Two different things were conflated in this section before 2026-10-28.** A *diagnosed and
+continued* compile is exit 3, and `FateCompiler.java:71-77` is that shape: `catch (final
+IOException e) { errors.add("Failed to load include " + e); continue; }` fires when an include
+**resolved but could not be read**, which is why its message interpolates the exception rather than
+a filename. An *unresolvable* `.fate` include never reaches that handler: `Include.resolve` is
+called at line 70, outside the `try`, and the `errors` list is never touched, so nothing is
+recorded that could later raise the exit status.
+
+Measured against the built oracle on 2026-10-28, rather than inferred: a missing include logs
+`Failed to compile:` plus `IncludeFailedException: Could not resolve include …` and its trace —
+caught by the `catch (final Throwable t)` at `Shell.java:236`, which swallows it and falls through
+to the end of `main` — **exit 0**, **no output file**, because `Files.writeString` sits on the line
+after the call that threw. Identical with no `-L` and with a valid `-L`. A `-L` path that is a
+plain file gives the same shape (the path resolves to nothing, so the include is reported
+unresolved). A `-L` path that does not exist is thrown at `Shell.java:281`, *outside* that `try`,
+stays uncaught, and gives **exit 1**. A valid include exits 0 and writes output. So on every probe
+the two tools agree on *what happens* — abort, nothing written — and differ only in the status code
+and the wording. Exit 0 on a run that compiled nothing is precisely the "a failure that also
+produces a deliverable" / "degrading into a lesser failure class" shape that §8 prohibits, and the
+native tool does not reproduce it.
+
+The owner ruled on 2026-10-28 that the native tool **aborts**: an include of a `.fate` file that
+resolves nowhere stops the compile immediately with exit 2 and no output, whether or not a `-L`
+path was given, and a stale file already sitting at the output path is removed rather than left
+there to be packaged under a failing exit. The earlier text of this section listed the case under
+exit 2 *and* simultaneously described continuing as the behaviour, which matched neither the
+reference nor our own code; both halves are replaced by the ruling.
+
+Three things keep that ruling honest. The abort applies only to tokens that end in `.fate`, so
+`include other.txt ;` and the trailing-space form still pass through verbatim (`c6` pins the
+gate). The message names the requesting unit — `1: include file not found: gone_deep.fate asked
+for by lvl1.fate` — because a nested include otherwise quotes a line number from a file other
+than the one being compiled. And `c3_valid_include_control` requires a *valid* include still to
+compile and write its output, which is what stops an abort-on-everything rule from reading as
+green.
 
 The reference exits 0 for almost everything; this contract is the explicit, owner-approved break
 (spec `spc-1793134462715-50393`). `exit(3)` ⇔ the `errors` list is non-empty.
@@ -931,14 +974,27 @@ comparison that would prove it is not implemented.
   available but emits line only, so adding either to default output would be a new divergence from
   the oracle rather than a conformance fix under ruling R1. It needs a recorded decision plus a
   `cli_contract` entry pinning the enhanced format.
-6. **Unresolvable `.fate` include: continue or abort?** Opened 2026-10-28 while implementing the
-   `-L` ruling. A clean missing include (`include missing_lib.fate;` with the file absent)
-   currently produces `Failed to load include missing_lib.fate` + `11: unknown function helper`,
-   exit 3, output written. The reference writes no output and exits 0 (§9.2 citation chain); the
-   phase-1 text asked for exit 2 and no output. Continuing is defensible under §8 (a real
-   diagnostic is still not "success"), but it is unpinned divergence and `c3_incdir_ok` asserts it
-   as *native*. Decide which of the three shapes is intended before more include-path behaviour is
-   specified.
+6. **Unresolvable `.fate` include: RESOLVED 2026-10-28 — abort, exit 2, no output.** Opened the
+   same day while implementing the `-L` ruling; the owner ruled that the compile stops, and the
+   reference was then measured rather than assumed (§9.2), which confirmed that aborting is also
+   what the reference does — it just declines to say so in its exit status. The shape it had
+   before — `Failed to load include missing_lib.fate` + `11: unknown function helper`, exit 3,
+   output written — is gone: a `.fate` include that resolves nowhere now prints one message naming
+   the missing file and the unit that asked for it, writes nothing, removes any file already at the
+   output path, and exits 2. Pinned by `c4_missing_include_with_path`, `c5_missing_include_no_path`,
+   `c9_include_after_valid_statements` (the include sits between two valid `def`s, so the abort is
+   exercised *after* real statements have been parsed — measured against the pre-abort build, that
+   case emitted 170 bytes beside `unknown function helper` and `unknown function other`),
+   `c7_stale_output_discarded` and (for the self-overwrite refusal)
+   `c8_refuses_input_as_output`, with `c3_valid_include_control`/`c6_trailing_space_gate` as the
+   controls that a resolvable include and a non-`.fate` include are untouched. All three of the
+   shapes under discussion collapsed into one: there is no longer a "diagnosed and continued" path
+   for a missing `.fate` file.
+   **Still open underneath:** `--no-antlr-fallback` is not implemented (a `.fate`-suffixed
+   include still passes the gate, which is the correct default). The include-directory search
+   order is *not* open: §5.1 gives `-L` dirs in argument order and never the including file's
+   directory, which was re-measured against the oracle on 2026-10-28 and is what the native
+   `resolveInclude()` does.
 
 ---
 

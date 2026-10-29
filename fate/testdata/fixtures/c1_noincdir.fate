@@ -1,11 +1,16 @@
 // Native CLI-contract fixture (Severed Chains Native, no upstream origin).
 // NOT oracle-derived: this pins the native exit-status contract, not reference output.
 //
-// `include missing_lib.fate;` names a file that exists nowhere, so a run with a usable
-// include path still compiles and answers with `Failed to load include` plus
-// `unknown function helper` (exit 3). With a `-L` path that is not a directory it must
-// stop before the program text is discussed: exit 2, nothing written. The fixture has to
-// be compilable for that reason - otherwise it would pin a path the check cannot reach.
+// `include missing_lib.fate;` names a file that exists nowhere, and it is deliberately
+// the FIRST line of executable text so that everything below it is "a statement after a
+// failed include". An unresolvable include is fatal (owner ruling 2026-10-28): the run
+// stops there with exit 2 and writes no output file, so `helper` is never reached and no
+// `unknown function` line is printed. With a `-L` path that is not a directory it stops
+// even earlier, before the program text is discussed.
+//
+// The file still has to be otherwise compilable. That is what makes the check mean
+// something: the same source compiles, emits and answers 3 when the include resolves, so
+// the 2 here is about the missing file and not about a source the tool cannot parse.
 include missing_lib.fate;
 def f(a) {
   helper(a);

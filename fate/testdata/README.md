@@ -7,7 +7,7 @@ only** — no code, and nothing here is read by a build.
 
 | Path | Contents |
 |---|---|
-| `fixtures/*.fate` | Fate Script sources fed to the compiler under test (20: 2 real + 17 probes + 1 CLI-contract source) |
+| `fixtures/*.fate` | Fate Script sources fed to the compiler under test (21: 2 real + 17 probes + 2 CLI-contract sources) |
 | `golden/<id>.expected` | byte-exact assembly text the reference produced for `<id>.fate` |
 | `golden/<id>.diag` | reference exit code, whether it wrote a file, and its reported diagnostics |
 | `manifest.json` | per-fixture arguments, expected outcome and parity ruling, plus a separate `cli_contract` table |
@@ -80,17 +80,31 @@ fail on bytes *and* diagnostics, so the divergence is visible rather than absorb
 and the two candidate fixes are recorded in `docs/research/fate-compile-design.md` §4.2 and §14
 item 2.
 
-**Native CLI-contract checks** (`cli_contract` in `manifest.json`). Three entries
-(`c1_missing_incdir`, `c2_incdir_is_file`, `c3_incdir_ok`) share the `c1_noincdir.fate` source and
-pin the exit class, the message, and whether a file was written for `-L` handling. They have no
-`.expected`/`.diag` pair and are **not** oracle-derived — for the missing-directory case the
-reference does something different on purpose (it aborts with exit 1), so there is no golden to
-agree with and ruling R1 does not apply. The harness reports them on their own line, marked
-*not derived from the oracle*, so nobody reads them as differential evidence. `c3` is a control:
-it uses a valid include path and requires the compile to proceed normally, which is what stops a
-guard that rejected every `-L` from reading as green. `$MISSING` and `$FIXTURES` are expanded into
-a private temporary directory and the fixture directory respectively; `-o` always points inside
-the temporary directory, so these runs cannot write into `fixtures/` or `golden/`.
+**Native CLI-contract checks** (`cli_contract` in `manifest.json`). Nine entries, `c1`
+through `c9`, in two families. `c1`/`c2` pin `-L` handling: a supplied include directory
+that is missing, or is a plain file, stops the run before the program text is discussed.
+`c4`/`c5`/`c9` pin the other family — a `def` body calling `helper`, guarded by an `include` of
+a file that exists nowhere, which is a fatal compile error rather than a diagnostic to
+collect and carry on past. `c9` is the case where that unresolvable include sits *between* two
+valid `def`s, so the failure happens after the tool has already parsed real callees: the
+contract is that nothing is written, not a half-built program whose call targets are
+undefined. `c3` (valid include, exit 0), `c6` (`include char_utils.fate ;`
+with the trailing space, which is not a file include at all) and `c7`/`c8` exist so that
+the first two families cannot be satisfied by a rule that rejects every include or deletes
+every output.
+
+They have no `.expected`/`.diag` pair and are **not** oracle-derived — for both families
+the reference does something different on purpose (it aborts with exit 1 on a bad include
+directory, and with a stack trace followed by exit 0 on an unresolvable include), so there
+is no golden to agree with and ruling R1 does not apply. The harness reports them on their
+own line, marked *not derived from the oracle*, so nobody reads them as differential
+evidence.
+
+`$MISSING` and `$FIXTURES` expand into a private temporary directory and the fixture
+directory respectively. Every entry runs with an explicit `-o` **inside that private
+directory**, so these runs cannot write into `fixtures/` or `golden/`; `c8` additionally
+compiles a *copy* of a fixture, so the entry that pins "no failing compile may damage its
+own source" cannot damage anything but a copy if it ever stops passing.
 
 **Two diagnostic modes** (`diag`). By default a fixture's stderr is compared with the
 message lines of `<id>.diag`: order-insensitive (the oracle captured `sorted(set(...))`, so

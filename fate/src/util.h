@@ -76,6 +76,19 @@ bool str_ends_with(Str s, const char* suffix);
  */
 bool path_is_dir(const char* path);
 
+/** @brief True when `path` names an existing regular file.
+ *
+ *  Used to decide whether a stale output file is worth removing: a directory, a device
+ *  such as `/dev/null`, or a socket is never "the previous run's output", and removing
+ *  one of those would be a bug rather than a cleanup. Follows symlinks, so a link to a
+ *  regular file counts as one.
+ *
+ *  @param path NUL-terminated path to test; NULL or "" answers false.
+ *  @return True only when the path exists and is a regular file.
+ *  @note Platform: `stat` on POSIX, `_stat` on MSVC; no third-party dependency.
+ */
+bool path_is_regular_file(const char* path);
+
 /** One block in the arena's chunk list. */
 typedef struct ArenaChunk
 {

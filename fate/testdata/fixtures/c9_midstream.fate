@@ -1,0 +1,18 @@
+// Native CLI-contract fixture, not an oracle golden (see ../README.md).
+//
+// The failing include sits BETWEEN two valid definitions, so the compile has already
+// parsed real statements by the time it cannot resolve the include. The contract pins
+// what happens next: the run stops there and produces no output file at all — not a
+// partial program whose `helper`/`other` targets have no definitions.
+
+def f(a) {
+  helper(a);
+  return;
+}
+
+include missing_lib.fate;
+
+def g(a) {
+  other(a);
+  return;
+}
