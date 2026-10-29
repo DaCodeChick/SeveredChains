@@ -192,7 +192,78 @@ instead of inheriting the host's order, which matters for big-endian hosts and
 for byte-exact golden tests. It is an implementation detail, not an exported API
 (psx-c-api.md §1).
 
-## 6. Open questions and gaps
+## 6. XA ADPCM (implemented 2026-10-29)
+
+Source of truth is `legend/core/spu/XaAdpcm.java` (the decoder). The
+`legend/core/audio/xa/XaTranscoder.java` file that shares the name is an offline
+Opus encoder and is not a hardware model.
+
+Four things were measured rather than assumed, because each one is a place where
+"obvious PS1 behaviour" and "what the reference does" part company:
+
+1. **The sector slice is the reference's, not the hardware's.** `XaAdpcm.java:89-90`
+   walks 18 portions of 128 bytes, reading control bytes at `4 + blk*2 (+1)` and
+   sample bytes at `16 + blk + i*4`. The documented CD-ROM XA Mode 2 Form 1 block
+   is normally described as an 8-byte header over 120 data bytes. The port
+   reproduces the reference and is exact against it; whether the reference matches
+   real hardware is **not established** and is an open question (§7), not a
+   resolved fact.
+2. **`filter` can only be 0..3.** `XaAdpcm.java:164` computes
+   `(b & 0x30) >> 4`. Both coefficient tables (`:22-23`) carry five entries, so
+   index 4 — `122` / `-60` — is unreachable dead data. The port keeps a
+   four-entry table, which is equivalent for every value the mask can produce.
+3. **`shift` can go negative.** `XaAdpcm.java:163` computes `12 - (b & 0x0F)`,
+   so a nibble-shift field of 13..15 yields -1..-3, and Java's `<<` on a negative
+   count uses `count & 31`. The port reproduces this through an explicit
+   `uint32_t` shift instead of relying on C's undefined behaviour, and the fixture
+   pins it with three badshift cases.
+4. **The prediction divide truncates.** `(+32)/64` in Java integer arithmetic
+   rounds toward zero, which is *not* an arithmetic `>> 6` for negative
+   predictions. The port uses truncating division to match.
+
+Points 3 and 4 are load-bearing, not theoretical: replacing truncating division
+with `>> 6` changes the output (`want -3694, got -3695`), as does dropping the
+`+32`. Both are covered by mutations (§7 of testing.md's non-vacuity rule).
+
+**The 8-bit flag is a deliberate behaviour difference.** The reference computes
+`is8BitPerSample` (`:84`) and then never uses it — an 8-bit sector is decoded as
+4-bit nibbles, producing noise. The port returns
+`PSX_ERROR_XA_UNSUPPORTED_CODING`. This is a divergence from the oracle, chosen
+because silently emitting noise is worse than refusing; it is pinned by a test
+rather than passed off as agreement.
+
+**State is per-stream, not process-wide.** The reference holds
+`oldL/olderL/oldR/olderR` in `static` fields. The port puts them in a
+caller-owned `psx_xa_stream_t`. For a single stream the output is bit-identical;
+the difference is that two sequences can no longer corrupt each other.
+
+### 6.1 The committed differential fixture
+
+`psx/testdata/xa_adpcm.bin` is 17 synthetic sectors, each carrying its coding
+byte and the reference's own PCM output. `psx/tools/xa_oracle.py` regenerates it
+by compiling and running the real `XaAdpcm.java` (needs a JDK 21+ and a fastutil
+jar; the committed `.bin` needs neither). Container is
+`"PSXXAFIX" + u32 version + u32 count +` per case
+`[u8 name_len, name, u8 coding, u32 sector_len, u32 pcm_len, sector, pcm]`,
+little-endian, with `pcm_len` a **byte** count (a sample-count reading would
+halve the payload and compare the wrong window). Full layout in
+`psx/testdata/README.md`.
+
+This is the **first committed** fixture in `psx/`, and it is deliberately a
+different class from the optional authentic-asset checks in testing.md §2.2: the
+input is synthetic, so it is always available, and `test_xa.cpp` **fails** when
+the file cannot be read instead of skipping. A skip would have been a way to
+report a pass that was not earned. `SC_PSX_ASSET_DIR` keeps its skip-with-
+visible-message behaviour because there the absence of data is expected.
+
+Coverage of the 17 cases, counted from the committed file: 88 704 expected
+samples, 63 094 non-zero (71.1%), 17 375 clamp-rail hits; shift values -3..12
+and all four reachable filter settings. Plus chained stereo (5 sectors) and mono
+(3 sectors) runs that carry predictor state across sector boundaries. An earlier
+draft of this section quoted 74.9% / 16858 from the scratch generator before the
+fixture was narrowed to 17 cases; the figures above are the committed ones.
+
+## 7. Open questions and gaps
 
 - **No retail game data available locally.** BPE/MRG/DEFF layouts are verified
   against the reference readers and against hand-built fixtures; they are not yet
@@ -206,5 +277,17 @@ for byte-exact golden tests. It is an implementation detail, not an exported API
   combat research (asset-pipeline.md §3) and out of scope here.
 - **TIM `trailingBytes`** is usually padding, but its meaning (palette animation
   data? alignment?) is not established by the reference. Reported as a count.
-- **DABA, TMD, ANM, SShd, SSSq, XA, ISO 9660** remain unimplemented
+- **DABA, TMD, ANM, SShd, SSSq, ISO 9660** remain unimplemented
   (psx-library.md §2 tracks them); nothing in this document describes them.
+- **XA block layout is verified against the reference only.** §6 item 1. If a
+  retail `DRGN0.BIN` is supplied, re-run the decode against a real XA track and
+  compare; agreement there would promote the layout from "reproduces the Java
+  decoder" to "reproduces the hardware". Until then the 128-byte portion stride
+  is a compatibility choice, not a hardware fact.
+- **No real XA data has been decoded.** The 17 fixture sectors are synthetic.
+  They cannot contain an 8-bit-coded sector, so the deliberate 8-bit divergence
+  (§6) has no observed instance in real data — it is a guard, not a fix for a
+  seen case.
+- **XA is tested single-threaded and single-stream.** The per-stream state change
+  (§6) removes the reference's cross-sequence hazard but nothing yet exercises
+  concurrent streams.

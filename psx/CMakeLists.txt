@@ -46,7 +46,8 @@ set(PSX_PUBLIC_HEADERS
   include/psx/export.h
   include/psx/psx.h
   include/psx/tim.h
-  include/psx/version.h)
+  include/psx/version.h
+  include/psx/xa.h)
 
 set(PSX_WRAPPER_HEADERS
   include/psx/cpp/archive.hpp
@@ -54,14 +55,16 @@ set(PSX_WRAPPER_HEADERS
   include/psx/cpp/bytes.hpp
   include/psx/cpp/error.hpp
   include/psx/cpp/psx.hpp
-  include/psx/cpp/tim.hpp)
+  include/psx/cpp/tim.hpp
+  include/psx/cpp/xa.hpp)
 
 set(PSX_CORE_SOURCES
   src/archive.c
   src/bpe.c
   src/error.c
   src/tim.c
-  src/version.c)
+  src/version.c
+  src/xa.c)
 
 # --- library version and ABI version, parsed from psx/version.h -------------
 # Single source of truth: the header the compiler sees, not a CMake duplicate.

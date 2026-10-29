@@ -63,6 +63,12 @@ const char* psx_error_name(psx_error_t error)
     case PSX_ERROR_DEFF_ENTRY_MISSING:
       return "DEFFEntryMissing";
 
+    /* --- XA (170..199) --- */
+    case PSX_ERROR_XA_UNSUPPORTED_CODING:
+      return "XAUnsupportedCoding";
+    case PSX_ERROR_XA_OUTPUT_TOO_LARGE:
+      return "XAOutputTooLarge";
+
     default:
       return "Unknown";
   }
@@ -123,6 +129,11 @@ const char* psx_error_message(psx_error_t error)
     case PSX_ERROR_DEFF_ENTRY_MISSING:
       return "no such DEFF subfile: the index is out of range or the range does not fit";
 
+    case PSX_ERROR_XA_UNSUPPORTED_CODING:
+      return "unsupported XA coding: the coding byte marks 8-bit samples, which have no decoder here";
+    case PSX_ERROR_XA_OUTPUT_TOO_LARGE:
+      return "XA output too small: the destination cannot hold this sector's samples";
+
     default:
       return "unrecognised psx error code";
   }
@@ -146,4 +157,9 @@ int psx_error_is_mrg(psx_error_t error)
 int psx_error_is_deff(psx_error_t error)
 {
   return error >= PSX_ERROR_DEFF_MAGIC && error <= PSX_ERROR_DEFF_ENTRY_MISSING;
+}
+
+int psx_error_is_xa(psx_error_t error)
+{
+  return error >= PSX_ERROR_XA_UNSUPPORTED_CODING && error <= PSX_ERROR_XA_OUTPUT_TOO_LARGE;
 }

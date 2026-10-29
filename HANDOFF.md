@@ -257,6 +257,59 @@ CLI surface: `--help`, argument validation, "missing required arg" messages, and
    unexercised — no fixture, no probe, no measurement — and the reference's `Failed to load include
    <exception>` message for it is unverified. Do not "align" it without measuring first.
 
+### 5.7 libpsx Tranche 1: XA delivered 2026-10-29 — read this before the next psx module
+
+`psx::xa` exists and is differential-tested. `psx::spu`, `sshd`, `sssq`, `gte`, `gpu`, `cdrom`,
+`tmd`, `tag` still do not. None of them blocks the renderer; the renderer is what blocks the
+roadmap (see §9).
+
+**What is actually verified.** 17 synthetic sectors, both single-sector (19 probes) and chained
+(5 stereo / 3 mono, predictor state carried across sector boundaries), byte-exact against the
+Java `XaAdpcm` executed in a scratch tree. 88 704 samples compared. Coverage counted from the
+committed fixture: 71.1% non-zero samples, 17 375 clamp-rail hits, shift values −3..12, all four
+reachable filter settings.
+
+**The differential is proven able to fail.** Seven mutations, each caught: filter coefficient
+115→116; per-call state reset; mono writing silence instead of duplicating; clamp replaced by
+16-bit wraparound; dropping the `+32`; `>>6` instead of truncating `/64`; L/R interleave swap.
+Baseline was 19/19 before and after. A harness that only ever passes proves nothing, so this was
+done deliberately, not as an afterthought.
+
+**Two documentation defects were found this way and are worth remembering as a class.**
+
+1. `xa.h` cited a symbol `PsxAudio18Bit` that does not exist anywhere in the reference tree.
+   Self-caught while checking, not by the user.
+2. `psx-library.md` asked for "the reference's exact pre-skip (312 samples) and gain behavior"
+   *inside the decoder*, while also demanding byte-exact agreement with the Java decoder. Those
+   two clauses contradict each other: `PRE_SKIP = 312` lives in `XaTranscoder.java:39` and is 312
+   leading zeros written into an Opus header for the Opus encoder, and the `>>= 1` gain happens in
+   `Fmv.java:425` after `decode` returns. Neither is a decoding step. An implementer following the
+   doc literally would have added a truncation that the oracle does not produce, and then had no
+   way to explain the mismatch.
+
+   **Rule: a doc citation is a claim. Open the file.** `grep` the symbol before repeating it.
+   This applies to anything carried over from a previous session, including anything marked ✅.
+
+**Numbers age.** The 74.9% / 16 858 figures that appeared in early drafts were measured on a
+19-sector scratch set; the committed fixture has 17 cases and its real numbers are 71.1% /
+17 375. Carrying a stale measurement forward is how a doc drifts away from the thing it describes.
+Re-measure, then write.
+
+**The fixture format has one trap.** `pcm_len` is a **byte** count, not a sample count. Reading it
+as samples halves the payload and silently compares the wrong window. `test_xa.cpp` and
+`psx/testdata/README.md` both say bytes; trust that pairing over any code that seems to disagree.
+
+**Also changed:** `psx/tests/abi_symbols.cmake` now lists the five new exports
+(`psx_xa_stream_init`, `psx_xa_coding_info`, `psx_xa_decoded_samples`, `psx_xa_decode_sector`,
+`psx_error_is_xa`) in its required set. The audit is a lower bound plus a `^psx_` shape rule, so
+without that listing a symbol that quietly stopped being exported would have passed on macOS.
+Verified non-vacuous: dropping `PSX_API` from `psx_xa_decode_sector` makes the audit report
+`missing export` and exit 1.
+
+**Still open in Tranche 1:** the CD-ROM sector reader (24-byte header + submode bits) is not
+written. Whether it becomes its own module or a helper inside `xa` is undecided — it is small, and
+nothing currently needs sector *submode* semantics, so do not build it speculatively.
+
 ---
 
 ## 6. Decisions already taken — do not re-litigate

@@ -166,7 +166,7 @@ C17 core has four distinct consumers:
 
 | Target / CTest entries | What it guarantees |
 |---|---|
-| `sc_tests_psx` — `psx.psx`, `psx.bpe`, `psx.tim`, `psx.archive`, `psx.wrapper`, `psx.clinkage` | Format behaviour through the C++23 wrappers (41 cases), wrapper delegation/move-semantics/RAII/error-propagation/span-borrowing, and that the C header is usable from C++ under `extern "C"` |
+| `sc_tests_psx` — `psx.psx`, `psx.bpe`, `psx.tim`, `psx.xa`, `psx.archive`, `psx.wrapper`, `psx.clinkage` | Format behaviour through the C++23 wrappers (52 cases: psx 2, bpe 9, tim 11, xa 11, archive 10, wrapper 8, clinkage 1), wrapper delegation/move-semantics/RAII/error-propagation/span-borrowing, and that the C header is usable from C++ under `extern "C"` |
 | `psx.c_consumer` (`sc_psx_c_consumer`) | A **pure C17** program (C compiler only, `-Wall -Wextra -Wshadow -Wconversion -Wmissing-prototypes -Wstrict-prototypes -pedantic`) exercises every entry point, every documented error code, NULL-argument rejection and the malformed-input contract: 261 checks. This is the target that answers "is the API really usable without C++?" |
 | `psx.abi.symbols` | Export-surface audit: exactly the documented symbols are exported, none undocumented, no C++ mangled symbol exported *or* referenced. Reads the symbol table with `nm` on ELF/Mach-O and the **PE export table** (`objdump -p`/`dumpbin /EXPORTS`) on a `.dll` — the method follows the artifact, so a cross-built Windows DLL is auditable from any host. Runs for both shared and static builds |
 | `psx.differential` (`-DPSX_ENABLE_DIFFERENTIAL_TEST=ON`) | Old-vs-new equivalence against the frozen pre-migration C++ implementation over a deterministic corpus incl. boundary probing (psx-c-api.md §10) |
@@ -202,10 +202,32 @@ Decoding expectations:
   (incl. B+1/4F), per-primitive constant depth, CLUT/chroma-key paths.
 - **Decoders**: BPE (compress→decompress identity + captured real segment),
   MRG (virtual entries, sector alignment), DEFF, TIM/DABA (all BPPs),
-  TMD/CTMD (all primitive classes + `ctmdFlags`), ANM, XA (**sample-exact
-  PCM vs the Java `XaAdpcm`/`XaTranscoder` fixtures, incl. the 312 pre-skip**), <!-- naming-allow: Java class names cited verbatim -->
-  SShd/SSSq parse, ISO9660 tree (synthetic disc fixture), Tag
+  TMD/CTMD (all primitive classes + `ctmdFlags`), ANM, XA (sample-exact PCM
+  delivered 2026-10-29 — the next two bullets say what that did and did not
+  cover), SShd/SSSq parse, ISO9660 tree (synthetic disc fixture), Tag
   (serialize/deserialize identity + real save bytes, opt-in lane).
+- **XA is exact against the Java decoder, and its scope was corrected on the way.**
+  The expectation here used to read "sample-exact PCM vs the Java
+  `XaAdpcm`/`XaTranscoder` fixtures, incl. the 312 pre-skip" <!-- naming-allow: reference class names cited verbatim -->
+  — those two clauses contradict each other. Pre-skip is not a decoding step:
+  `PRE_SKIP = 312` is a transcoder-only constant that writes 312 leading zeros
+  into an Opus header, and the `>>= 1` gain happens in the FMV player after
+  `decode` returns. Reproducing either inside the decoder would have broken the
+  byte-exact clause it sat next to. Delivered scope and the deliberate 8-bit
+  divergence are written up in psx-formats.md §6; fixture is
+  `psx/testdata/xa_adpcm.bin`, 88 704 samples.
+- **Two classes of differential fixture, and the difference matters.** The
+  authentic-asset lanes (`SC_PSX_ASSET_DIR`, retail `DRGN0.BIN`) are optional and
+  **skip with a visible message** when the data is absent, because absence there
+  is expected. The XA fixture is synthetic, committed, and always available, so
+  `test_xa.cpp` **fails** when it cannot be read — a skip there would report a
+  pass that was not earned, and would also hide a broken checkout. Do not
+  generalise the §2.2 skip rule to committed synthetic fixtures.
+- **A differential harness must be shown able to fail.** The XA run is accompanied
+  by seven mutations (filter coefficient, per-call state reset, mono duplication,
+  clamp→wraparound, dropped `+32`, arithmetic-vs-truncating divide, L/R interleave
+  swap), each of which produces mismatches against a 19/19 baseline. A future
+  decoder lane is not done until it has the same demonstration.
 - Malformed input: truncation/corruption at every offset class → the
   specific `psx_error_t` / `psx::Error` code (fuzzed — §3), asserted identically from
   C and C++.

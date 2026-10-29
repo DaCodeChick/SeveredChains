@@ -59,6 +59,10 @@ enum class Error : int
   DEFFTableTruncated = PSX_ERROR_DEFF_TABLE_TRUNCATED, ///< Subfile table exceeds the buffer.
   DEFFOffsetsBad = PSX_ERROR_DEFF_OFFSETS_BAD,         ///< Subfile starts not monotonic.
   DEFFEntryMissing = PSX_ERROR_DEFF_ENTRY_MISSING,     ///< Index out of range.
+
+  // --- XA audio (170..199) --------------------------------------------------
+  XAUnsupportedCoding = PSX_ERROR_XA_UNSUPPORTED_CODING, ///< Coding byte asks for 8-bit.
+  XAOutputTooLarge = PSX_ERROR_XA_OUTPUT_TOO_LARGE,      ///< Output span cannot hold a sector.
 };
 
 /* The C++ enumerators must keep the C values: the wrapper translates by cast, and
@@ -86,6 +90,8 @@ static_assert(static_cast<int>(Error::DEFFMagic) == PSX_ERROR_DEFF_MAGIC);
 static_assert(static_cast<int>(Error::DEFFTableTruncated) == PSX_ERROR_DEFF_TABLE_TRUNCATED);
 static_assert(static_cast<int>(Error::DEFFOffsetsBad) == PSX_ERROR_DEFF_OFFSETS_BAD);
 static_assert(static_cast<int>(Error::DEFFEntryMissing) == PSX_ERROR_DEFF_ENTRY_MISSING);
+static_assert(static_cast<int>(Error::XAUnsupportedCoding) == PSX_ERROR_XA_UNSUPPORTED_CODING);
+static_assert(static_cast<int>(Error::XAOutputTooLarge) == PSX_ERROR_XA_OUTPUT_TOO_LARGE);
 
 /// @brief Human-readable name for an Error value (logs, tests, crash context).
 /// @param Code Any Error value; a code the library never produced yields

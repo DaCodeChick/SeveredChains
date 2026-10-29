@@ -11,8 +11,9 @@
 ///  - psx_bpe_*   — adaptive byte-pair codec used by the disc (bpe.h)
 ///  - psx_tim_*   — TIM texture images (tim.h)
 ///  - psx_archive_* / psx_mrg_* / psx_deff_* — MRG / DEFF containers (archive.h)
+///  - psx_xa_*    — XA 4-bit ADPCM sector decoding (xa.h)
 ///
-/// Documented but not yet implemented (psx-library.md §2): gte, gpu, spu, xa,
+/// Documented but not yet implemented (psx-library.md §2): gte, gpu, spu,
 /// sssq, cdrom, tmd, anm, tag. Nothing here guesses at their layouts; each lands
 /// with the evidence and golden tests that pin it down.
 ///
@@ -25,4 +26,5 @@
 #include "psx/error.h"
 #include "psx/export.h"
 #include "psx/tim.h"
+#include "psx/xa.h"
 #include "psx/version.h"

@@ -175,10 +175,13 @@ set(_psx_required
     psx_version_major psx_version_minor psx_version_patch psx_version_string psx_abi_version
     # error
     psx_error_name psx_error_message psx_error_is_bpe psx_error_is_tim psx_error_is_mrg psx_error_is_deff
+    psx_error_is_xa
     # bpe
     psx_bpe_is_bpe psx_bpe_declared_size psx_bpe_decompress psx_bpe_compressed_size psx_bpe_compress
     # tim
     psx_tim_is_tim psx_tim_parse psx_tim_clut_entry_count psx_tim_image_init
+    # xa
+    psx_xa_stream_init psx_xa_coding_info psx_xa_decoded_samples psx_xa_decode_sector
     # archive
     psx_archive_is_mrg psx_archive_is_deff
     psx_archive_mrg_entry_count psx_archive_mrg_parse

@@ -113,7 +113,21 @@ typedef enum
   ///        container.
   PSX_ERROR_DEFF_OFFSETS_BAD = 142,
   /// @brief Subfile index is out of range.
-  PSX_ERROR_DEFF_ENTRY_MISSING = 143
+  PSX_ERROR_DEFF_ENTRY_MISSING = 143,
+
+  /* --- XA audio (170..199) ---------------------------------------------- */
+
+  /// @brief The coding byte asked for something the decoder does not implement:
+  ///        8-bit samples (coding bit 4). Decoding such data as 4-bit ADPCM
+  ///        would produce noise rather than an error, so it is refused.
+  /// @note Coding bit 2 (the 18900 Hz flag) is deliberately **not** an error.
+  ///       There is no resampler in this build, so the flag is informational and
+  ///       the caller decides what to do about the rate.
+  PSX_ERROR_XA_UNSUPPORTED_CODING = 170,
+  /// @brief The output buffer cannot hold the interleaved sample count this
+  ///        sector produces (4032 stereo / 8064 mono, x2 bytes each). Nothing is
+  ///        written; query psx_xa_decoded_samples() for the exact requirement.
+  PSX_ERROR_XA_OUTPUT_TOO_LARGE = 171
 } psx_error_t;
 
 /// @brief ABI guard: `psx_error_t` crosses the shared-library boundary as a function
@@ -170,6 +184,12 @@ PSX_API int psx_error_is_mrg(psx_error_t error);
 /// @return Non-zero when the code is a DEFF failure.
 /// @note Thread: pure function, no state — thread-safe.
 PSX_API int psx_error_is_deff(psx_error_t error);
+
+/// @brief Whether a code belongs to the XA audio group (170..199).
+/// @param Error Code to classify.
+/// @return Non-zero when the code is an XA decoding failure.
+/// @note Thread: pure function, no state — thread-safe.
+PSX_API int psx_error_is_xa(psx_error_t error);
 
 #ifdef __cplusplus
 } /* extern "C" */

@@ -745,6 +745,150 @@ static void test_deff(void)
   printf("[  OK  ] c.deff_parse_slice_and_handles\n");
 }
 
+/* --- XA ADPCM -------------------------------------------------------------- */
+
+/* Deterministic nibble filler (xorshift32). No libc RNG and no fixture file:
+   the C consumer has to reproduce byte for byte on every host, which is the
+   only way it can assert a *difference* as well as a match. */
+static uint32_t g_xa_rng = 0x12345678u;
+
+static uint8_t xa_next_byte(void)
+{
+  g_xa_rng ^= g_xa_rng << 13u;
+  g_xa_rng ^= g_xa_rng >> 17u;
+  g_xa_rng ^= g_xa_rng << 5u;
+  return (uint8_t)(g_xa_rng & 0xffu);
+}
+
+/// @brief Fill a sector whose predictor is actually live.
+///
+/// Control bytes carry filter index 2 (coefficients 115 / -52). Without feedback
+/// the prediction term is identically zero, so a test that compares "carried
+/// history" against "fresh history" would pass even if the decoder ignored its
+/// own state. Every state-sensitive check below depends on this helper, and each
+/// one asserts a *difference*, so a silent loss of feedback fails loudly.
+static void xa_build_sector(uint8_t* sector, size_t len)
+{
+  for (size_t i = 0; i < len; ++i)
+    sector[i] = xa_next_byte();
+  for (size_t p = 0; p < 18u && 24u + p * 128u + 128u <= len; ++p)
+  {
+    const size_t base = 24u + p * 128u;
+    for (size_t k = 4u; k < 12u; ++k)
+      sector[base + k] = (uint8_t)0x24; /* shift field 4, filter index 2 */
+  }
+}
+
+static void test_xa(void)
+{
+  printf("[ RUN  ] c.xa_decode_and_rejects\n");
+
+  static uint8_t sector[2352];
+  static uint8_t out[16128];
+  static uint8_t one_shot[16128];
+  static uint8_t again[16128];
+  static uint8_t carried[16128];
+  size_t written = 0;
+  uint8_t info = 0;
+  size_t samples = 0;
+
+  /* --- coding_info: reads byte 19, and refuses a sector that has no byte 19. */
+  memset(sector, 0, sizeof(sector));
+  sector[19] = (uint8_t)0x05;
+  check_eq_err(psx_xa_coding_info((psx_bytes_t){sector, sizeof(sector)}, &info), PSX_OK, "coding_info reads byte 19");
+  CHECK(info == 0x05u);
+  info = 0;
+  check_eq_err(psx_xa_coding_info((psx_bytes_t){sector, sizeof(sector)}, NULL), PSX_ERROR_INVALID_ARGUMENT,
+               "coding_info refuses a null out");
+  check_eq_err(psx_xa_coding_info((psx_bytes_t){sector, 19u}, &info), PSX_ERROR_TRUNCATED,
+               "coding_info refuses a sector without byte 19");
+  CHECK(info == 0u); /* documented: unmodified on failure */
+
+  /* --- size the destination from the header, not from a worst case. -------- */
+  check_eq_err(psx_xa_decoded_samples(0x05u, &samples), PSX_OK, "stereo size query");
+  check_eq_u64(samples, 4032ull, "a stereo sector is 4032 interleaved samples");
+  check_eq_err(psx_xa_decoded_samples(0x04u, &samples), PSX_OK, "mono size query");
+  check_eq_u64(samples, 8064ull, "a mono sector widens to 8064, duplicated L=R");
+  samples = 0;
+  check_eq_err(psx_xa_decoded_samples(0x15u, &samples), PSX_ERROR_XA_UNSUPPORTED_CODING,
+               "8-bit coding is refused, not decoded as 4-bit nibbles");
+  CHECK(samples == 0u);
+  check_eq_err(psx_xa_decoded_samples(0x05u, NULL), PSX_ERROR_INVALID_ARGUMENT, "size query refuses a null out");
+
+  xa_build_sector(sector, sizeof(sector));
+
+  /* --- one-shot decode: NULL stream means no state, in either direction. --- */
+  check_eq_err(
+      psx_xa_decode_sector(NULL, (psx_bytes_t){sector, sizeof(sector)}, 0x05u, (psx_writable_bytes_t){out, sizeof(out)},
+                           &written),
+      PSX_OK, "one-shot decode");
+  check_eq_u64(written, 4032ull, "one-shot wrote a full stereo sector");
+  memcpy(one_shot, out, written * 2u);
+
+  /* --- rejection paths, each isolated so one cannot mask another. ---------- */
+  check_eq_err(
+      psx_xa_decode_sector(NULL, (psx_bytes_t){sector, sizeof(sector)}, 0x05u, (psx_writable_bytes_t){out, sizeof(out)},
+                           NULL),
+      PSX_ERROR_INVALID_ARGUMENT, "decode refuses a null out_samples");
+  check_eq_err(
+      psx_xa_decode_sector(NULL, (psx_bytes_t){sector, 2327u}, 0x05u, (psx_writable_bytes_t){out, sizeof(out)},
+                           &written),
+      PSX_ERROR_TRUNCATED, "2327 bytes is one short of the minimum");
+  check_eq_err(
+      psx_xa_decode_sector(NULL, (psx_bytes_t){sector, 2328u}, 0x05u, (psx_writable_bytes_t){out, sizeof(out)},
+                           &written),
+      PSX_OK, "2328 bytes is exactly the minimum");
+  check_eq_err(
+      psx_xa_decode_sector(NULL, (psx_bytes_t){sector, sizeof(sector)}, 0x15u, (psx_writable_bytes_t){out, sizeof(out)},
+                           &written),
+      PSX_ERROR_XA_UNSUPPORTED_CODING, "decode refuses 8-bit coding");
+  check_eq_err(
+      psx_xa_decode_sector(NULL, (psx_bytes_t){sector, sizeof(sector)}, 0x05u, (psx_writable_bytes_t){out, 16u},
+                           &written),
+      PSX_ERROR_XA_OUTPUT_TOO_LARGE, "decode refuses an undersized destination");
+
+  /* --- independence: the reference keeps these taps in process-wide statics.
+     A second stream must not see the first one's tail, or two tracks would
+     cross-contaminate. This is the property the per-stream design exists for, so
+     it is checked from C as well as from C++. ---------------------------------*/
+  psx_xa_stream_t primed;
+  psx_xa_stream_t clean;
+  psx_xa_stream_init(&primed);
+  psx_xa_stream_init(&clean);
+  CHECK(primed.prev[0] == 0 && primed.prev[1] == 0 && primed.prev2[0] == 0 && primed.prev2[1] == 0);
+
+  check_eq_err(
+      psx_xa_decode_sector(&primed, (psx_bytes_t){sector, sizeof(sector)}, 0x05u,
+                           (psx_writable_bytes_t){carried, sizeof(carried)}, &written),
+      PSX_OK, "first decode through a stream");
+  CHECK(memcmp(carried, one_shot, written * 2u) == 0); /* zero history == one-shot */
+
+  check_eq_err(
+      psx_xa_decode_sector(&clean, (psx_bytes_t){sector, sizeof(sector)}, 0x05u,
+                           (psx_writable_bytes_t){again, sizeof(again)}, &written),
+      PSX_OK, "a fresh stream is unaffected by a used one");
+  CHECK(memcmp(again, one_shot, written * 2u) == 0);
+
+  /* And the primed stream must now differ, otherwise none of the above proves
+     anything: identical results would mean the taps are never read. */
+  check_eq_err(
+      psx_xa_decode_sector(&primed, (psx_bytes_t){sector, sizeof(sector)}, 0x05u,
+                           (psx_writable_bytes_t){carried, sizeof(carried)}, &written),
+      PSX_OK, "second decode through the primed stream");
+  CHECK(memcmp(carried, one_shot, written * 2u) != 0);
+  CHECK(primed.prev[0] != 0 || primed.prev[1] != 0);
+
+  /* --- classification and names. ------------------------------------------- */
+  CHECK(psx_error_is_xa(PSX_ERROR_XA_UNSUPPORTED_CODING));
+  CHECK(psx_error_is_xa(PSX_ERROR_XA_OUTPUT_TOO_LARGE));
+  CHECK(!psx_error_is_xa(PSX_ERROR_TRUNCATED));
+  CHECK(!psx_error_is_xa(PSX_OK));
+  CHECK(psx_error_name(PSX_ERROR_XA_OUTPUT_TOO_LARGE)[0] != '\0');
+  CHECK(psx_error_message(PSX_ERROR_XA_UNSUPPORTED_CODING)[0] != '\0');
+
+  printf("[  OK  ] c.xa_decode_and_rejects\n");
+}
+
 /* ========================================================================== */
 int main(void)
 {
@@ -756,6 +900,7 @@ int main(void)
   test_tim();
   test_mrg();
   test_deff();
+  test_xa();
 
   printf("%d check(s), %d failed\n", g_checks, g_failed);
   return g_failed;

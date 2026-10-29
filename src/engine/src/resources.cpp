@@ -232,6 +232,7 @@ Status ToStatus(psx::Error err) noexcept
     case E::MRGMagic:
     case E::DEFFMagic:
       return Status::DecodeHeader;
+
     case E::MRGTableTruncated:
     case E::DEFFTableTruncated:
       return Status::DecodeTruncated;
@@ -241,6 +242,15 @@ Status ToStatus(psx::Error err) noexcept
     case E::MRGEntryMissing:
     case E::DEFFEntryMissing:
       return Status::InvalidArgument;
+
+    case E::XAUnsupportedCoding:
+      // 8-bit XA is a recognised variant that has no decoder here, which is what
+      // DecodeUnsupported means. It is not corruption: a valid 8-bit sector is
+      // not a malformed 4-bit one, and reporting it as corrupt would invite a
+      // retry or a discard of good data.
+      return Status::DecodeUnsupported;
+    case E::XAOutputTooLarge:
+      return Status::IOTooLarge; // Same shape as BPEOutputTooLarge.
   }
   return Status::Error;
 }

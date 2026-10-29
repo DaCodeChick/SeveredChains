@@ -14,6 +14,7 @@ add_executable(sc_tests_psx
   test_bpe.cpp
   test_tim.cpp
   test_archive.cpp
+  test_xa.cpp
   test_wrapper.cpp
   test_c_linkage.cpp)
 target_link_libraries(sc_tests_psx PRIVATE psx::cpp)
@@ -46,7 +47,14 @@ if(DEFINED SC_PSX_ASSET_DIR)
   target_compile_definitions(sc_tests_psx PRIVATE SC_PSX_ASSET_DIR="${SC_PSX_ASSET_DIR}")
 endif()
 
-foreach(group psx bpe tim archive wrapper clinkage)
+# The XA goldens are the opposite case: synthetic input, reference-generated
+# expected output, committed to the repository. There is no host condition under
+# which they may legitimately be absent, so the path is always defined and
+# test_xa.cpp fails rather than skips when it cannot be read.
+target_compile_definitions(sc_tests_psx PRIVATE
+  PSX_XA_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/../testdata/xa_adpcm.bin")
+
+foreach(group psx bpe tim xa archive wrapper clinkage)
   add_test(NAME psx.${group} COMMAND sc_tests_psx ${group})
 endforeach()
 
