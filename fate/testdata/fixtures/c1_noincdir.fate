@@ -1,0 +1,13 @@
+// Native CLI-contract fixture (Severed Chains Native, no upstream origin).
+// NOT oracle-derived: this pins the native exit-status contract, not reference output.
+//
+// `include missing_lib.fate;` names a file that exists nowhere, so a run with a usable
+// include path still compiles and answers with `Failed to load include` plus
+// `unknown function helper` (exit 3). With a `-L` path that is not a directory it must
+// stop before the program text is discussed: exit 2, nothing written. The fixture has to
+// be compilable for that reason - otherwise it would pin a path the check cannot reach.
+include missing_lib.fate;
+def f(a) {
+  helper(a);
+  return;
+}

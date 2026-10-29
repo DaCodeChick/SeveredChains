@@ -7,10 +7,10 @@ only** — no code, and nothing here is read by a build.
 
 | Path | Contents |
 |---|---|
-| `fixtures/*.fate` | Fate Script sources fed to the compiler under test (19: 2 real + 17 probes) |
+| `fixtures/*.fate` | Fate Script sources fed to the compiler under test (20: 2 real + 17 probes + 1 CLI-contract source) |
 | `golden/<id>.expected` | byte-exact assembly text the reference produced for `<id>.fate` |
 | `golden/<id>.diag` | reference exit code, whether it wrote a file, and its reported diagnostics |
-| `manifest.json` | per-fixture arguments, expected outcome, and the parity ruling |
+| `manifest.json` | per-fixture arguments, expected outcome and parity ruling, plus a separate `cli_contract` table |
 | `run_golden.py` | the differential harness: runs `fate compile` per fixture and compares |
 
 ## Provenance
@@ -65,11 +65,32 @@ means "this machine tested nothing", which is why the CI step prints a `NOT VERI
 instead of treating it as coverage.
 
 **Two parity modes** (`parity` in `manifest.json`). `match` (18 fixtures) requires byte
-equality. `deviation` (`p12_forloop`) is for input that is not valid Fate: the reference's
-output there is an ANTLR error-recovery artifact, so the harness instead requires exit
-status 3, no crash, and that the output *differs* from the golden — and it reports an
-obsolete pin if the output ever matches again, so a stale pin cannot outlive the divergence
-that justified it.
+equality — that is the default and it applies to every fixture whose source is valid Fate.
+`deviation` (`p12_forloop`) is for input that is not valid Fate: the reference's output there is
+an ANTLR error-recovery artifact, so the harness instead requires exit status 3, no crash, and
+that the output *differs* from the golden — and it reports an obsolete pin if the output ever
+matches again, so a stale pin cannot outlive the divergence that justified it.
+
+The `p12` pin is a **test pin, not a claim of semantic equivalence** (owner ruling 2026-10-28,
+decision 3). Checking it surfaced that our recovery rule 2 is not local: after the malformed
+`for(...)` header the parser consumes the remainder of the function body, so valid statements
+following the bad one are dropped. Because that mechanism can destroy valid code, the fixture
+stays an open issue; flipping `parity` to `match` in a copy of this directory makes the harness
+fail on bytes *and* diagnostics, so the divergence is visible rather than absorbed. The reproducer
+and the two candidate fixes are recorded in `docs/research/fate-compile-design.md` §4.2 and §14
+item 2.
+
+**Native CLI-contract checks** (`cli_contract` in `manifest.json`). Three entries
+(`c1_missing_incdir`, `c2_incdir_is_file`, `c3_incdir_ok`) share the `c1_noincdir.fate` source and
+pin the exit class, the message, and whether a file was written for `-L` handling. They have no
+`.expected`/`.diag` pair and are **not** oracle-derived — for the missing-directory case the
+reference does something different on purpose (it aborts with exit 1), so there is no golden to
+agree with and ruling R1 does not apply. The harness reports them on their own line, marked
+*not derived from the oracle*, so nobody reads them as differential evidence. `c3` is a control:
+it uses a valid include path and requires the compile to proceed normally, which is what stops a
+guard that rejected every `-L` from reading as green. `$MISSING` and `$FIXTURES` are expanded into
+a private temporary directory and the fixture directory respectively; `-o` always points inside
+the temporary directory, so these runs cannot write into `fixtures/` or `golden/`.
 
 **Two diagnostic modes** (`diag`). By default a fixture's stderr is compared with the
 message lines of `<id>.diag`: order-insensitive (the oracle captured `sorted(set(...))`, so
@@ -84,7 +105,8 @@ passing quietly.
 **Inputs are read-only.** Every `fixtures/*.fate`, `golden/*.expected` and `golden/*.diag`
 file is hashed before the sweep and re-hashed after it; a run that mutates one of them fails,
 naming every changed file. This exists because two probe scripts in this project's history
-redirected output onto fixture paths and truncated them while the suite stayed green.
+redirected output onto fixture paths and truncated them while the suite stayed green. The same
+rule applies to hand-run probes: always pass `-o` to a path outside this directory.
 
 ## Why a meta bundle is part of the recipe
 

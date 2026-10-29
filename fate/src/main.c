@@ -200,10 +200,15 @@ int main(int argc, char** argv)
       opt.metaDir = argv[++i];
     else if (strcmp(a, "-L") == 0 && i + 1 < argc)
     {
-      if (job.includeDirCount < FATE_MAX_INCLUDE_DIRS)
-        job.includeDirs[job.includeDirCount++] = argv[++i];
-      else
-        ++i;
+      /* A dropped `-L` would silently change where includes resolve, so a full table is
+       * a usage error rather than something to ignore. */
+      if (job.includeDirCount == FATE_MAX_INCLUDE_DIRS)
+      {
+        fprintf(stderr, "too many -L directories (limit %d)\n", FATE_MAX_INCLUDE_DIRS);
+        return 1;
+      }
+
+      job.includeDirs[job.includeDirCount++] = argv[++i];
     }
     else if (a[0] == '-' && a[1] != '\0')
     {
@@ -237,6 +242,30 @@ int main(int argc, char** argv)
   {
     fprintf(stderr, "could not read metadata from %s\n", opt.metaDir);
     return 2;
+  }
+
+  /* An include directory that the command line had to name explicitly is an input, not
+   * a hint. Checked here — before any source is read and before anything is emitted —
+   * because letting it pass turns an environment mistake into per-function
+   * `unknown function` diagnostics and a non-empty program (owner ruling 2026-10-28,
+   * decision 1): a supplied `-L` path that cannot be read is exit 2, with no output
+   * file, and it is reported before the program text is discussed.
+   *
+   * The reference aborts with exit 1 in this situation. That status is deliberately NOT
+   * reproduced: the native 0/1/2/3 contract maps "a path the command line supplied
+   * cannot be read" to 2, and R1 does not override the exit-code contract. The reference
+   * makes the same check for the same reason - `Shell.readIncludeDirs` (Shell.java:273-286)
+   * throws `IncludeFailedException("Include dir <path> does not exist")`, and it throws
+   * outside the compile `try`, so nothing is caught and nothing is written. Pinned by
+   * `c1_missing_incdir` / `c2_incdir_is_file`, with `c3_incdir_ok` as the control that a
+   * usable `-L` still compiles (fate/testdata/manifest.json, `cli_contract`). */
+  for (int i = 0; i < job.includeDirCount; i++)
+  {
+    if (!path_is_dir(job.includeDirs[i]))
+    {
+      fprintf(stderr, "no such include directory: %s\n", job.includeDirs[i]);
+      return 2;
+    }
   }
 
   job.diag.buf.arena = &job.arena;

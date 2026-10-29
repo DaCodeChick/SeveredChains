@@ -61,6 +61,21 @@ bool str_ieq_cstr(Str s, const char* lit);
 /** True when the slice ends with the given NUL-terminated suffix. */
 bool str_ends_with(Str s, const char* suffix);
 
+/** @brief True when `path` names an existing directory.
+ *
+ *  Exists for the command line: an include path the user had to type is an input, so
+ *  "the filesystem has no such directory" is an I/O failure (exit 2), not a compile
+ *  diagnostic (exit 3). A trailing `/` or `\` is not part of the name for this test,
+ *  so `/tmp/inc` and `/tmp/inc/` answer the same way; a symlink to a directory counts
+ *  as one. Nothing is cached and nothing is allocated.
+ *
+ *  @param path NUL-terminated path to test; NULL or "" answers false.
+ *  @return True only when the path exists, is readable, and is a directory.
+ *  @note Platform: `stat` on POSIX, `_stat` on MSVC; no third-party dependency.
+ *  @note Thread: single-threaded, no lock, reads the filesystem on every call.
+ */
+bool path_is_dir(const char* path);
+
 /** One block in the arena's chunk list. */
 typedef struct ArenaChunk
 {

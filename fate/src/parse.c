@@ -15,7 +15,7 @@
  * --------------
  * ANTLR's default recovery strategy is a behaviour, not just a diagnostic path: three
  * goldens (`p8_badhex`, `p12_forloop`, `p13_incl`) only match byte-for-byte if
- * recovery behaves the same way. The rules implemented here are:
+ * recovery behaves the same way. Two of them do. The rules implemented here are:
  *
  *   1. A statement that parses but is not terminated by `;` has its offending tokens
  *      silently deleted if a `;` is reachable within the statement (single-token
@@ -28,6 +28,16 @@
  * This is calibrated against the three goldens, not derived from ANTLR's source. It
  * is deliberately narrower than ANTLR's full strategy, and inputs outside the golden
  * corpus may diverge. That is a known, accepted limit (design doc §14 decision 2).
+ *
+ * @note Open defect, measured 2026-10-28 (design doc §4.2, §14 item 2): rule 2 is not
+ * local. `p12_forloop` is the proof, and it is pinned as a *deviation*, not as matching
+ * output. A malformed `for(...)` header consumes the rest of the function body, so
+ * statements that are individually valid (`bar(a);`, `baz(a);`, `return;`) disappear; the
+ * reference's recovery emits the body statement instead. `for` is not a keyword, so no
+ * valid identifier is captured by this and no fixture in the corpus reaches the path - but
+ * semantic non-interference with valid source is unproven, so do not describe this
+ * recovery as equivalent to ANTLR's, and do not extend a rule 2 skip without
+ * re-measuring against the oracle.
  *
  * @note Thread: single-threaded.
  */

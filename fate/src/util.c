@@ -6,6 +6,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <sys/stat.h>
+
 #define ARENA_CHUNK (256u * 1024u)
 #define PRINT_MAX 4096
 
@@ -195,4 +197,33 @@ void buf_put_lower(Buf* b, Str s)
       c = (char)(c - 'A' + 'a');
     buf_putc(b, c);
   }
+}
+
+/* Kept as a yes/no rather than a Status because `main` already knows what to do with a
+ * path it cannot use; the value here only decides whether to do it. */
+bool path_is_dir(const char* path)
+{
+  if (path == NULL || path[0] == '\0')
+    return false;
+
+  char buf[1024];
+  size_t n = strlen(path);
+
+  if (n >= sizeof(buf))
+    return false;
+
+  memcpy(buf, path, n);
+
+  while (n > 1 && (buf[n - 1] == '/' || buf[n - 1] == '\\'))
+    --n;
+
+  buf[n] = '\0';
+
+#if defined(_MSC_VER)
+  struct _stat st;
+  return _stat(buf, &st) == 0 && (st.st_mode & _S_IFMT) == _S_IFDIR;
+#else
+  struct stat st;
+  return stat(buf, &st) == 0 && S_ISDIR(st.st_mode);
+#endif
 }

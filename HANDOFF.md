@@ -115,8 +115,19 @@ write inside `~/Documents/GitHub/Script-Recompiler`** — read-only reference re
 *deliberate deviation* from the reference, which exits 0 even when it logs errors. `p15` exits 3
 here and `exit=0` in `p15_argcount.diag` — that is correct, not a bug.
 
-**Two parity modes** in `manifest.json`: `"match"` (18) needs byte equality; `"deviation"` (`p12`)
-needs exit 3 + no crash + output *differs*. Mismatches on **valid** source are defects.
+**`-L` paths are validated before the source is read** (decision 1, 2026-10-28): a
+non-directory `-L` prints `no such include directory: <path>`, exits `2`, writes nothing. Before
+that it decayed into `Failed to load include` + `unknown function` at exit `3`, which the contract
+forbids. More than 32 `-L` entries exits `1` (it used to be silently ignored).
+
+**Three tables in `manifest.json`**, not two: `fixtures` (19 oracle comparisons) and
+`cli_contract` (3 native checks, `c1`/`c2`/`c3`, no golden — reported on their own line as *not
+derived from the oracle*, because for the missing-directory case the reference deliberately
+behaves differently, exiting 1).
+
+**Two parity modes** in `manifest.json`: `"match"` (18) needs byte equality — that is the default
+for valid source; `"deviation"` (`p12`) needs exit 3 + no crash + output *differs*. Mismatches on
+**valid** source are defects. The `p12` pin is **open, not accepted**: see §5.6.
 
 **Two diagnostic modes**: a fixture's stderr is compared against its `.diag` (order-insensitive,
 multiset-strict, reference crash lines filtered out), unless the entry says `"diag": "unpinned"`,
@@ -156,14 +167,21 @@ implemented". It is now implemented, on both sides of the pair:
   nothing, and one that prints one invented message, each produce failures naming the
   fixture, the expected line and the actual line.
 
-Still open here, and deliberately not "fixed": `p12_forloop`'s missing pair (`return lists
-are not the same size`, `unknown function for`) exists in the reference only because ANTLR
-recovers `for(...) {` as a call to a function named `for` — pinned as `"diag": "unpinned"`
-and printed as NOT VERIFIED. The reference emits **no diagnostic codes** anywhere in the
-19 `.diag` files, so the "stable diagnostic codes" half of `spc-1793131198334-17871` has
-nothing to match against; inventing our own would be a new divergence under R1. Specs
-`spc-1793131198334-17871` and `spc-1793139055396-44131` can move from *open* once the
-column/code question is ruled on, not before.
+Two things were re-ruled here on 2026-10-28 (decision 2), and the *shape* of the answer matters:
+
+- Diagnostic **semantics** (which conditions are diagnosed, in what order, on which carrier) are
+  settled by the oracle. Diagnostic **format** (codes, columns) is a native enhancement that may
+  only be added as an additive machine-readable channel — JSON report, `file:line:col:` prefix,
+  `--format=llvm` — never by rewriting the golden's default plain text.
+- **Never fabricate a source location to satisfy a template.** The reference has column data
+  available (`Token.getCharPositionInLine()`) and uses only `getLine()`; the lexer's own messages
+  carry real columns, which is why `p9` can print `line 3:5 …` honestly.
+- So the "stable codes / columns" half of `spc-1793131198334-17871` is no longer an unmeetable
+  parity target — it is a feature with a place to be pinned (`cli_contract`). Nobody should invent
+  an `FATE-E0001` string and call it parity.
+
+`p12_forloop`'s missing diagnostic pair stays `"diag": "unpinned"`, and §5.6 records why it is not
+"accepted" either.
 
 ### 5.2 CI is written but has never run (blocked, needs a decision)
 
@@ -184,11 +202,10 @@ the 3 `fate-toolchain` legs build the tool and **skip** the golden test (printed
 under `fate/testdata/local-meta/` would make them real. That is a licensing/scope call —
 **do not do it unilaterally.**
 
-### 5.4 Nothing from this session is committed
+### 5.4 Nothing from these two sessions is committed
 
-The repository exists (see the header), but everything from this session — the four parity fixes,
-the harness rewrite, the manifest changes and the restored fixture corpus — is uncommitted
-working-tree state (9 modified files, no new ones). HEAD contains the **pre-damage** fixtures, so
+`git status` is 8 modified files + 1 new fixture (`fate/testdata/fixtures/c1_noincdir.fate`), no
+commit made. HEAD contains the **pre-damage** fixtures, so
 `git checkout -- fate/testdata/fixtures` would have restored the corpus in one command. The manual
 restore from the `/tmp` snapshot happens to be byte-identical to HEAD (empty `git diff` against
 HEAD for all 19), which is the integrity proof — and also luck, not process. Committing is the
@@ -197,7 +214,28 @@ user's call; no destructive git operation may be used to "fix" mistakes.
 ### 5.5 Then F3
 
 CLI surface: `--help`, argument validation, "missing required arg" messages, and keeping
-`exit()`/`abort()` out of every file except `main.c`.
+`exit()`/`abort()` out of every file except `main.c` (that last still holds: they appear only in
+`main.c`).
+
+### 5.6 Two open issues, both found while checking, neither fixed unilaterally
+
+1. **Parse recovery rule 2 is not local.** A malformed statement swallows the *rest of the
+   function body*, including valid statements. Reproducer: `foo(a); for(var i = 0; i < 3; i++)
+   { bar(a); } baz(a); return;` emits `gosub inl[:foo]` + `incr undefined` and stops — `bar(a)`,
+   `baz(a)`, `return` are gone, and the reported `function "f" missing return` is a consequence of
+   the eaten `return`. `for(...)` is invalid Fate so no fixture hits it, and `for` is not a keyword
+   (`for(a);` lowers like `foo(a);`; `var for = 1;` is an ordinary variable), but that is evidence
+   about *probes*, not a proof that valid source cannot reach the path. **Therefore
+   `p12_forloop` stays an open issue and must not be described as conformant** (decision 3).
+   Closing it needs either local recovery re-measured against the oracle, or an oracle-generated
+   golden pinned as a permanent divergence.
+2. **Unresolvable `.fate` include: continue or abort?** `include missing_lib.fate;` with the file
+   absent currently gives `Failed to load include …` + `11: unknown function helper`, exit 3, with
+   output written. The reference writes no output and exits 0 (`Include.java:24-26` throws,
+   `Shell.java:236` catches it, and the write is inside the same `try`); the phase-1 design text
+   asked for exit 2 and no output. Design doc §9.2 now documents all three shapes instead of
+   pretending they agree, and `c3_incdir_ok` pins the current behaviour **as native**, so changing
+   it is a visible edit rather than silent drift.
 
 ---
 
@@ -220,6 +258,16 @@ CLI surface: `--help`, argument validation, "missing required arg" messages, and
 8. Project default stays C17; only the `fate` target is C23. Measured fact: **all 7 fate `.c`
    files currently compile clean under `-std=c17`** — nothing requires C23 yet; the probe guards
    the declared standard for future use.
+9. **Ruling of 2026-10-28 (three decisions, implemented or filed this session).** (a) A missing or
+   non-directory `-L` path is an I/O error: exit `2`, message names the path, no output; the
+   reference's exit `1` is *not* reproduced, because R1 covers diagnostics and emitted text, not
+   the exit contract. (b) Diagnostic codes and compile-diagnostic columns stay **native
+   enhancements in an additive channel**; the oracle governs semantics only; no fabricated source
+   locations. (c) A pinned deviation is allowed only after checking that it does not alter
+   valid-source semantics — and for `p12` that check **did not establish** equivalence, so the
+   issue is open (§5.6). Nothing in this ruling licenses expanding scope: implementing a
+   `for`-loop desugaring, matching ANTLR recovery in general, and adding `FATE-E000x` strings are
+   explicitly *not* authorised by it.
 
 ---
 
@@ -270,13 +318,17 @@ CLI surface: `--help`, argument validation, "missing required arg" messages, and
 
 ## 9. Suggested first moves for the next session
 
-1. **Commit the verified state** (the user's call). Nine modified files sit uncommitted, including
-   the four parity fixes and the harness rewrite. Before committing, re-run both gates and `ctest`
-   at the root — the 30/30 figure is pre-edit evidence. Pushing to `origin` is what would make CI
-   run for the first time, and that is a separate decision from committing.
-2. **Ask the user about 5.2 / 5.3 / 5.4** (git + CI execution + synthetic meta) before
-   building anything that assumes an answer.
+1. **Commit the verified state** (the user's call). Eight modified files and one new fixture sit
+   uncommitted, including the `-L` guard, the harness changes and the manifest's `cli_contract`
+   table. Before committing, re-run both gates and `ctest` at the root — the 30/30 figure is
+   pre-edit evidence. Pushing to `origin` is what would make CI run for the first time, and that
+   is a separate decision from committing.
+2. **Ask the user about 5.2 / 5.3 / 5.4** (git + CI execution + synthetic meta) and **§5.6** (the
+   two open issues) before building anything that assumes an answer.
 3. Whatever you change: re-run `run_golden.py`, both gates, and `ctest` (expect 30/30). A
    change that makes 19/19 match is *suspicious*, not good — it means the p12 pin went stale.
    The harness now also fails if any input file changes during a run, so that check needs no
    human memory anymore.
+4. **Never run a probe against the real `testdata` tree**, and never let a stub write to a
+   positional argument that might be a source file (see §7). `cli_contract` puts `-o` inside a
+   private temporary directory for exactly this reason; hand-run probes must do the same.

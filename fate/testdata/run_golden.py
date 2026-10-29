@@ -47,7 +47,15 @@ Two kinds of byte-parity entry, set by `parity` in manifest.json:
 
 `expect` drives the exit-status check: `clean` and `silent-wrong` want exit 0,
 `warnings` wants exit 0 with stderr (the tab class: printed, but not errors-list
-entries), `diagnostics` and `crash` want exit 3. `exit` overrides it verbatim.
+entries), `diagnostics` and `crash` want exit 3, `io-error` wants exit 2. `exit`
+overrides it verbatim.
+
+A second, smaller table - `cli_contract` in manifest.json - pins the native command-line
+contract rather than reference output. Those entries have no `.expected`/`.diag` pair and
+are NOT oracle-derived: for the include-path case the reference does something different
+on purpose (it aborts with exit 1, which ruling R1 does not extend to, and the 0/1/2/3
+contract is not overridden by it). They are reported separately so nobody reads them as
+differential evidence about the reference.
 
 The metadata bundle is NOT committed. It is read from `$FATE_META_DIR` when set, and
 otherwise from a small list of local locations. If the goldens, the binary or the
@@ -78,6 +86,7 @@ EXPECT_EXIT = {
     "warnings": 0,
     "diagnostics": 3,
     "crash": 3,
+    "io-error": 2,
 }
 
 CRASH_BANNER = "Failed to compile:"
@@ -185,6 +194,75 @@ def check_diagnostics(entry: dict, golden: pathlib.Path, fid: str,
     return state, failures
 
 
+def want_exit_for(entry: dict) -> int | None:
+    """Exit status a fixture or CLI-contract entry must answer with, or None if the
+    manifest names a class this harness does not know (which is itself a failure)."""
+    override = entry.get("exit")
+
+    if override is not None:
+        return override
+
+    return EXPECT_EXIT.get(entry.get("expect", "clean"))
+
+
+def check_cli_contract(entry: dict, binary: pathlib.Path, meta: pathlib.Path,
+                       fixtures: pathlib.Path) -> tuple[list[str], str]:
+    """Run one native CLI-contract entry and return (failures, summary line).
+
+    Unlike the fixture loop there is no golden to compare against: what is pinned here
+    is the exit class, the message that must appear, and whether a file was written. The
+    `$MISSING` token expands to a path inside a private temporary directory that is never
+    created, so the check does not depend on what happens to exist under `/tmp`.
+    """
+    cid = entry["id"]
+    src = fixtures / entry.get("source", f"{cid}.fate")
+
+    if not src.is_file():
+        return [f"{cid}: missing source {src.name}"], ""
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_dir = pathlib.Path(tmp)
+        out = tmp_dir / "out.txt"
+        missing = tmp_dir / "no-such-include-dir"
+        cmd = [str(binary), "compile", "-m", str(meta), *entry.get("args", []),
+               "-o", str(out), str(src)]
+        cmd = [a.replace("$FIXTURES", str(fixtures)).replace("$MISSING", str(missing))
+               for a in cmd]
+
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        except subprocess.TimeoutExpired:
+            return [f"{cid}: timed out after 30s"], ""
+
+        failures: list[str] = []
+        want_exit = want_exit_for(entry)
+
+        if want_exit is None:
+            return [f"{cid}: manifest 'expect' is not a known class: "
+                    f"{entry.get('expect')}"], ""
+
+        if proc.returncode != want_exit:
+            failures.append(f"{cid}: exit {proc.returncode}, contract expects "
+                            f"{want_exit} (expect={entry.get('expect')})")
+
+        for needle in entry.get("stderr_must_contain", []):
+            if needle not in proc.stderr:
+                failures.append(f"{cid}: stderr does not contain {needle!r}; got "
+                                f"{proc.stderr.strip()!r}")
+
+        wrote = out.is_file() and out.stat().st_size > 0
+
+        if entry.get("writes_output", False) and not wrote:
+            failures.append(f"{cid}: expected output to be written, none was "
+                            f"(rc={proc.returncode})")
+
+        if not entry.get("writes_output", False) and wrote:
+            failures.append(f"{cid}: expected no output, got {out.stat().st_size} bytes "
+                            f"(rc={proc.returncode})")
+
+        return failures, f"{cid}: exit {proc.returncode}"
+
+
 def main(argv: list[str]) -> int:
     if len(argv) < 3:
         print(f"usage: {sys.argv[0]} <fate-binary> <testdata-dir>")
@@ -212,7 +290,8 @@ def main(argv: list[str]) -> int:
               "Severed-Chains/patches/meta)")
         return SKIP
 
-    entries = json.loads(manifest.read_text())["fixtures"]
+    doc = json.loads(manifest.read_text())
+    entries = doc["fixtures"]
 
     # The fixture set is an input, not scratch space. Two incidents so far were probes
     # that redirected output onto a fixture path and truncated it, and the suite stayed
@@ -305,19 +384,32 @@ def main(argv: list[str]) -> int:
                 continue
 
             # --- axis 3: exit status ------------------------------------------------
-            want_exit = entry.get("exit")
+            want_exit = want_exit_for(entry)
 
             if want_exit is None:
-                expect = entry.get("expect", "clean")
-                want_exit = EXPECT_EXIT.get(expect)
-
-                if want_exit is None:
-                    failures.append(f"{fid}: manifest 'expect' is not a known class: {expect}")
-                    continue
+                failures.append(f"{fid}: manifest 'expect' is not a known class: "
+                                f"{entry.get('expect', 'clean')}")
+                continue
 
             if proc.returncode != want_exit:
                 failures.append(f"{fid}: exit {proc.returncode}, manifest expects "
                                 f"{want_exit} (expect={entry.get('expect')})")
+
+    # --- native CLI contract ---------------------------------------------------------
+    # No golden involved: these entries pin the exit class and the message of paths
+    # where the native contract deliberately differs from the reference. They are listed
+    # here so that difference is tested, and reported as native-only.
+    cli_checked = 0
+    cli_ok = 0
+
+    for entry in doc.get("cli_contract", []):
+        cli_checked += 1
+        cli_fails, _note = check_cli_contract(entry, binary, meta, fixtures)
+
+        if cli_fails:
+            failures.extend(cli_fails)
+        else:
+            cli_ok += 1
 
     mutated = [str(p.relative_to(testdata)) for p, digest in inputs.items()
                if fingerprint([p])[p] != digest]
@@ -331,6 +423,10 @@ def main(argv: list[str]) -> int:
 
     for n in notes:
         print(n)
+
+    if cli_checked:
+        print(f"fate cli contract: {cli_ok}/{cli_checked} native check(s) passed "
+              f"(pinned by the native contract, not derived from the oracle)")
 
     if failures:
         print(f"\n{len(failures)} check(s) did not match the oracle "

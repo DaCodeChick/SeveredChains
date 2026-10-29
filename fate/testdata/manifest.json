@@ -128,11 +128,11 @@
    "expect": "diagnostics",
    "parity": "deviation",
    "ruling": "R1 2026-10-27, refined 2026-10-28 (decision 1)",
-   "note": "`for` is not a keyword and `for(...)` matches no parser rule, so this input is NOT valid Fate. The reference's 152-byte output is a by-product of ANTLR's default error recovery: it recovers `for(...) {` as a call to a function named `for` and emits `gosub inl[:for]`, which would assemble into a non-working script. Per ruling R1 refined by decision 1, recovery artefacts on invalid source are documented, not reproduced. Pinned properties: diagnosed failure (exit 3), no crash, output differs. The reference itself exits 0 with errors; the native 0/1/2/3 contract is not overridden by R1, so exit 3 is intended, not a deviation from the contract.",
+   "note": "`for` is not a keyword and `for(...)` matches no parser rule, so this input is NOT valid Fate. The reference's 152-byte output is a by-product of ANTLR's default error recovery: it recovers `for(...) {` as a call to a function named `for` and emits `gosub inl[:for]`, which would assemble into a non-working script. Per ruling R1 refined by decision 1, recovery artefacts on invalid source are documented, not reproduced. Pinned properties: diagnosed failure (exit 3), no crash, output differs. The reference itself exits 0 with errors; the native 0/1/2/3 contract is not overridden by R1, so exit 3 is intended, not a deviation from the contract. Decision 3 (2026-10-28) narrows that: a pinned deviation is allowed only where non-interference with valid source has been checked, and here it has not. Status: OPEN, not accepted.",
    "valid_source": false,
    "diag_count": 4,
    "diag": "unpinned",
-   "diag_note": "The reference logs four diagnostics here; the tool logs two (`3: function \"f\" missing return` and `4: variable \"i\" is not defined in the current scope`). The missing pair is `3: function \"f\" return lists are not the same size` and `4: unknown function for`, and both exist only because ANTLR recovers `for(...) {` as a call to a function named `for`. That is the recovery by-product decision 1 keeps out of scope, so the harness reports this fixture's diagnostics as NOT VERIFIED instead of comparing them."
+   "diag_note": "The reference logs four diagnostics here; the tool logs two (`3: function \"f\" missing return` and `4: variable \"i\" is not defined in the current scope`). The missing pair is `3: function \"f\" return lists are not the same size` and `4: unknown function for`, and both exist only because ANTLR recovers `for(...) {` as a call to a function named `for`. That is the recovery by-product decision 1 keeps out of scope, so the harness reports this fixture's diagnostics as NOT VERIFIED instead of comparing them. Status 2026-10-28 (decision 3): this fixture is an OPEN issue, not an accepted deviation. Checking whether the deviation alters valid-source semantics showed that recovery rule 2 is not local - it consumes the rest of the function body, so statements that are individually valid after the bad one are dropped. Probe: `foo(a); for(var i = 0; i < 3; i++) { bar(a); } baz(a); return;` emits `gosub inl[:foo]` + `incr undefined` and stops, losing `bar(a)`, `baz(a)` and `return`; the reference emits the body statement. Semantic non-interference is therefore unproven - do not read this fixture as conformant. Reproducer and candidate fixes: docs/research/fate-compile-design.md \u00a74.2 and \u00a714 item 2."
   },
   {
    "id": "p13_incl",
@@ -178,6 +178,52 @@
    "parity": "match",
    "valid_source": true,
    "note": "String escape handling in a legal position (string argument to a known engine call). Exercises \\n, escaped \\\" and escaped \\\\ against the lexer rule STRING = '\"' (ESC_SEQ | ~('\\\\'|'\"'))* '\"' with ESC_SEQ = '\\\\' [n\"\\\\]. Valid Fate source, so byte-parity is required."
+  }
+ ],
+ "cli_contract": [
+  {
+   "id": "c1_missing_incdir",
+   "source": "c1_noincdir.fate",
+   "args": [
+    "-L",
+    "$MISSING"
+   ],
+   "expect": "io-error",
+   "stderr_must_contain": [
+    "no such include directory: "
+   ],
+   "provenance": "native",
+   "note": "Owner ruling 2026-10-28 (decision 1): an explicitly supplied `-L` path that is not a readable directory is an I/O failure, reported at once with the path named, answering exit 2 and writing nothing. Before that ruling a missing include directory was ignored and degraded into `Failed to load include` plus a per-function `unknown function` at exit 3, which is the shape the exit contract forbids (malformed input must not decay into a lesser failure class). The reference aborts with exit 1 here; that status is deliberately NOT reproduced - ruling R1 covers diagnostics and emitted text, and it does not override the 0/1/2/3 contract. `$MISSING` expands to a path inside the run's private temporary directory that is never created, so the check does not depend on what happens to exist under /tmp."
+  },
+  {
+   "id": "c2_incdir_is_file",
+   "source": "c1_noincdir.fate",
+   "args": [
+    "-L",
+    "$FIXTURES/p1_min.fate"
+   ],
+   "expect": "io-error",
+   "stderr_must_contain": [
+    "no such include directory: "
+   ],
+   "provenance": "native",
+   "note": "The other way to fail the same guard: `-L` naming something that exists but is not a directory. One message covers both cases because the operator mistake and its fix are the same."
+  },
+  {
+   "id": "c3_incdir_ok",
+   "source": "c1_noincdir.fate",
+   "args": [
+    "-L",
+    "$FIXTURES"
+   ],
+   "expect": "diagnostics",
+   "writes_output": true,
+   "stderr_must_contain": [
+    "Failed to load include missing_lib.fate",
+    "11: unknown function helper"
+   ],
+   "provenance": "native",
+   "note": "Control for the two checks above: with a usable include path the same source must still compile, still report the unresolvable include and the unknown callee, and still write its output. Without this control, a guard that rejected every `-L` would read as green."
   }
  ]
 }

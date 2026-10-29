@@ -357,6 +357,19 @@ The implementer should treat the recovery policy as the single highest-risk item
 milestone and validate it against `p8`/`p12`/`p13` first, in isolation, before building the rest
 of codegen on top.
 
+**Measured state (2026-10-28).** `p8_badhex` and `p13_incl` match byte-for-byte; `p12_forloop`
+does not, and the reason is not cosmetic: our recovery rule 2 is **not local**. The malformed
+`for(...)` header makes the parser consume the rest of the function body, so the individually valid
+statements after it (`bar(a);`, `baz(a);`, `return;`) are dropped, while the reference's ANTLR
+recovery emits the body statement (`incr inl[:f_a]` — see
+`fate/testdata/golden/p12_forloop.expected`). A `for(...)` header is not valid Fate, and nothing
+in the current corpus reaches this path: `for` is not a keyword, so `for(a);` lowers as
+`gosub inl[:for]` + `unknown function for` exactly like `foo(a);`, and `var for = 1;` lowers as an
+ordinary variable. But because the mechanism destroys valid statements that follow an invalid one,
+**semantic non-interference is unproven, and `p12_forloop` stays an open issue rather than an
+accepted deviation** (§14 item 2). Removing the manifest pin makes the harness fail on bytes *and*
+diagnostics, so the divergence cannot be silently absorbed.
+
 ---
 
 ## 5. Preprocessor pass (pass 1)
@@ -685,8 +698,23 @@ After the op list is complete:
   `diag.h`) covers: `Ok`, `Usage`, `IO` (missing/unreadable input, unwritable output, missing
   include dir, missing/bad meta), `Compile` (one or more diagnostics), `OutOfMemory`.
 * Deep components (lexer, parser, codegen, meta) return `Status` and never call `exit()`.
-* Diagnostics carry file/line/column + code + message. The `errors` list (§7.7) is the
-  compilation-diagnostic carrier.
+* **Diagnostic shape is two-layer, and the layers are not interchangeable** (owner ruling
+  2026-10-28, amending `spc-1793131198334-17871`). *Reference-compatible semantics* — which
+  conditions are diagnosed, in what order, and the `errors` list (§7.7) as their carrier — come
+  from the oracle and are compared byte-for-byte. *Native formatting enhancements* (stable
+  `FATE-E000x` codes, column numbers) may only be added as **additive machine-readable channels**:
+  a companion JSON report, `file:line:col:` prefixes, or a `--format=llvm` mode. They must never
+  be added by rewriting the golden's default plain-text bytes.
+* **Never fabricate a source location to satisfy a template.** A column is emitted only where a
+  real position exists. The lexer already records real columns and its messages carry a real
+  `line:col`; compile diagnostics print the line only, which is also what the reference emits —
+  ANTLR's `Token` exposes `getCharPositionInLine()`, and `FatePreprocessor.java:34` /
+  `FateCompilerVisitor.java:32` use only `getLine()`. No `.diag` in the corpus contains a code or
+  a compile-diagnostic column, so emitting either changes the default output format and needs a
+  recorded decision plus fixtures that pin the enhanced format. Native-format expectations belong
+  in the `cli_contract` table of `fate/testdata/manifest.json` (run by `run_golden.py`, reported
+  separately from the oracle comparisons), so a future `--format=llvm`/JSON work package has
+  somewhere to pin its expected output without disturbing the byte-parity corpus.
 * **Malformed input must never degrade into success**: a compile that produced any diagnostic
   exits 3, never 0.
 
@@ -709,6 +737,17 @@ message on **exit 1** (usage). Unknown subcommand → usage on **exit 1**.
 | `-m <dir>` / `--meta <dir>` | meta bundle directory (required) | — |
 | `-w <dir>` / `--work-dir <dir>` | working dir for relative paths | CWD |
 
+* **`-L` directories are validated before the program text is read** (2026-10-28). Every entry
+  must exist and be a directory; otherwise `no such include directory: <path>` is printed and the
+  tool answers **exit 2** without writing output. More than `FATE_MAX_INCLUDE_DIRS` (32) entries is
+  a usage error → **exit 1**. Before this, a missing directory was silently ignored and decayed
+  into `Failed to load include` + a per-function `unknown function` at exit 3 — the shape §8
+  forbids. The reference performs the same check (`Shell.java:273-286`, `readIncludeDirs` throws
+  `Include dir <path> does not exist`) and, because that throw happens outside the compile `try`,
+  it exits 1 with a stack trace; **that status is deliberately not reproduced** — ruling R1 covers
+  diagnostics and emitted text, and it does not override the exit contract.
+* `FATE_MAX_INCLUDE_DIRS` overflow is an error, not silent truncation (2026-10-28).
+
 * **`--dump-ast`** (debug, development only): after parsing, print the parse tree (node kind +
   token text, indented) to stdout and stop before codegen. It is a developer aid for the
   recovery-policy work (§4.2); it is not part of the differential test, changes no golden, and
@@ -725,8 +764,21 @@ message on **exit 1** (usage). Unknown subcommand → usage on **exit 1**.
 |---|---|
 | `0` | compiled, **no** diagnostics in the `errors` list, output written |
 | `1` | usage / CLI error (bad flags, missing required flag, unknown subcommand, unimplemented subcommand) |
-| `2` | I/O error: missing or unreadable input, unwritable output, missing `-L` dir, missing/bad meta, or an unresolvable `.fate` include (no output written) |
+| `2` | I/O error that stops the run **before the program text is discussed**: missing or unreadable input, unwritable output, a missing or non-directory `-L` path, missing or malformed meta (no output written) |
 | `3` | compilation produced one or more diagnostics (output written **unless** the failure aborted emission, as in `p10`) |
+
+**A diagnosed-but-continued compile is exit 3, not exit 2.** An include that cannot be resolved or
+read is a diagnostic and compilation continues: `FateCompiler.java:69-77` is
+`catch (final IOException e) { errors.add("Failed to load include " + e); continue; }`. The row
+above previously listed "an unresolvable `.fate` include (no output written)" under exit 2, which
+matched neither the implementation nor that code path; it was corrected on 2026-10-28 and the
+remaining difference is recorded rather than absorbed, because the reference's behaviour for a
+*clean* unresolvable include is a third thing again — `Include.java:24-26` throws
+`IncludeFailedException` from outside that `try`, `Shell.java:236` catches it, no output is
+written, and the run then **exits 0**, which is precisely the "malformed input degrading into a
+lesser failure class" that §8 prohibits. Whether the native tool keeps continuing (exit 3) or
+moves that case to exit 2 is open (§14 item 6); `c3_incdir_ok` pins the current behaviour as a
+*native* assertion, explicitly not as oracle-derived evidence.
 
 The reference exits 0 for almost everything; this contract is the explicit, owner-approved break
 (spec `spc-1793134462715-50393`). `exit(3)` ⇔ the `errors` list is non-empty.
@@ -839,6 +891,18 @@ comparison that would prove it is not implemented.
    `p8`/`p12`/`p13`. Confirm it is acceptable that inputs outside the golden corpus may diverge
    from the reference's ANTLR by-product, with any such divergence promoted to a new
    fixture+golden when found. *Proposed: acceptable.*
+   **Status (2026-10-28): a divergence has been found, and it is NOT promoted to an accepted
+   deviation.** A `for(...)` header is invalid input, so the current corpus is unaffected, but our
+   recovery rule 2 swallows the statements that follow it, including valid ones: for
+   `foo(a); for(var i = 0; i < 3; i++) { bar(a); } baz(a); return;` the native tool emits
+   `gosub inl[:foo]` then `incr undefined` and stops — `bar(a)`, `baz(a)` and `return` are lost,
+   and the reported `1: function "f" missing return` is itself a consequence of the swallowed
+   `return`. The reference emits the body statement instead, so semantic non-interference is
+   **unproven** and, per the owner's 2026-10-28 ruling, `p12_forloop` is *not* declared
+   conformant. Two honest ways to close it: (a) make recovery local — resume at the next statement
+   boundary without eating the body — and re-measure against the reference, or (b) pin the
+   reference output with an oracle-generated golden and treat the difference as permanent. Both
+   need the oracle; neither has been done unilaterally.
 3. **Unterminated-string and a few untested paths** (string as a global table, `id[…]` enum
    lookup, `rel` table emission, `wait` copy) have no golden yet. They are specified here from
    the source, but the owner should confirm we should add fixtures+goldens for them in this
@@ -855,15 +919,26 @@ comparison that would prove it is not implemented.
    of output. Committing a small *synthetic* (non-retail) meta bundle under
    `fate/testdata/local-meta/` would make those legs actually test output; that needs an explicit
    decision about fixture licensing, so it has not been done unilaterally.
-5. **Diagnostic format.** Compile diagnostics are `line: message` (e.g. `3: function "f"
-  missing return`), which is what the reference writes into the `.diag` captures; lexer
-  complaints keep the reference's own shape, `line <L>:<C> token recognition error at: '<c>'`,
-  go to stderr, do **not** enter the errors list and therefore do not affect the exit code
-  (that is why `p9` exits 0). Implemented 2026-10-28 and compared by the harness. §14 of the
-  phase-1 doc also asks for column numbers on compile diagnostics and stable codes
-  (e.g. `FATE-E0002`): still open, and note that **no `.diag` in the corpus contains a code
-  or a compile-diagnostic column**, so adding either would be a new divergence from the
-  oracle rather than a conformance fix under ruling R1.
+5. **Diagnostic format.** Two layers, per §8 (owner ruling 2026-10-28): the oracle decides
+  diagnostic *semantics* — which conditions are diagnosed, in which order, on which carrier — and
+  native formatting is an additive machine-readable channel. Compile diagnostics are `line:
+  message` (e.g. `3: function "f" missing return`), which is what the reference writes into the
+  `.diag` captures; lexer complaints keep the reference's own shape, `line <L>:<C> token
+  recognition error at: '<c>'`, go to stderr, do **not** enter the errors list and therefore do
+  not affect the exit code (that is why `p9` exits 0). Implemented 2026-10-28 and compared by the
+  harness. Codes and columns remain permitted as additive channels only: **no `.diag` in the
+  corpus contains a code or a compile-diagnostic column**, and the reference has column data
+  available but emits line only, so adding either to default output would be a new divergence from
+  the oracle rather than a conformance fix under ruling R1. It needs a recorded decision plus a
+  `cli_contract` entry pinning the enhanced format.
+6. **Unresolvable `.fate` include: continue or abort?** Opened 2026-10-28 while implementing the
+   `-L` ruling. A clean missing include (`include missing_lib.fate;` with the file absent)
+   currently produces `Failed to load include missing_lib.fate` + `11: unknown function helper`,
+   exit 3, output written. The reference writes no output and exits 0 (§9.2 citation chain); the
+   phase-1 text asked for exit 2 and no output. Continuing is defensible under §8 (a real
+   diagnostic is still not "success"), but it is unpinned divergence and `c3_incdir_ok` asserts it
+   as *native*. Decide which of the three shapes is intended before more include-path behaviour is
+   specified.
 
 ---
 

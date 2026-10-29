@@ -239,9 +239,12 @@ Decoding expectations:
   re-runs the oracle and fails on drift; it exits **77 (skip)** with a visible message when the
   oracle cannot run, so a machine without a JDK never reports a pass it did not earn. Comparison
   is byte-exact by design: leading blank line, trailing space on zero-parameter ops, and per-file
-  scratch/label counters are all observable. Still missing from the corpus: unterminated string,
-  opcode-name collision, and a missing `-L` directory (measured to abort the reference with exit
-  1, unlike a missing include file, which is exit 0 with no output).
+  scratch/label counters are all observable. Still missing from the corpus: unterminated string
+  and opcode-name collision. The missing `-L` directory case is covered, but by the
+  **`cli_contract`** table rather than by a golden: the reference aborts there (exit 1, stack
+  trace), so there is nothing to match byte-for-byte, and the native 0/1/2/3 contract is not
+  overridden by ruling R1. A missing *include file* is a different shape again (reference: exit 0,
+  no output) and is open — design doc §14 item 6.
 - **Fate differential harness.** `fate/testdata/run_golden.py` is the acceptance test — one CTest
   entry, `fate.compile.golden`, registered by `fate/CMakeLists.txt` and **on by default**
   (`-DFATE_ENABLE_GOLDEN_TEST=OFF` opts out; a default build that registers zero fate tests is
@@ -256,9 +259,18 @@ Decoding expectations:
   compiles the tool and compares nothing; the CI step prints `NOT VERIFIED` in that case rather
   than reporting coverage. It also fingerprints every fixture/golden before the sweep and fails
   if a run mutates one, because two probes in this project's history truncated fixtures while the
-  suite stayed green. Current local state (re-measured 2026-10-28): 18/19 fixtures byte-match,
-  1 pinned deviation; 17 diagnostics exact, 2 reported NOT VERIFIED (`p10` crash filter, `p12`
-  unpinned recovery by-product); 19/19 exit statuses.
+  suite stayed green. A second, smaller table — `cli_contract` — pins the **native** CLI contract
+  (three `-L` cases: missing directory, file-as-directory, and a valid-directory control); those
+  entries have no golden, are reported on their own line as *not derived from the oracle*, and put
+  `-o` inside a private temporary directory so they cannot write into the tree.
+  Current local state (re-measured 2026-10-28 after the `-L` work): 18/19 fixtures byte-match, 1
+  pinned deviation; 17 diagnostics exact, 2 reported NOT VERIFIED (`p10` crash filter, `p12`
+  unpinned recovery by-product); 19/19 exit statuses; 3/3 native CLI-contract checks.
+- **Test gates were proven non-vacuous, twice.** With a compiler built from HEAD (no `-L` guard),
+  `c1`/`c2` fail on all three axes and the harness exits 1; with `p12` flipped back to `parity:
+  match` in a **copy** of `testdata`, the harness fails on bytes and diagnostics, and a truncated
+  valid fixture fails too. A check that cannot fail is not evidence — new checks need a
+  deliberately-wrong compiler or a deliberately-wrong expectation, not just a green run.
 - **Fate CI lane (written, never executed).** `.github/workflows/ci.yml` has a dedicated
   `fate-toolchain` job (macOS arm64, Linux x86-64 GCC, Linux x86-64 Clang) while the engine
   matrix passes `-DSC_ENABLE_FATE=OFF`. Compiler selection is by measured feature support: the
