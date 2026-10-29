@@ -50,12 +50,12 @@
 
 /* ------------------------------------------------------------------ AST bits ----- */
 
-void nodeAddChild(Arena* a, Node* parent, Node* child)
+void node_add_child(arena_t* a, node_t* parent, node_t* child)
 {
   if (parent->kids.n == parent->kids.cap)
   {
-    const int newCap = parent->kids.cap ? parent->kids.cap * 2 : 4;
-    Node** grown = (Node**)arena_alloc(a, (size_t)newCap * sizeof(Node*));
+    const int new_cap = parent->kids.cap ? parent->kids.cap * 2 : 4;
+    node_t** grown = (node_t**)arena_alloc(a, (size_t)new_cap * sizeof(node_t*));
 
     if (!grown)
     {
@@ -64,21 +64,21 @@ void nodeAddChild(Arena* a, Node* parent, Node* child)
     }
 
     if (parent->kids.n > 0)
-      memcpy(grown, parent->kids.v, (size_t)parent->kids.n * sizeof(Node*));
+      memcpy(grown, parent->kids.v, (size_t)parent->kids.n * sizeof(node_t*));
 
     parent->kids.v = grown;
-    parent->kids.cap = newCap;
+    parent->kids.cap = new_cap;
   }
 
   parent->kids.v[parent->kids.n++] = child;
 }
 
-void nodeAddName(Arena* a, Node* parent, Node* child)
+void node_add_name(arena_t* a, node_t* parent, node_t* child)
 {
   if (parent->names.n == parent->names.cap)
   {
-    const int newCap = parent->names.cap ? parent->names.cap * 2 : 4;
-    Node** grown = (Node**)arena_alloc(a, (size_t)newCap * sizeof(Node*));
+    const int new_cap = parent->names.cap ? parent->names.cap * 2 : 4;
+    node_t** grown = (node_t**)arena_alloc(a, (size_t)new_cap * sizeof(node_t*));
 
     if (!grown)
     {
@@ -87,18 +87,18 @@ void nodeAddName(Arena* a, Node* parent, Node* child)
     }
 
     if (parent->names.n > 0)
-      memcpy(grown, parent->names.v, (size_t)parent->names.n * sizeof(Node*));
+      memcpy(grown, parent->names.v, (size_t)parent->names.n * sizeof(node_t*));
 
     parent->names.v = grown;
-    parent->names.cap = newCap;
+    parent->names.cap = new_cap;
   }
 
   parent->names.v[parent->names.n++] = child;
 }
 
-Node* nodeNew(Arena* a, NodeKind kind, int line, int col)
+node_t* node_new(arena_t* a, node_kind_t kind, int line, int col)
 {
-  Node* n = (Node*)arena_alloc(a, sizeof(Node));
+  node_t* n = (node_t*)arena_alloc(a, sizeof(node_t));
 
   if (!n)
     return NULL;
@@ -111,35 +111,35 @@ Node* nodeNew(Arena* a, NodeKind kind, int line, int col)
 
 /* ------------------------------------------------------------------ parser state - */
 
-struct Parser
+struct parser_t
 {
-  Arena* arena;
-  Lexer* lx;
+  arena_t* arena;
+  lexer_t* lx;
   int pos;
-  Diag* diag;
+  diag_t* diag;
   bool aborted; /**< a structural failure that makes further parsing meaningless */
 };
 
-static Token* peek(Parser* p, int ahead)
+static token_t* peek(parser_t* p, int ahead)
 {
   const int i = p->pos + ahead;
 
   return (i < p->lx->count) ? &p->lx->tok[i] : &p->lx->tok[p->lx->count - 1];
 }
 
-static Token* here(Parser* p)
+static token_t* here(parser_t* p)
 {
   return peek(p, 0);
 }
 
-static TokKind kindAt(Parser* p, int ahead)
+static tok_kind_t kind_at(parser_t* p, int ahead)
 {
   return peek(p, ahead)->kind;
 }
 
-static Token* advance(Parser* p)
+static token_t* advance(parser_t* p)
 {
-  Token* t = &p->lx->tok[p->pos];
+  token_t* t = &p->lx->tok[p->pos];
 
   if (t->kind != TK_EOF)
     p->pos++;
@@ -147,9 +147,9 @@ static Token* advance(Parser* p)
   return t;
 }
 
-static bool accept(Parser* p, TokKind k)
+static bool accept(parser_t* p, tok_kind_t k)
 {
-  if (kindAt(p, 0) == k)
+  if (kind_at(p, 0) == k)
   {
     advance(p);
     return true;
@@ -158,7 +158,7 @@ static bool accept(Parser* p, TokKind k)
   return false;
 }
 
-static void note(Parser* p, int line, const char* fmt, ...)
+static void note(parser_t* p, int line, const char* fmt, ...)
 {
   char buf[512];
   va_list ap;
@@ -172,17 +172,17 @@ static void note(Parser* p, int line, const char* fmt, ...)
 
 /* ------------------------------------------------------------------- expressions - */
 
-static Node* parseExpression(Parser* p);
-static Node* parseAssignable(Parser* p);
-static Node* parseCall(Parser* p);
+static node_t* parse_expression(parser_t* p);
+static node_t* parse_assignable(parser_t* p);
+static node_t* parse_call(parser_t* p);
 
-static bool isAssignableView(TokKind k)
+static bool is_assignable_view(tok_kind_t k)
 {
   return k == TK_IDENTIFIER || k == TK_STOR || k == TK_REG || k == TK_VAR;
 }
 
 /** Map a token class to its binary operator, or BIN_NONE. */
-static BinOp binaryOpOf(TokKind k)
+static bin_op_t binary_op_of(tok_kind_t k)
 {
   switch (k)
   {
@@ -229,9 +229,9 @@ static BinOp binaryOpOf(TokKind k)
 
 /** Binding power; higher binds tighter. Order copied from `FateParser.g4`'s
  *  `expression` alternatives, which list the tightest-binding alternative first. */
-static int binaryPrecOf(TokKind k)
+static int binary_prec_of(tok_kind_t k)
 {
-  switch (binaryOpOf(k))
+  switch (binary_op_of(k))
   {
     case BIN_MUL:
     case BIN_DIV:
@@ -267,49 +267,49 @@ static int binaryPrecOf(TokKind k)
 }
 
 /** Precedence climbing for the `expression` rule. `minPrec` 11 enters at unary. */
-static Node* parseExprPrec(Parser* p, int minPrec)
+static node_t* parse_expr_prec(parser_t* p, int min_prec)
 {
-  Node* lhs = NULL;
+  node_t* lhs = NULL;
 
   /* Prefix alternatives: parenthesized, then the four unary operators. Redundant
    * parentheses are transparent in the reference (`while(ctx.LPAREN() != null)`),
    * so they never become a node. */
   if (accept(p, TK_LPAREN))
   {
-    lhs = parseExprPrec(p, 1);
+    lhs = parse_expr_prec(p, 1);
 
     if (!accept(p, TK_RPAREN))
       note(p, here(p)->line, "expected ')'");
   }
-  else if (kindAt(p, 0) == TK_NOTC || kindAt(p, 0) == TK_NOTA || kindAt(p, 0) == TK_SUB || kindAt(p, 0) == TK_ADD)
+  else if (kind_at(p, 0) == TK_NOTC || kind_at(p, 0) == TK_NOTA || kind_at(p, 0) == TK_SUB || kind_at(p, 0) == TK_ADD)
   {
-    Token* op = advance(p);
-    Node* u = nodeNew(p->arena, E_UNARY, op->line, op->col);
+    token_t* op = advance(p);
+    node_t* u = node_new(p->arena, E_UNARY, op->line, op->col);
 
     if (!u)
       return NULL;
 
-    u->isUnary = true;
+    u->is_unary = true;
     u->bin = (op->kind == TK_NOTC)   ? UNY_NOT
              : (op->kind == TK_NOTA) ? UNY_NOTA
              : (op->kind == TK_SUB)  ? UNY_SUB
                                      : UNY_ADD;
 
-    Node* operand = parseExprPrec(p, 11);
+    node_t* operand = parse_expr_prec(p, 11);
 
     if (!operand)
       return NULL;
 
-    nodeAddChild(p->arena, u, operand);
+    node_add_child(p->arena, u, operand);
     lhs = u;
   }
   else
   {
     /* `value : NUMBER | call | assignable | id | array_lookup` */
-    if (kindAt(p, 0) == TK_NUMBER)
+    if (kind_at(p, 0) == TK_NUMBER)
     {
-      Token* t = advance(p);
-      Node* n = nodeNew(p->arena, E_NUM, t->line, t->col);
+      token_t* t = advance(p);
+      node_t* n = node_new(p->arena, E_NUM, t->line, t->col);
 
       if (!n)
         return NULL;
@@ -317,10 +317,10 @@ static Node* parseExprPrec(Parser* p, int minPrec)
       n->text = t->text;
       lhs = n;
     }
-    else if (kindAt(p, 0) == TK_STRING)
+    else if (kind_at(p, 0) == TK_STRING)
     {
-      Token* t = advance(p);
-      Node* n = nodeNew(p->arena, E_STR, t->line, t->col);
+      token_t* t = advance(p);
+      node_t* n = node_new(p->arena, E_STR, t->line, t->col);
 
       if (!n)
         return NULL;
@@ -329,17 +329,17 @@ static Node* parseExprPrec(Parser* p, int minPrec)
       n->text = (t->text.len >= 2) ? str_of(t->text.p + 1, (size_t)(t->text.len - 2)) : t->text;
       lhs = n;
     }
-    else if (kindAt(p, 0) == TK_IDENTIFIER && kindAt(p, 1) == TK_LPAREN)
+    else if (kind_at(p, 0) == TK_IDENTIFIER && kind_at(p, 1) == TK_LPAREN)
     {
-      lhs = parseCall(p);
+      lhs = parse_call(p);
     }
-    else if (kindAt(p, 0) == TK_IDENTIFIER && kindAt(p, 1) == TK_COLON && kindAt(p, 2) == TK_IDENTIFIER)
+    else if (kind_at(p, 0) == TK_IDENTIFIER && kind_at(p, 1) == TK_COLON && kind_at(p, 2) == TK_IDENTIFIER)
     {
       /* `id : IDENTIFIER COLON IDENTIFIER` — emitted as `id[a:b]`. */
-      Token* a = advance(p);
+      token_t* a = advance(p);
       advance(p); /* ':' */
-      Token* b = advance(p);
-      Node* n = nodeNew(p->arena, E_ID, a->line, a->col);
+      token_t* b = advance(p);
+      node_t* n = node_new(p->arena, E_ID, a->line, a->col);
 
       if (!n)
         return NULL;
@@ -352,35 +352,35 @@ static Node* parseExprPrec(Parser* p, int minPrec)
       n->text = str_of(arena_dup(p->arena, buf, strlen(buf)), strlen(buf));
       lhs = n;
     }
-    else if (kindAt(p, 0) == TK_IDENTIFIER && kindAt(p, 1) == TK_LBRACKET)
+    else if (kind_at(p, 0) == TK_IDENTIFIER && kind_at(p, 1) == TK_LBRACKET)
     {
       /* `array_lookup : IDENTIFIER LBRACKET expression RBRACKET` */
-      Token* nameTok = advance(p);
+      token_t* name_tok = advance(p);
       advance(p); /* '[' */
-      Node* n = nodeNew(p->arena, E_ARRAY, nameTok->line, nameTok->col);
+      node_t* n = node_new(p->arena, E_ARRAY, name_tok->line, name_tok->col);
 
       if (!n)
         return NULL;
 
-      n->name = arena_dup(p->arena, nameTok->text.p, (size_t)nameTok->text.len);
+      n->name = arena_dup(p->arena, name_tok->text.p, (size_t)name_tok->text.len);
       n->name2 = n->name; /* array name renders verbatim, without an inl[:] wrapper */
 
-      Node* idx = parseExprPrec(p, 1);
+      node_t* idx = parse_expr_prec(p, 1);
 
       if (!idx)
         return NULL;
 
-      nodeAddChild(p->arena, n, idx);
+      node_add_child(p->arena, n, idx);
       accept(p, TK_RBRACKET);
       lhs = n;
     }
-    else if (kindAt(p, 0) == TK_TRUE || kindAt(p, 0) == TK_FALSE)
+    else if (kind_at(p, 0) == TK_TRUE || kind_at(p, 0) == TK_FALSE)
     {
       /* Lexer keywords, but no parser rule mentions them. They are handed to the
        * emitter as a variable-shaped node so it can report the reference's
        * "unimplemented op" and stop. */
-      Token* t = advance(p);
-      Node* n = nodeNew(p->arena, E_VAR, t->line, t->col);
+      token_t* t = advance(p);
+      node_t* n = node_new(p->arena, E_VAR, t->line, t->col);
 
       if (!n)
         return NULL;
@@ -388,15 +388,15 @@ static Node* parseExprPrec(Parser* p, int minPrec)
       n->name = arena_dup(p->arena, t->text.p, (size_t)t->text.len);
       lhs = n;
     }
-    else if (kindAt(p, 0) == TK_STOR || kindAt(p, 0) == TK_VAR || kindAt(p, 0) == TK_REG)
+    else if (kind_at(p, 0) == TK_STOR || kind_at(p, 0) == TK_VAR || kind_at(p, 0) == TK_REG)
     {
-      lhs = parseAssignable(p);
+      lhs = parse_assignable(p);
     }
-    else if (kindAt(p, 0) == TK_IDENTIFIER)
+    else if (kind_at(p, 0) == TK_IDENTIFIER)
     {
       /* A bare identifier used as a value. The three two-token forms above are matched
        * first; everything else that starts with an identifier is an `assignable`. */
-      lhs = parseAssignable(p);
+      lhs = parse_assignable(p);
     }
     else
     {
@@ -410,49 +410,49 @@ static Node* parseExprPrec(Parser* p, int minPrec)
   /* Infix levels, left-associative. */
   for (;;)
   {
-    const int prec = binaryPrecOf(kindAt(p, 0));
+    const int prec = binary_prec_of(kind_at(p, 0));
 
-    if (prec == 0 || prec < minPrec)
+    if (prec == 0 || prec < min_prec)
       break;
 
-    Token* opTok = advance(p);
-    Node* rhs = parseExprPrec(p, prec + 1);
+    token_t* op_tok = advance(p);
+    node_t* rhs = parse_expr_prec(p, prec + 1);
 
     if (!rhs)
       return NULL;
 
-    Node* bin = nodeNew(p->arena, E_BINARY, opTok->line, opTok->col);
+    node_t* bin = node_new(p->arena, E_BINARY, op_tok->line, op_tok->col);
 
     if (!bin)
       return NULL;
 
-    bin->bin = binaryOpOf(opTok->kind);
-    nodeAddChild(p->arena, bin, lhs);
-    nodeAddChild(p->arena, bin, rhs);
+    bin->bin = binary_op_of(op_tok->kind);
+    node_add_child(p->arena, bin, lhs);
+    node_add_child(p->arena, bin, rhs);
     lhs = bin;
   }
 
   return lhs;
 }
 
-static Node* parseExpression(Parser* p)
+static node_t* parse_expression(parser_t* p)
 {
-  return parseExprPrec(p, 1);
+  return parse_expr_prec(p, 1);
 }
 
 /* --------------------------------------------------------------- assignables ---- */
 
-static Node* parseIndexList(Parser* p, Node* n)
+static node_t* parse_index_list(parser_t* p, node_t* n)
 {
   if (!accept(p, TK_LBRACKET))
     return NULL;
 
-  Node* first = parseExprPrec(p, 1);
+  node_t* first = parse_expr_prec(p, 1);
 
   if (!first)
     return NULL;
 
-  nodeAddChild(p->arena, n, first);
+  node_add_child(p->arena, n, first);
   return first;
 }
 
@@ -463,18 +463,18 @@ static Node* parseIndexList(Parser* p, Node* n)
  * text `undefined`; that is what the reference emits after its
  * "unknown assignable" diagnostic, and p12 depends on it.
  */
-static Node* parseAssignable(Parser* p)
+static node_t* parse_assignable(parser_t* p)
 {
-  Token* t = here(p);
+  token_t* t = here(p);
 
-  if (kindAt(p, 0) == TK_IDENTIFIER)
+  if (kind_at(p, 0) == TK_IDENTIFIER)
   {
     advance(p);
 
-    if (kindAt(p, 0) == TK_LPAREN)
-      return parseCall(p);
+    if (kind_at(p, 0) == TK_LPAREN)
+      return parse_call(p);
 
-    Node* n = nodeNew(p->arena, E_VAR, t->line, t->col);
+    node_t* n = node_new(p->arena, E_VAR, t->line, t->col);
 
     if (!n)
       return NULL;
@@ -483,50 +483,50 @@ static Node* parseAssignable(Parser* p)
     return n;
   }
 
-  if (kindAt(p, 0) == TK_STOR)
+  if (kind_at(p, 0) == TK_STOR)
   {
     advance(p);
-    Node* n = nodeNew(p->arena, E_STOR, t->line, t->col);
+    node_t* n = node_new(p->arena, E_STOR, t->line, t->col);
 
     if (!n)
       return NULL;
 
-    if (!parseIndexList(p, n))
+    if (!parse_index_list(p, n))
       return NULL;
 
     if (accept(p, TK_COMMA))
     {
-      Node* second = parseExprPrec(p, 1);
+      node_t* second = parse_expr_prec(p, 1);
 
       if (!second)
         return NULL;
 
-      nodeAddChild(p->arena, n, second);
+      node_add_child(p->arena, n, second);
     }
 
     accept(p, TK_RBRACKET);
     return n;
   }
 
-  if (kindAt(p, 0) == TK_VAR)
+  if (kind_at(p, 0) == TK_VAR)
   {
     advance(p);
-    Node* n = nodeNew(p->arena, E_GAMEVAR, t->line, t->col);
+    node_t* n = node_new(p->arena, E_GAMEVAR, t->line, t->col);
 
     if (!n)
       return NULL;
 
     /* Each bracket pair is closed here: `var[a][b]` is two index lists, and leaving the
      * first `]` unconsumed made the second pair invisible to the check below. */
-    if (!parseIndexList(p, n))
+    if (!parse_index_list(p, n))
       return NULL;
 
     if (!accept(p, TK_RBRACKET))
       return NULL;
 
-    if (kindAt(p, 0) == TK_LBRACKET)
+    if (kind_at(p, 0) == TK_LBRACKET)
     {
-      if (!parseIndexList(p, n))
+      if (!parse_index_list(p, n))
         return NULL;
 
       if (!accept(p, TK_RBRACKET))
@@ -536,15 +536,15 @@ static Node* parseAssignable(Parser* p)
     return n;
   }
 
-  if (kindAt(p, 0) == TK_REG)
+  if (kind_at(p, 0) == TK_REG)
   {
     advance(p);
-    Node* n = nodeNew(p->arena, E_REG, t->line, t->col);
+    node_t* n = node_new(p->arena, E_REG, t->line, t->col);
 
     if (!n)
       return NULL;
 
-    if (!parseIndexList(p, n))
+    if (!parse_index_list(p, n))
       return NULL;
 
     return n;
@@ -564,52 +564,52 @@ static Node* parseAssignable(Parser* p)
  * `gosub inl[:name]` for it (see p12, where `for` becomes a call to a function named
  * `for`).
  */
-static Node* parseCall(Parser* p)
+static node_t* parse_call(parser_t* p)
 {
-  Token* nameTok = advance(p);
-  Node* c = nodeNew(p->arena, E_CALL, nameTok->line, nameTok->col);
+  token_t* name_tok = advance(p);
+  node_t* c = node_new(p->arena, E_CALL, name_tok->line, name_tok->col);
 
   if (!c)
     return NULL;
 
-  c->name = arena_dup(p->arena, nameTok->text.p, (size_t)nameTok->text.len);
+  c->name = arena_dup(p->arena, name_tok->text.p, (size_t)name_tok->text.len);
 
   /* Qualified names: `A::B::f`. The grammar allows one SCOPE; the reference's
    * `name += "::" + ctx.IDENTIFIER(1)` concatenation means anything longer has already
    * failed to parse as a call, so one is enough to model. */
   if (accept(p, TK_SCOPE))
   {
-    Token* second = here(p);
+    token_t* second = here(p);
 
     if (second->kind == TK_IDENTIFIER)
     {
       advance(p);
 
       char buf[256];
-      const int la = nameTok->text.len < 120 ? nameTok->text.len : 120;
+      const int la = name_tok->text.len < 120 ? name_tok->text.len : 120;
       const int lb = second->text.len < 120 ? second->text.len : 120;
 
-      snprintf(buf, sizeof(buf), "%.*s::%.*s", la, nameTok->text.p, lb, second->text.p);
+      snprintf(buf, sizeof(buf), "%.*s::%.*s", la, name_tok->text.p, lb, second->text.p);
       c->name = arena_dup(p->arena, buf, strlen(buf));
       c->name2 = arena_dup(p->arena, second->text.p, (size_t)second->text.len);
-      c->scopeDepth = 1;
-      c->isEngineCall = true;
+      c->scope_depth = 1;
+      c->is_engine_call = true;
     }
   }
 
   if (!accept(p, TK_LPAREN))
     return NULL;
 
-  if (kindAt(p, 0) != TK_RPAREN)
+  if (kind_at(p, 0) != TK_RPAREN)
   {
     for (;;)
     {
-      Node* arg = NULL;
+      node_t* arg = NULL;
 
-      if (kindAt(p, 0) == TK_STRING)
+      if (kind_at(p, 0) == TK_STRING)
       {
-        Token* s = advance(p);
-        arg = nodeNew(p->arena, E_STR, s->line, s->col);
+        token_t* s = advance(p);
+        arg = node_new(p->arena, E_STR, s->line, s->col);
 
         if (!arg)
           return NULL;
@@ -618,13 +618,13 @@ static Node* parseCall(Parser* p)
       }
       else
       {
-        arg = parseExpression(p);
+        arg = parse_expression(p);
       }
 
       if (!arg)
         return NULL;
 
-      nodeAddChild(p->arena, c, arg);
+      node_add_child(p->arena, c, arg);
 
       if (!accept(p, TK_COMMA))
         break;
@@ -639,28 +639,28 @@ static Node* parseCall(Parser* p)
 
 /* --------------------------------------------------------------------- blocks ---- */
 
-static Node* parseStatement(Parser* p);
-static Node* parseControl(Parser* p);
+static node_t* parse_statement(parser_t* p);
+static node_t* parse_control(parser_t* p);
 
-static Node* parseBraceBlock(Parser* p)
+static node_t* parse_brace_block(parser_t* p)
 {
   if (!accept(p, TK_OPENER))
     return NULL;
 
-  const Token* open = &p->lx->tok[p->pos - 1];
-  Node* b = nodeNew(p->arena, N_BLOCK, open->line, open->col);
+  const token_t* open = &p->lx->tok[p->pos - 1];
+  node_t* b = node_new(p->arena, N_BLOCK, open->line, open->col);
 
   if (!b)
     return NULL;
 
-  while (kindAt(p, 0) != TK_CLOSER && kindAt(p, 0) != TK_EOF)
+  while (kind_at(p, 0) != TK_CLOSER && kind_at(p, 0) != TK_EOF)
   {
-    Node* s = NULL;
+    node_t* s = NULL;
 
-    if (kindAt(p, 0) == TK_IF || kindAt(p, 0) == TK_WHILE || kindAt(p, 0) == TK_DO)
-      s = parseControl(p);
+    if (kind_at(p, 0) == TK_IF || kind_at(p, 0) == TK_WHILE || kind_at(p, 0) == TK_DO)
+      s = parse_control(p);
     else
-      s = parseStatement(p);
+      s = parse_statement(p);
 
     if (!s)
     {
@@ -668,28 +668,28 @@ static Node* parseBraceBlock(Parser* p)
         break;
 
       /* Recovery rule 2: skip to the next statement boundary and keep going. */
-      while (kindAt(p, 0) != TK_TERM && kindAt(p, 0) != TK_CLOSER && kindAt(p, 0) != TK_EOF)
+      while (kind_at(p, 0) != TK_TERM && kind_at(p, 0) != TK_CLOSER && kind_at(p, 0) != TK_EOF)
         advance(p);
 
       accept(p, TK_TERM);
       continue;
     }
 
-    nodeAddChild(p->arena, b, s);
+    node_add_child(p->arena, b, s);
   }
 
   accept(p, TK_CLOSER);
   return b;
 }
 
-static Node* parseControl(Parser* p)
+static node_t* parse_control(parser_t* p)
 {
-  Token* t = here(p);
+  token_t* t = here(p);
 
   if (t->kind == TK_IF)
   {
     advance(p);
-    Node* n = nodeNew(p->arena, N_IF, t->line, t->col);
+    node_t* n = node_new(p->arena, N_IF, t->line, t->col);
 
     if (!n)
       return NULL;
@@ -697,31 +697,31 @@ static Node* parseControl(Parser* p)
     if (!accept(p, TK_LPAREN))
       return NULL;
 
-    Node* cond = parseExpression(p);
+    node_t* cond = parse_expression(p);
 
     if (!cond)
       return NULL;
 
-    nodeAddChild(p->arena, n, cond);
+    node_add_child(p->arena, n, cond);
 
     if (!accept(p, TK_RPAREN))
       return NULL;
 
-    Node* thenBlock = parseBraceBlock(p);
+    node_t* then_block = parse_brace_block(p);
 
-    if (!thenBlock)
+    if (!then_block)
       return NULL;
 
-    nodeAddChild(p->arena, n, thenBlock);
+    node_add_child(p->arena, n, then_block);
 
     if (accept(p, TK_ELSE))
     {
-      Node* elseNode = (kindAt(p, 0) == TK_IF) ? parseControl(p) : parseBraceBlock(p);
+      node_t* else_node = (kind_at(p, 0) == TK_IF) ? parse_control(p) : parse_brace_block(p);
 
-      if (!elseNode)
+      if (!else_node)
         return NULL;
 
-      nodeAddChild(p->arena, n, elseNode);
+      node_add_child(p->arena, n, else_node);
     }
 
     return n;
@@ -730,7 +730,7 @@ static Node* parseControl(Parser* p)
   if (t->kind == TK_WHILE)
   {
     advance(p);
-    Node* n = nodeNew(p->arena, N_WHILE, t->line, t->col);
+    node_t* n = node_new(p->arena, N_WHILE, t->line, t->col);
 
     if (!n)
       return NULL;
@@ -738,39 +738,39 @@ static Node* parseControl(Parser* p)
     if (!accept(p, TK_LPAREN))
       return NULL;
 
-    Node* cond = parseExpression(p);
+    node_t* cond = parse_expression(p);
 
     if (!cond)
       return NULL;
 
-    nodeAddChild(p->arena, n, cond);
+    node_add_child(p->arena, n, cond);
 
     if (!accept(p, TK_RPAREN))
       return NULL;
 
-    Node* body = parseBraceBlock(p);
+    node_t* body = parse_brace_block(p);
 
     if (!body)
       return NULL;
 
-    nodeAddChild(p->arena, n, body);
+    node_add_child(p->arena, n, body);
     return n;
   }
 
   if (t->kind == TK_DO)
   {
     advance(p);
-    Node* n = nodeNew(p->arena, N_DOWHILE, t->line, t->col);
+    node_t* n = node_new(p->arena, N_DOWHILE, t->line, t->col);
 
     if (!n)
       return NULL;
 
-    Node* body = parseBraceBlock(p);
+    node_t* body = parse_brace_block(p);
 
     if (!body)
       return NULL;
 
-    nodeAddChild(p->arena, n, body);
+    node_add_child(p->arena, n, body);
 
     if (!accept(p, TK_WHILE))
       return NULL;
@@ -778,12 +778,12 @@ static Node* parseControl(Parser* p)
     if (!accept(p, TK_LPAREN))
       return NULL;
 
-    Node* cond = parseExpression(p);
+    node_t* cond = parse_expression(p);
 
     if (!cond)
       return NULL;
 
-    nodeAddChild(p->arena, n, cond);
+    node_add_child(p->arena, n, cond);
 
     if (!accept(p, TK_RPAREN))
       return NULL;
@@ -798,47 +798,47 @@ static Node* parseControl(Parser* p)
 /* ------------------------------------------------------------------ statements --- */
 
 /** True if the tokens starting at the cursor form `ident (` or `ident :: ident (`. */
-static bool looksLikeCall(Parser* p)
+static bool looks_like_call(parser_t* p)
 {
-  if (kindAt(p, 0) != TK_IDENTIFIER)
+  if (kind_at(p, 0) != TK_IDENTIFIER)
     return false;
 
-  if (kindAt(p, 1) == TK_LPAREN)
+  if (kind_at(p, 1) == TK_LPAREN)
     return true;
 
-  return kindAt(p, 1) == TK_SCOPE && kindAt(p, 2) == TK_IDENTIFIER && kindAt(p, 3) == TK_LPAREN;
+  return kind_at(p, 1) == TK_SCOPE && kind_at(p, 2) == TK_IDENTIFIER && kind_at(p, 3) == TK_LPAREN;
 }
 
-static Node* parseStatement(Parser* p)
+static node_t* parse_statement(parser_t* p)
 {
-  Token* start = here(p);
+  token_t* start = here(p);
 
   /* `declaration : VAR (IDENTIFIER | identifier_list) (ASSIGN ...)? TERM`
    * Only `var IDENTIFIER` is a declaration; `var[` is a gamevar used as an
    * assignment target, which is why the second token has to be inspected. */
-  if (kindAt(p, 0) == TK_VAR && kindAt(p, 1) == TK_IDENTIFIER)
+  if (kind_at(p, 0) == TK_VAR && kind_at(p, 1) == TK_IDENTIFIER)
   {
     advance(p);
-    Node* d = nodeNew(p->arena, N_DECL, start->line, start->col);
+    node_t* d = node_new(p->arena, N_DECL, start->line, start->col);
 
     if (!d)
       return NULL;
 
     for (;;)
     {
-      Token* nameTok = here(p);
+      token_t* name_tok = here(p);
 
-      if (nameTok->kind != TK_IDENTIFIER)
+      if (name_tok->kind != TK_IDENTIFIER)
         break;
 
       advance(p);
-      Node* n = nodeNew(p->arena, E_VAR, nameTok->line, nameTok->col);
+      node_t* n = node_new(p->arena, E_VAR, name_tok->line, name_tok->col);
 
       if (!n)
         return NULL;
 
-      n->name = arena_dup(p->arena, nameTok->text.p, (size_t)nameTok->text.len);
-      nodeAddName(p->arena, d, n);
+      n->name = arena_dup(p->arena, name_tok->text.p, (size_t)name_tok->text.len);
+      node_add_name(p->arena, d, n);
 
       if (!accept(p, TK_COMMA))
         break;
@@ -846,19 +846,19 @@ static Node* parseStatement(Parser* p)
 
     if (accept(p, TK_ASSIGN))
     {
-      if (kindAt(p, 0) == TK_LBRACKET)
+      if (kind_at(p, 0) == TK_LBRACKET)
       {
         advance(p);
-        d->initKind = INIT_ARRAY;
+        d->init_kind = INIT_ARRAY;
 
-        while (kindAt(p, 0) != TK_RBRACKET && kindAt(p, 0) != TK_EOF)
+        while (kind_at(p, 0) != TK_RBRACKET && kind_at(p, 0) != TK_EOF)
         {
-          Node* e = parseExpression(p);
+          node_t* e = parse_expression(p);
 
           if (!e)
             return NULL;
 
-          nodeAddChild(p->arena, d, e);
+          node_add_child(p->arena, d, e);
           accept(p, TK_COMMA);
         }
 
@@ -866,8 +866,8 @@ static Node* parseStatement(Parser* p)
       }
       else
       {
-        d->initKind = INIT_EXPR;
-        d->init = parseExpression(p);
+        d->init_kind = INIT_EXPR;
+        d->init = parse_expression(p);
 
         if (!d->init)
           return NULL;
@@ -877,26 +877,26 @@ static Node* parseStatement(Parser* p)
     return d;
   }
 
-  if (kindAt(p, 0) == TK_RETURN)
+  if (kind_at(p, 0) == TK_RETURN)
   {
     advance(p);
-    Node* r = nodeNew(p->arena, N_RETURN, start->line, start->col);
+    node_t* r = node_new(p->arena, N_RETURN, start->line, start->col);
 
     if (!r)
       return NULL;
 
-    if (kindAt(p, 0) == TK_LPAREN)
+    if (kind_at(p, 0) == TK_LPAREN)
     {
       advance(p);
 
-      while (kindAt(p, 0) != TK_RPAREN && kindAt(p, 0) != TK_EOF)
+      while (kind_at(p, 0) != TK_RPAREN && kind_at(p, 0) != TK_EOF)
       {
-        Node* e = parseExpression(p);
+        node_t* e = parse_expression(p);
 
         if (!e)
           break;
 
-        nodeAddChild(p->arena, r, e);
+        node_add_child(p->arena, r, e);
         accept(p, TK_COMMA);
       }
 
@@ -905,66 +905,66 @@ static Node* parseStatement(Parser* p)
       return r;
     }
 
-    if (kindAt(p, 0) != TK_TERM)
+    if (kind_at(p, 0) != TK_TERM)
     {
-      Node* e = parseExpression(p);
+      node_t* e = parse_expression(p);
 
       if (!e)
         return NULL;
 
-      nodeAddChild(p->arena, r, e);
+      node_add_child(p->arena, r, e);
     }
 
     return r;
   }
 
-  if (kindAt(p, 0) == TK_BREAK || kindAt(p, 0) == TK_CONTINUE)
+  if (kind_at(p, 0) == TK_BREAK || kind_at(p, 0) == TK_CONTINUE)
   {
-    Token* t = advance(p);
-    Node* n = nodeNew(p->arena, (t->kind == TK_BREAK) ? N_BREAK : N_CONTINUE, t->line, t->col);
+    token_t* t = advance(p);
+    node_t* n = node_new(p->arena, (t->kind == TK_BREAK) ? N_BREAK : N_CONTINUE, t->line, t->col);
     return n;
   }
 
   /* A call must be tried before the assignable paths: `for(...)` in p12 parses as a
    * call to a function named `for`, because `for` is only an identifier. */
-  if (looksLikeCall(p))
+  if (looks_like_call(p))
   {
-    Node* c = parseCall(p);
+    node_t* c = parse_call(p);
 
     if (!c)
       return NULL;
 
-    Node* s = nodeNew(p->arena, N_CALL, start->line, start->col);
+    node_t* s = node_new(p->arena, N_CALL, start->line, start->col);
 
     if (!s)
       return NULL;
 
-    nodeAddChild(p->arena, s, c);
+    node_add_child(p->arena, s, c);
     return s;
   }
 
-  if (isAssignableView(kindAt(p, 0)) || kindAt(p, 0) == TK_LPAREN)
+  if (is_assignable_view(kind_at(p, 0)) || kind_at(p, 0) == TK_LPAREN)
   {
-    Node* st = NULL;
-    Node* lhs = NULL;
+    node_t* st = NULL;
+    node_t* lhs = NULL;
 
     if (accept(p, TK_LPAREN))
     {
-      st = nodeNew(p->arena, N_ASSIGN, start->line, start->col);
+      st = node_new(p->arena, N_ASSIGN, start->line, start->col);
 
       if (!st)
         return NULL;
 
-      st->lhsKind = LH_LIST;
+      st->lhs_kind = LH_LIST;
 
-      while (kindAt(p, 0) != TK_RPAREN && kindAt(p, 0) != TK_EOF)
+      while (kind_at(p, 0) != TK_RPAREN && kind_at(p, 0) != TK_EOF)
       {
-        Node* a = parseAssignable(p);
+        node_t* a = parse_assignable(p);
 
         if (!a)
           return NULL;
 
-        nodeAddName(p->arena, st, a);
+        node_add_name(p->arena, st, a);
         accept(p, TK_COMMA);
       }
 
@@ -973,7 +973,7 @@ static Node* parseStatement(Parser* p)
     }
     else
     {
-      lhs = parseAssignable(p);
+      lhs = parse_assignable(p);
 
       if (!lhs)
         return NULL;
@@ -981,31 +981,31 @@ static Node* parseStatement(Parser* p)
 
     if (accept(p, TK_ASSIGN))
     {
-      Node* a = st;
+      node_t* a = st;
 
       if (!a)
       {
-        a = nodeNew(p->arena, N_ASSIGN, start->line, start->col);
+        a = node_new(p->arena, N_ASSIGN, start->line, start->col);
 
         if (!a)
           return NULL;
 
-        nodeAddName(p->arena, a, lhs);
+        node_add_name(p->arena, a, lhs);
       }
 
-      if (kindAt(p, 0) == TK_LBRACKET)
+      if (kind_at(p, 0) == TK_LBRACKET)
       {
         advance(p);
-        a->initKind = INIT_ARRAY;
+        a->init_kind = INIT_ARRAY;
 
-        while (kindAt(p, 0) != TK_RBRACKET && kindAt(p, 0) != TK_EOF)
+        while (kind_at(p, 0) != TK_RBRACKET && kind_at(p, 0) != TK_EOF)
         {
-          Node* e = parseExpression(p);
+          node_t* e = parse_expression(p);
 
           if (!e)
             return NULL;
 
-          nodeAddChild(p->arena, a, e);
+          node_add_child(p->arena, a, e);
           accept(p, TK_COMMA);
         }
 
@@ -1013,8 +1013,8 @@ static Node* parseStatement(Parser* p)
       }
       else
       {
-        a->initKind = INIT_EXPR;
-        a->init = parseExpression(p);
+        a->init_kind = INIT_EXPR;
+        a->init = parse_expression(p);
 
         if (!a->init)
           return NULL;
@@ -1023,52 +1023,52 @@ static Node* parseStatement(Parser* p)
       return a;
     }
 
-    if (kindAt(p, 0) == TK_INCR || kindAt(p, 0) == TK_DECR)
+    if (kind_at(p, 0) == TK_INCR || kind_at(p, 0) == TK_DECR)
     {
-      Token* opTok = advance(p);
-      Node* s = nodeNew(p->arena, N_POSTFIX, start->line, start->col);
+      token_t* op_tok = advance(p);
+      node_t* s = node_new(p->arena, N_POSTFIX, start->line, start->col);
 
       if (!s)
         return NULL;
 
-      s->isUnary = (opTok->kind == TK_DECR);
-      nodeAddName(p->arena, s, lhs);
+      s->is_unary = (op_tok->kind == TK_DECR);
+      node_add_name(p->arena, s, lhs);
       return s;
     }
 
     {
-      const AugOp aug = (kindAt(p, 0) == TK_ANDC_ASSIGN)   ? AUG_ANDC
-                        : (kindAt(p, 0) == TK_ORC_ASSIGN)  ? AUG_ORC
-                        : (kindAt(p, 0) == TK_MUL_ASSIGN)  ? AUG_MUL
-                        : (kindAt(p, 0) == TK_DIV_ASSIGN)  ? AUG_DIV
-                        : (kindAt(p, 0) == TK_MOD_ASSIGN)  ? AUG_MOD
-                        : (kindAt(p, 0) == TK_ADD_ASSIGN)  ? AUG_ADD
-                        : (kindAt(p, 0) == TK_SUB_ASSIGN)  ? AUG_SUB
-                        : (kindAt(p, 0) == TK_ANDA_ASSIGN) ? AUG_ANDA
-                        : (kindAt(p, 0) == TK_ORA_ASSIGN)  ? AUG_ORA
-                        : (kindAt(p, 0) == TK_XORA_ASSIGN) ? AUG_XORA
-                        : (kindAt(p, 0) == TK_NOTA_ASSIGN) ? AUG_NOTA
-                        : (kindAt(p, 0) == TK_SHR_ASSIGN)  ? AUG_SHR
-                        : (kindAt(p, 0) == TK_SHL_ASSIGN)  ? AUG_SHL
-                                                           : AUG_NONE;
+      const aug_op_t aug = (kind_at(p, 0) == TK_ANDC_ASSIGN)   ? AUG_ANDC
+                           : (kind_at(p, 0) == TK_ORC_ASSIGN)  ? AUG_ORC
+                           : (kind_at(p, 0) == TK_MUL_ASSIGN)  ? AUG_MUL
+                           : (kind_at(p, 0) == TK_DIV_ASSIGN)  ? AUG_DIV
+                           : (kind_at(p, 0) == TK_MOD_ASSIGN)  ? AUG_MOD
+                           : (kind_at(p, 0) == TK_ADD_ASSIGN)  ? AUG_ADD
+                           : (kind_at(p, 0) == TK_SUB_ASSIGN)  ? AUG_SUB
+                           : (kind_at(p, 0) == TK_ANDA_ASSIGN) ? AUG_ANDA
+                           : (kind_at(p, 0) == TK_ORA_ASSIGN)  ? AUG_ORA
+                           : (kind_at(p, 0) == TK_XORA_ASSIGN) ? AUG_XORA
+                           : (kind_at(p, 0) == TK_NOTA_ASSIGN) ? AUG_NOTA
+                           : (kind_at(p, 0) == TK_SHR_ASSIGN)  ? AUG_SHR
+                           : (kind_at(p, 0) == TK_SHL_ASSIGN)  ? AUG_SHL
+                                                               : AUG_NONE;
 
       if (aug != AUG_NONE)
       {
         advance(p);
-        Node* s = nodeNew(p->arena, N_AUGASSIGN, start->line, start->col);
+        node_t* s = node_new(p->arena, N_AUGASSIGN, start->line, start->col);
 
         if (!s)
           return NULL;
 
         s->aug = aug;
-        nodeAddName(p->arena, s, lhs);
+        node_add_name(p->arena, s, lhs);
 
-        Node* rhs = parseExpression(p);
+        node_t* rhs = parse_expression(p);
 
         if (!rhs)
           return NULL;
 
-        nodeAddChild(p->arena, s, rhs);
+        node_add_child(p->arena, s, rhs);
         return s;
       }
     }
@@ -1080,24 +1080,24 @@ static Node* parseStatement(Parser* p)
 /* --------------------------------------------------------------------- top level -- */
 
 /** Skip to the next top-level construct start, so a bad line cannot eat the file. */
-static void recoverTopLevel(Parser* p)
+static void recover_top_level(parser_t* p)
 {
-  while (kindAt(p, 0) != TK_EOF)
+  while (kind_at(p, 0) != TK_EOF)
   {
-    if (kindAt(p, 0) == TK_DEF || kindAt(p, 0) == TK_ENTRYPOINT || kindAt(p, 0) == TK_INCLUDE)
+    if (kind_at(p, 0) == TK_DEF || kind_at(p, 0) == TK_ENTRYPOINT || kind_at(p, 0) == TK_INCLUDE)
       return;
 
-    if (kindAt(p, 0) == TK_VAR && kindAt(p, 1) == TK_IDENTIFIER)
+    if (kind_at(p, 0) == TK_VAR && kind_at(p, 1) == TK_IDENTIFIER)
       return;
 
     advance(p);
   }
 }
 
-Status parse_translationUnit(Arena* arena, Lexer* lx, Source* src, Diag* diag)
+status_t parse_translation_unit(arena_t* arena, lexer_t* lx, source_t* src, diag_t* diag)
 {
-  Parser parser;
-  Parser* p = &parser;
+  parser_t parser;
+  parser_t* p = &parser;
 
   memset(p, 0, sizeof(*p));
 
@@ -1112,16 +1112,16 @@ Status parse_translationUnit(Arena* arena, Lexer* lx, Source* src, Diag* diag)
 
   for (;;)
   {
-    while (kindAt(p, 0) == TK_EOF && p->pos < lx->count - 1)
+    while (kind_at(p, 0) == TK_EOF && p->pos < lx->count - 1)
       break;
 
-    if (kindAt(p, 0) == TK_EOF)
+    if (kind_at(p, 0) == TK_EOF)
       break;
 
-    if (kindAt(p, 0) == TK_INCLUDE)
+    if (kind_at(p, 0) == TK_INCLUDE)
     {
-      Token* t = advance(p);
-      Token* file = here(p);
+      token_t* t = advance(p);
+      token_t* file = here(p);
 
       if (file->kind == TK_INCLUDE_FILE)
       {
@@ -1130,7 +1130,7 @@ Status parse_translationUnit(Arena* arena, Lexer* lx, Source* src, Diag* diag)
         /* The filename token keeps a trailing space, which is what the reference
          * emits; trimming it would change `p13_incl`'s golden. Function loading uses
          * the *trimmed* name, hence the two fields. */
-        Str trimmed = str_of(file->text.p, (size_t)file->text.len);
+        str_t trimmed = str_of(file->text.p, (size_t)file->text.len);
 
         while (trimmed.len > 0 && (trimmed.p[trimmed.len - 1] == ' ' || trimmed.p[trimmed.len - 1] == '\t'))
           trimmed.len--;
@@ -1138,30 +1138,30 @@ Status parse_translationUnit(Arena* arena, Lexer* lx, Source* src, Diag* diag)
         char* raw = arena_dup(arena, file->text.p, (size_t)file->text.len);
         char* cut = arena_dup(arena, trimmed.p, (size_t)trimmed.len);
 
-        if (src->includeCount == src->includeCap)
+        if (src->include_count == src->include_cap)
         {
-          const int newCap = src->includeCap ? src->includeCap * 2 : 8;
-          Include* grown = (Include*)arena_alloc(arena, (size_t)newCap * sizeof(Include));
+          const int new_cap = src->include_cap ? src->include_cap * 2 : 8;
+          include_t* grown = (include_t*)arena_alloc(arena, (size_t)new_cap * sizeof(include_t));
 
           if (!grown)
             return ST_OOM;
 
-          if (src->includeCount > 0)
-            memcpy(grown, src->includes, (size_t)src->includeCount * sizeof(Include));
+          if (src->include_count > 0)
+            memcpy(grown, src->includes, (size_t)src->include_count * sizeof(include_t));
 
           src->includes = grown;
-          src->includeCap = newCap;
+          src->include_cap = new_cap;
         }
 
-        src->includes[src->includeCount].raw = raw;
-        src->includes[src->includeCount].name = cut;
-        src->includes[src->includeCount].line = t->line;
-        src->includeCount++;
+        src->includes[src->include_count].raw = raw;
+        src->includes[src->include_count].name = cut;
+        src->includes[src->include_count].line = t->line;
+        src->include_count++;
 
         /* `includes` drives file loading; the emitted `#include` line needs an
          * emission-order item as well, otherwise the directive disappears from the
          * output while the file still resolves. */
-        TopItem* it = src_add_item(src, arena, TOP_INCLUDE);
+        top_item_t* it = src_add_item(src, arena, TOP_INCLUDE);
 
         if (!it)
           return ST_OOM;
@@ -1173,7 +1173,7 @@ Status parse_translationUnit(Arena* arena, Lexer* lx, Source* src, Diag* diag)
       }
     }
 
-    if (kindAt(p, 0) == TK_ENTRYPOINT)
+    if (kind_at(p, 0) == TK_ENTRYPOINT)
     {
       advance(p);
       accept(p, TK_IDENTIFIER);
@@ -1181,43 +1181,43 @@ Status parse_translationUnit(Arena* arena, Lexer* lx, Source* src, Diag* diag)
       continue;
     }
 
-    if (kindAt(p, 0) == TK_VAR && kindAt(p, 1) == TK_IDENTIFIER)
+    if (kind_at(p, 0) == TK_VAR && kind_at(p, 1) == TK_IDENTIFIER)
     {
       /* `global : VAR IDENTIFIER ASSIGN (NUMBER | const_array_initializer) TERM` */
       advance(p);
-      Token* nameTok = advance(p);
+      token_t* name_tok = advance(p);
 
       if (accept(p, TK_ASSIGN))
       {
-        Node* g = nodeNew(arena, N_DECL, nameTok->line, nameTok->col);
+        node_t* g = node_new(arena, N_DECL, name_tok->line, name_tok->col);
 
         if (!g)
           return ST_OOM;
 
-        Node* n = nodeNew(arena, E_VAR, nameTok->line, nameTok->col);
+        node_t* n = node_new(arena, E_VAR, name_tok->line, name_tok->col);
 
         if (!n)
           return ST_OOM;
 
-        n->name = arena_dup(arena, nameTok->text.p, (size_t)nameTok->text.len);
-        nodeAddName(arena, g, n);
+        n->name = arena_dup(arena, name_tok->text.p, (size_t)name_tok->text.len);
+        node_add_name(arena, g, n);
 
-        if (kindAt(p, 0) == TK_NUMBER)
+        if (kind_at(p, 0) == TK_NUMBER)
         {
-          Token* num = advance(p);
+          token_t* num = advance(p);
 
-          TopItem* it = src_add_item(src, arena, TOP_GLOBAL);
+          top_item_t* it = src_add_item(src, arena, TOP_GLOBAL);
 
           if (!it)
             return ST_OOM;
 
-          GlobalVar* gv = (GlobalVar*)arena_alloc(arena, sizeof(GlobalVar));
+          global_var_t* gv = (global_var_t*)arena_alloc(arena, sizeof(global_var_t));
           const char** vals = (const char**)arena_alloc(arena, 2 * sizeof(char*));
 
           if (!gv || !vals)
             return ST_OOM;
 
-          it->name = arena_dup(arena, nameTok->text.p, (size_t)nameTok->text.len);
+          it->name = arena_dup(arena, name_tok->text.p, (size_t)name_tok->text.len);
           gv->name = it->name;
           gv->length = 1;
           vals[0] = arena_dup(arena, num->text.p, (size_t)num->text.len);
@@ -1232,18 +1232,18 @@ Status parse_translationUnit(Arena* arena, Lexer* lx, Source* src, Diag* diag)
           static const char* elems[256];
           int count = 0;
 
-          while (kindAt(p, 0) != TK_RBRACKET && kindAt(p, 0) != TK_EOF)
+          while (kind_at(p, 0) != TK_RBRACKET && kind_at(p, 0) != TK_EOF)
           {
-            if (kindAt(p, 0) == TK_COMMA)
+            if (kind_at(p, 0) == TK_COMMA)
             {
               advance(p);
               continue;
             }
 
-            if (kindAt(p, 0) != TK_NUMBER && kindAt(p, 0) != TK_STRING)
+            if (kind_at(p, 0) != TK_NUMBER && kind_at(p, 0) != TK_STRING)
               break;
 
-            Token* item = advance(p);
+            token_t* item = advance(p);
 
             if (count < (int)(sizeof(elems) / sizeof(elems[0])))
               elems[count++] = arena_dup(arena, item->text.p, (size_t)item->text.len);
@@ -1251,18 +1251,18 @@ Status parse_translationUnit(Arena* arena, Lexer* lx, Source* src, Diag* diag)
 
           accept(p, TK_RBRACKET);
 
-          TopItem* it = src_add_item(src, arena, TOP_GLOBAL);
+          top_item_t* it = src_add_item(src, arena, TOP_GLOBAL);
 
           if (!it)
             return ST_OOM;
 
-          GlobalVar* gv = (GlobalVar*)arena_alloc(arena, sizeof(GlobalVar));
+          global_var_t* gv = (global_var_t*)arena_alloc(arena, sizeof(global_var_t));
           const char** vals = (const char**)arena_alloc(arena, (size_t)(count + 1) * sizeof(char*));
 
           if (!gv || !vals)
             return ST_OOM;
 
-          it->name = arena_dup(arena, nameTok->text.p, (size_t)nameTok->text.len);
+          it->name = arena_dup(arena, name_tok->text.p, (size_t)name_tok->text.len);
           gv->name = it->name;
           gv->length = count;
 
@@ -1279,82 +1279,82 @@ Status parse_translationUnit(Arena* arena, Lexer* lx, Source* src, Diag* diag)
       continue;
     }
 
-    if (kindAt(p, 0) == TK_DEF)
+    if (kind_at(p, 0) == TK_DEF)
     {
       /* The definition line, not the body's: `missing return` is reported against the
        * function, and the reference takes the line its function rule starts on, which
        * is the `def` keyword. Without this the diagnostic has no line prefix at all. */
-      Token* defTok = here(p);
+      token_t* def_tok = here(p);
 
       advance(p);
-      Token* nameTok = here(p);
+      token_t* name_tok = here(p);
 
-      if (nameTok->kind != TK_IDENTIFIER)
+      if (name_tok->kind != TK_IDENTIFIER)
       {
-        recoverTopLevel(p);
+        recover_top_level(p);
         continue;
       }
 
       advance(p);
 
-      Func* f = add_function(src, arena, nameTok->text);
+      func_t* f = add_function(src, arena, name_tok->text);
 
       if (!f)
         return ST_OOM;
 
-      f->line = defTok->line;
+      f->line = def_tok->line;
 
       if (accept(p, TK_LPAREN))
       {
-        while (kindAt(p, 0) != TK_RPAREN && kindAt(p, 0) != TK_EOF)
+        while (kind_at(p, 0) != TK_RPAREN && kind_at(p, 0) != TK_EOF)
         {
-          Token* argTok = here(p);
+          token_t* arg_tok = here(p);
 
-          if (argTok->kind == TK_COMMA)
+          if (arg_tok->kind == TK_COMMA)
           {
             advance(p);
             continue;
           }
 
-          if (argTok->kind != TK_IDENTIFIER)
+          if (arg_tok->kind != TK_IDENTIFIER)
           {
             advance(p);
             continue;
           }
 
           advance(p);
-          add_argument(f, arena, argTok->text);
+          add_argument(f, arena, arg_tok->text);
         }
 
         accept(p, TK_RPAREN);
       }
 
-      Node* body = parseBraceBlock(p);
+      node_t* body = parse_brace_block(p);
 
       if (!body)
       {
-        recoverTopLevel(p);
+        recover_top_level(p);
         continue;
       }
 
       /* Emission order is the item list, so a function records its slot here and the
        * body is reached through the stable `Func` pointer. */
-      TopItem* it = src_add_item(src, arena, TOP_FUNC);
+      top_item_t* it = src_add_item(src, arena, TOP_FUNC);
 
       if (!it)
         return ST_OOM;
 
-      it->name = arena_dup(arena, nameTok->text.p, (size_t)nameTok->text.len);
+      it->name = arena_dup(arena, name_tok->text.p, (size_t)name_tok->text.len);
       it->fn = f;
       f->body = body;
       continue;
     }
 
     /* Nothing matched at top level. */
-    recoverTopLevel(p);
+    recover_top_level(p);
 
-    if (kindAt(p, 0) == TK_DEF || kindAt(p, 0) == TK_ENTRYPOINT || kindAt(p, 0) == TK_INCLUDE ||
-        (kindAt(p, 0) == TK_VAR && kindAt(p, 1) == TK_IDENTIFIER))
+    if (kind_at(p, 0) == TK_DEF || kind_at(p, 0) == TK_ENTRYPOINT || kind_at(p, 0) == TK_INCLUDE ||
+        (kind_at(p, 0) == TK_VAR && kind_at(p, 1) == TK_IDENTIFIER))
     {
       if (p->aborted)
         break;

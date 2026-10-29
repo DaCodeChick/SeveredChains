@@ -25,7 +25,7 @@
  * beats the identifier rule at the same length. Keep this enum's keyword block in
  * the same relative order as FateLexer.g4 if new entries are ever added.
  */
-typedef enum TokKind
+typedef enum tok_kind_t
 {
   TK_EOF = 0,
 
@@ -103,46 +103,46 @@ typedef enum TokKind
   TK_STRING,
 
   TK_ERROR /**< One unrecognized character (see @ref LexerError). */
-} TokKind;
+} tok_kind_t;
 
 /** One token, with the source position the reference would have reported. */
-typedef struct Token
+typedef struct token_t
 {
-  TokKind kind;
+  tok_kind_t kind;
   int line;     /**< 1-based line, as ANTLR reports it. */
   int col;      /**< 0-based column within the line, as ANTLR reports it. */
-  Str text;     /**< Borrowed from the source buffer; includes quotes for TK_STRING. */
+  str_t text;   /**< Borrowed from the source buffer; includes quotes for TK_STRING. */
   int error_id; /**< Index into Lexer::errors for TK_ERROR, else -1. */
-} Token;
+} token_t;
 
 /** A lexer-level complaint: `line L:C token recognition error at: '<text>'`. */
-typedef struct LexerError
+typedef struct lexer_error_t
 {
-  int line; /**< 1-based. */
-  int col;  /**< 0-based. */
-  Str text; /**< The unrecognized text, escaped for display. */
-} LexerError;
+  int line;   /**< 1-based. */
+  int col;    /**< 0-based. */
+  str_t text; /**< The unrecognized text, escaped for display. */
+} lexer_error_t;
 
 /** Token stream plus the diagnostics produced while building it. */
-typedef struct Lexer
+typedef struct lexer_t
 {
-  Arena* arena;
-  Token* tok;
+  arena_t* arena;
+  token_t* tok;
   int count;
   int cap;
-  LexerError* errors;
-  int errorCount;
-  int errorCap;
-} Lexer;
+  lexer_error_t* errors;
+  int error_count;
+  int error_cap;
+} lexer_t;
 
 /** @brief Tokenize `src` into `lx`.
  *  @errors ST_IO if the source could not be read (caller reads it; this never fails
  *  for that reason), ST_OOM if the arena could not serve the token array. A stream
  *  that tokenized with complaints still returns ST_OK: unrecognized characters are
  *  reported through `lx->errors`, not through Status. */
-Status lex_run(Arena* arena, Str src, Lexer* lx);
+status_t lex_run(arena_t* arena, str_t src, lexer_t* lx);
 
 /** @brief Human-readable name of a token class (diagnostics and --dump-ast). */
-const char* tok_kind_name(TokKind k);
+const char* tok_kind_name(tok_kind_t k);
 
 #endif /* FATE_LEXER_H */

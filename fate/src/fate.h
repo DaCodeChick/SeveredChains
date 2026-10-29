@@ -20,99 +20,99 @@
 
 /* -------------------------------------------------------------- diagnostics ----- */
 
-typedef struct Diag
+typedef struct diag_t
 {
-  Buf buf;   /* rendered "LINE: message\n" text, in emission order */
+  buf_t buf; /* rendered "LINE: message\n" text, in emission order */
   int count; /* number of diagnostics recorded */
-} Diag;
+} diag_t;
 
 /** Record one diagnostic.
  *  @param line 1-based source line, or 0 for a file-level message. */
-void diag_add(Diag* d, int line, const char* message);
+void diag_add(diag_t* d, int line, const char* message);
 
 /* --------------------------------------------------------------- model: include - */
 
 /** One `#include` directive as written in the source. */
-typedef struct Include
+typedef struct include_t
 {
   const char* raw;  /* exact INCLUDE_FILE token text, trailing space preserved */
   const char* name; /* same text with trailing blanks removed */
   int line;
-} Include;
+} include_t;
 
 /* ----------------------------------------------------------- model: definition -- */
 
 /** A function definition, or a table row when `body == NULL`. */
-typedef struct Func
+typedef struct func_t
 {
-  Str name;
-  Str args[16];
+  str_t name;
+  str_t args[16];
   int argc;
-  Node* body; /**< owned by the arena; NULL for a table row */
+  node_t* body; /**< owned by the arena; NULL for a table row */
   int line;
-} Func;
+} func_t;
 
 /** A constant or scratch array declaration. */
-typedef struct GlobalVar
+typedef struct global_var_t
 {
   const char* name;
   int length;
   const char* const* values; /* owned by the arena, NUL-terminated strings */
-} GlobalVar;
+} global_var_t;
 
 /* ------------------------------------------------------------- model: file ------ */
 
 /** The kind of one top-level item, in source order. */
-typedef enum TopKind
+typedef enum top_kind_t
 {
   TOP_INCLUDE,
   TOP_GLOBAL,
   TOP_FUNC
-} TopKind;
+} top_kind_t;
 
 /** A top-level item in a translation unit. Order matters: emission follows it. */
-typedef struct TopItem
+typedef struct top_item_t
 {
-  TopKind kind;
-  const char* name;       /**< include filename, global name, or function name */
-  const Func* fn;         /**< TOP_FUNC */
-  const GlobalVar* globs; /**< TOP_GLOBAL: the one declaration this item carries */
-} TopItem;
+  top_kind_t kind;
+  const char* name;          /**< include filename, global name, or function name */
+  const func_t* fn;          /**< TOP_FUNC */
+  const global_var_t* globs; /**< TOP_GLOBAL: the one declaration this item carries */
+} top_item_t;
 
 /** One translation unit: the main script, or an included file. */
-typedef struct Source
+typedef struct source_t
 {
-  const char* displayName; /**< path as it appeared on the command line */
+  const char* display_name; /**< path as it appeared on the command line */
 
-  TopItem* items;
-  int itemCount;
-  int itemCap;
+  top_item_t* items;
+  int item_count;
+  int item_cap;
 
   /* Function lookup table. Entries are individually allocated and referenced by
    * pointer from TopItem, so growing this table never invalidates those pointers. */
-  Func** funcs;
-  int funcCount;
-  int funcCap;
+  func_t** funcs;
+  int func_count;
+  int func_cap;
 
-  Include* includes;
-  int includeCount;
-  int includeCap;
-} Source;
+  include_t* includes;
+  int include_count;
+  int include_cap;
+} source_t;
 
 /** Find a function definition by exact name within one translation unit. */
-const Func* src_find_func(const Source* src, Str name);
+const func_t* src_find_func(const source_t* src, str_t name);
 
 /** Append a top-level item, growing the arena-backed array. NULL on allocation
  *  failure. */
-TopItem* src_add_item(Source* src, Arena* a, TopKind kind);
+top_item_t* src_add_item(source_t* src, arena_t* a, top_kind_t kind);
 
 /** Register a function definition (and its index entry) in one translation unit. */
-Func* add_function(Source* src, Arena* a, Str name);
+func_t* add_function(source_t* src, arena_t* a, str_t name);
 
 /** Append a parameter name to a function. */
-bool add_argument(Func* fn, Arena* a, Str name);
+bool add_argument(func_t* fn, arena_t* a, str_t name);
 
 /** Append a parsed function body to a translation unit. */
-bool add_body(Source* src, Arena* a, const Node* body);
+bool add_body(source_t* src, arena_t* a, const node_t* body);
 
 #endif /* FATE_FATE_H */

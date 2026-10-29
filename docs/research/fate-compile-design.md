@@ -851,10 +851,25 @@ Per D1, the mechanical gates must see the C tool:
 * `tools/check_format.py`: add `"fate"` to `SCAN_ROOTS` and ensure `.c`/`.h` are in the scanned
   suffixes. The C code is formatted to the root `.clang-format` (Allman, 2-space, 120-col,
   `RemoveBracesLLVM`).
-* `tools/check_naming.py`: add `.c` to the scanned suffixes. snake_case identifiers pass
-  automatically via `is_snake_or_macro`; **camelCase in `fate/` must be flagged**. `fate` uses
-  snake_case throughout (spec `spc-1793133498509-334`), so a clean result is expected — but the
-  gate must actually *cover* the files, which is the point.
+* `tools/check_naming.py`: add `.c` to the scanned suffixes **and add a check that can actually
+  see camelCase**. Both halves were needed, and the earlier draft of this bullet had only the
+  first, which is the more instructive part of the finding:
+
+  - Adding `.c` alone changed nothing. The acronym rule (`check_identifier`) only fires on
+    *acronym humps*, and `kindAt`/`putOp`/`nodeNew` contain no acronym, so they passed. Measured
+    on 2026-10-28 against a deliberately camelCase tree of the four `fate/src` translation
+    units: old gate = **clean**, old gate with `.c` added = **1 finding**, new gate =
+    **1545 findings**. A gate covering the files is not the same as a gate that reads them.
+  - The `fate` code was **not** snake_case throughout, so the "a clean result is expected"
+    prediction here was false. 169 distinct camelCase identifiers (1 744 occurrences) were live
+    in `fate/src` while this document asserted the opposite and no check disagreed with it.
+
+  `scan_c_style` is now that check: it flags any identifier in production C that is neither
+  `lower_snake` nor `UPPER_SNAKE`, after blanking comments and literals newline-preservingly.
+  Two implementation traps are worth keeping: the literal pattern must accept backslash escapes
+  (a help string containing `Fate Script` was otherwise reported as two identifiers), and the
+  blanking must keep newlines or every reported line number drifts. `psx/cpp` is excluded —
+  PascalCase is correct there — and `tests/` is excluded as a scope choice, not an oversight.
 * **Prove the extension bites**: before declaring F1 done, plant a deliberately mis-cased
   identifier (camelCase) in a scratch copy of a `fate/` file and confirm both gates fail, then
   remove it. A gate that "passes" without actually scanning `fate/` is a silent exemption.
@@ -990,11 +1005,17 @@ comparison that would prove it is not implemented.
    controls that a resolvable include and a non-`.fate` include are untouched. All three of the
    shapes under discussion collapsed into one: there is no longer a "diagnosed and continued" path
    for a missing `.fate` file.
-   **Still open underneath:** `--no-antlr-fallback` is not implemented (a `.fate`-suffixed
-   include still passes the gate, which is the correct default). The include-directory search
-   order is *not* open: §5.1 gives `-L` dirs in argument order and never the including file's
-   directory, which was re-measured against the oracle on 2026-10-28 and is what the native
-   `resolveInclude()` does.
+   **Nothing is open underneath.** An earlier draft of this section asked for a command-line
+   switch to disable "the ANTLR fallback". That request is **withdrawn and was never a real
+   requirement**: it named an implementation detail of the *Java reference* (its
+   parser-generator's recovery path), and this compiler contains no parser-generator runtime to
+   switch off, so the flag would have been a Java-shaped artefact carried into a C tool — a knob
+   with nothing behind it. Recorded here only so the idea is not re-imported from the reference's
+   source. What this section actually has to state is behaviour, which is settled: a
+   `.fate`-suffixed include still passes the resolvability gate (the correct default — the suffix
+   gate decides what must resolve, it was never a recovery switch), and the include-directory
+   search order is `-L` dirs in argument order and never the including file's directory, which was
+   re-measured against the oracle on 2026-10-28 and is what the native `resolveInclude()` does.
 
 ---
 

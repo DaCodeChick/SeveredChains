@@ -14,7 +14,7 @@
 #include "lexer.h"
 
 /** Parser state. Deliberately opaque: only `parse.c` touches the fields. */
-typedef struct Parser Parser;
+typedef struct parser_t parser_t;
 
 /** Parse one translation unit.
  *  (@param arena  arena owning every node, name and string the parser creates.
@@ -24,6 +24,6 @@ typedef struct Parser Parser;
  *                golden corpus, which is why it is quiet here).
  *  @return #ST_OK, #ST_COMPILE on a structural failure, or #ST_OOM.
  *  @note Thread: single-threaded. */
-Status parse_translationUnit(Arena* arena, Lexer* lx, Source* src, Diag* diag);
+status_t parse_translation_unit(arena_t* arena, lexer_t* lx, source_t* src, diag_t* diag);
 
 #endif /* FATE_PARSE_H */

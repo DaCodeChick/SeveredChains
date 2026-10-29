@@ -75,6 +75,29 @@ ALLOWED_DOC_TOKENS = {
 # Third-party / standard-library identifiers allowed in our own code.
 ALLOWED_CODE_IDENTS = {"sdl", "npos", "uint", "lod", "psx", "midi"}
 
+# --- C identifier grammar ---------------------------------------------------
+#
+# C code in this repository (the psx C core plus its ABI headers, and all of
+# fate/) is prescribed snake_case with `_t` type names and UPPER_SNAKE
+# macros/enumerators (psx-c-api.md §2, AGENTS.md naming table, and the 2026-10-27
+# owner decision that fate follows the psx C style with no prefix). Two things had
+# to be true before that could be checked rather than merely documented: `.c` had
+# to be scanned at all (it was not), and the check had to exclude the C++ wrapper
+# layer, where PascalCase is the correct grammar.
+C_GRAMMAR_ALLOWED = {
+    "_static_assert", "_thread_local", "_atomic", "_noreturn", "uint", "npos",
+}
+
+# Comments and literals, matched across newlines. The literal alternatives accept
+# backslash escapes, so a help string containing a \n escape stays one token
+# instead of becoming a place where code happens to live.
+C_NON_CODE = re.compile(
+    r"""/\*.*?\*/|//[^\n]*|"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'""", re.S)
+
+# Test code is not the C API surface, so the grammar rule does not speak to it.
+# Excluding it is a scope choice, not an oversight; production C is checked fully.
+TEST_SEGMENT = "tests"
+
 # Doc lines citing a Java source path or symbol are exempt wholesale: the names
 # there are quotations, not our API.
 DOC_LINE_EXEMPT = re.compile(r"\.java|legend[./]|\.class|GlApi|GlesApi|RenderApi")
@@ -138,6 +161,37 @@ def scan_code(path: Path) -> list[str]:
             f"{path}:{number}: {identifier}: acronym '{hump}' must be '{canonical}' "
             f"(enum values and constants are PascalCase positions too)"
         )
+  return findings
+
+
+def scan_c_style(path: Path) -> list[str]:
+  """Flag identifiers in C code that are neither lower_snake nor UPPER_SNAKE.
+
+  Comments and string literals are blanked out first, with their newlines
+  preserved so a finding points at the line it is really on. Without the
+  escape-aware literal pattern in C_NON_CODE, help text such as "translate Fate
+  Script source..." reads as two identifiers named Fate and Script; that was the
+  first draft's bug, and the pattern - not an allowlist - is where it is fixed.
+  """
+  findings = []
+  text = path.read_text(encoding="utf-8", errors="replace")
+
+  def blank_out(match):
+    return "".join(ch if ch == "\n" else " " for ch in match.group(0))
+
+  code = C_NON_CODE.sub(blank_out, text)
+  for number, line in enumerate(code.splitlines(), 1):
+    for match in IDENT.finditer(line):
+      identifier = match.group(0)
+      if identifier == identifier.lower() or identifier == identifier.upper():
+        continue  # lower_snake or UPPER_SNAKE: already the C grammar
+      if identifier.lower() in C_GRAMMAR_ALLOWED:
+        continue
+      findings.append(
+          f"{path}:{number}: {identifier}: C code uses snake_case identifiers "
+          f"(types take a `_t` suffix); PascalCase and camelCase belong to the "
+          f"C++ grammar (psx-c-api.md §2)"
+      )
   return findings
 
 
@@ -362,7 +416,14 @@ def main(argv: list[str]) -> int:
   for path in files:
     if "build" in path.parts or ".git" in path.parts or "third_party" in path.parts:
       continue
-    if path.suffix in {".h", ".hpp", ".cpp", ".cc"} and not opts.docs_only:
+    # C roots carry two grammars: the C ABI surface (snake_case) and, under
+    # psx/cpp, the C++ wrappers on top of it (PascalCase). Only the first is
+    # checked by scan_c_style, and test code is out of scope by choice.
+    c_root = "psx" in path.parts or "fate" in path.parts
+    c_code = c_root and "tests" not in path.parts and "cpp" not in path.parts
+    if path.suffix in {".c", ".h"} and c_code and not opts.docs_only:
+      findings.extend(scan_c_style(path))
+    elif path.suffix in {".h", ".hpp", ".cpp", ".cc"} and not opts.docs_only:
       findings.extend(scan_code(path))
       # The psx library keeps its own conventions: snake_case in the C17 core (a
       # C ABI surface) and camelCase in the C++ wrappers, whose structs mirror
@@ -373,8 +434,7 @@ def main(argv: list[str]) -> int:
       # psx C core (owner decision 2026-10-27 — "psx-style snake_case without a `fate_`
       # prefix"), so struct fields there are snake_case by design and the C++
       # data-member rule does not describe them.
-      c_style = "psx" in path.parts or "fate" in path.parts
-      if not opts.no_members and not c_style:
+      if not opts.no_members and not c_root:
         findings.extend(scan_members(path))
     elif path.suffix == ".md" and not opts.code_only:
       findings.extend(scan_doc(path))
@@ -384,9 +444,10 @@ def main(argv: list[str]) -> int:
   if findings:
     print(f"\n{len(findings)} naming violation(s): acronyms are fully capitalised in "
           f"every PascalCase position, public data members are PascalCase and private "
-          f"ones are camelCase_ (AGENTS.md naming table).")
+          f"ones are camelCase_ (AGENTS.md naming table); C code is snake_case with "
+          f"`_t` types (psx-c-api.md §2).")
     return 1
-  print("naming: clean (acronym policy + data-member casing)")
+  print("naming: clean (acronym policy + data-member casing + C identifier grammar)")
   return 0
 
 

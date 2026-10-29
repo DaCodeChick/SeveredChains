@@ -24,7 +24,7 @@
 /* ------------------------------------------------------------------ values ------- */
 
 /** Rendering classes, one per `FateValue` subclass with a `toString()`. */
-typedef enum Vk
+typedef enum vk_t
 {
   VK_IMM,   /**< literal text */
   VK_VAR,   /**< `inl[:name]` */
@@ -36,36 +36,36 @@ typedef enum Vk
   VK_STOR2, /**< `stor[s, i]` */
   VK_REG,   /**< `reg[i]` */
   VK_LIST   /**< `[a, b]` */
-} Vk;
+} vk_t;
 
 /** A variable slot: the unit of the prologue and of `inl[:]` rendering. */
-typedef struct VarDecl
+typedef struct var_decl_t
 {
   const char* display; /**< already prefixed, exactly as it prints */
   int length;
   const char* value; /**< text after `data ` in the prologue */
-} VarDecl;
+} var_decl_t;
 
 /** A value, i.e. one thing printable as an op parameter. */
-typedef struct Val Val;
+typedef struct val_t val_t;
 
-struct Val
+struct val_t
 {
-  Vk kind;
+  vk_t kind;
   const char* text;
-  VarDecl* var;
-  struct Val* a;
-  struct Val* b;
-  Val** items;
+  var_decl_t* var;
+  struct val_t* a;
+  struct val_t* b;
+  val_t** items;
   int n;
 };
 
 /** One name binding in the scope chain. */
-typedef struct Binding
+typedef struct binding_t
 {
   const char* name;
-  VarDecl* var;
-} Binding;
+  var_decl_t* var;
+} binding_t;
 
 /* ------------------------------------------------------------- scope chain ------ */
 
@@ -79,31 +79,31 @@ typedef struct Binding
  *  A name already visible keeps its slot, matching `FateScope`'s `computeIfAbsent`.
  *
  *  @return The slot, or NULL when the binding table could not grow. */
-static VarDecl* declareVar(Emit* e, const char* base, int length, const char* value)
+static var_decl_t* declare_var(emit_t* e, const char* base, int length, const char* value)
 {
-  for (int i = 0; i < e->bindCount; i++)
+  for (int i = 0; i < e->bind_count; i++)
     if (strcmp(e->binds[i].name, base) == 0)
       return e->binds[i].var;
 
-  if (e->bindCount == e->bindCap)
+  if (e->bind_count == e->bind_cap)
   {
-    const int newCap = e->bindCap ? e->bindCap * 2 : 128;
-    Binding* grown = (Binding*)arena_alloc(e->arena, (size_t)newCap * sizeof(Binding));
+    const int new_cap = e->bind_cap ? e->bind_cap * 2 : 128;
+    binding_t* grown = (binding_t*)arena_alloc(e->arena, (size_t)new_cap * sizeof(binding_t));
 
     if (!grown)
       return NULL;
 
-    if (e->bindCount > 0)
-      memcpy(grown, e->binds, (size_t)e->bindCount * sizeof(Binding));
+    if (e->bind_count > 0)
+      memcpy(grown, e->binds, (size_t)e->bind_count * sizeof(binding_t));
 
     e->binds = grown;
-    e->bindCap = newCap;
+    e->bind_cap = new_cap;
   }
 
-  if (e->bindCount == 0)
-    e->bindCap = (e->bindCap < 128) ? 128 : e->bindCap;
+  if (e->bind_count == 0)
+    e->bind_cap = (e->bind_cap < 128) ? 128 : e->bind_cap;
 
-  VarDecl* var = (VarDecl*)arena_alloc(e->arena, sizeof(VarDecl));
+  var_decl_t* var = (var_decl_t*)arena_alloc(e->arena, sizeof(var_decl_t));
 
   if (!var)
     return NULL;
@@ -119,32 +119,32 @@ static VarDecl* declareVar(Emit* e, const char* base, int length, const char* va
   var->length = length;
   var->value = value;
 
-  if (e->varCount < (int)(sizeof(e->vars) / sizeof(e->vars[0])))
-    e->vars[e->varCount++] = var;
+  if (e->var_count < (int)(sizeof(e->vars) / sizeof(e->vars[0])))
+    e->vars[e->var_count++] = var;
 
-  e->binds[e->bindCount].name = arena_dup(e->arena, base, strlen(base));
-  e->binds[e->bindCount].var = var;
-  e->bindCount++;
+  e->binds[e->bind_count].name = arena_dup(e->arena, base, strlen(base));
+  e->binds[e->bind_count].var = var;
+  e->bind_count++;
 
   return var;
 }
 
 /** Find a binding by bare name, innermost scope first. */
-static VarDecl* lookupVar(Emit* e, Str name)
+static var_decl_t* lookup_var(emit_t* e, str_t name)
 {
-  for (int i = e->bindCount - 1; i >= 0; i--)
+  for (int i = e->bind_count - 1; i >= 0; i--)
     if ((int)strlen(e->binds[i].name) == name.len && memcmp(e->binds[i].name, name.p, (size_t)name.len) == 0)
       return e->binds[i].var;
 
   return NULL;
 }
 
-static bool hasVar(Emit* e, Str name)
+static bool has_var(emit_t* e, str_t name)
 {
-  return lookupVar(e, name) != NULL;
+  return lookup_var(e, name) != NULL;
 }
 
-void emit_bindGlobal(Emit* e, const char* name, int length, const char* value)
+void emit_bind_global(emit_t* e, const char* name, int length, const char* value)
 {
   const char* saved = e->prefix;
   char empty[1] = {0};
@@ -155,17 +155,17 @@ void emit_bindGlobal(Emit* e, const char* name, int length, const char* value)
 
   /* Declared outside any function, so it takes no prefix and joins no function's
    * prologue; the prologue for a `var` block is rendered from the TopItem instead. */
-  (void)declareVar(e, name, length, value);
+  (void)declare_var(e, name, length, value);
 
-  e->globalMark = e->bindCount;
+  e->global_mark = e->bind_count;
 }
 
 /* ------------------------------------------------------------- op rendering ------ */
 
-static void renderVal(Buf* out, const Val* v);
+static void render_val(buf_t* out, const val_t* v);
 
 /** One rendered op line, including its terminating newline. */
-static void putOp(Emit* e, const char* name, Val* const* params, int n)
+static void put_op(emit_t* e, const char* name, val_t* const* params, int n)
 {
   buf_puts(&e->body, name);
   buf_putc(&e->body, ' ');
@@ -175,22 +175,22 @@ static void putOp(Emit* e, const char* name, Val* const* params, int n)
     if (i > 0)
       buf_puts(&e->body, ", ");
 
-    renderVal(&e->body, params[i]);
+    render_val(&e->body, params[i]);
   }
 
   buf_putc(&e->body, '\n');
 }
 
-static void putLabelLine(Emit* e, int label)
+static void put_label_line(emit_t* e, int label)
 {
   buf_printf(&e->body, "_label_%d:\n", label);
 }
 
 /* ---------------------------------------------------------------- value helpers -- */
 
-static Val* mkVal(Emit* e, Vk kind)
+static val_t* mk_val(emit_t* e, vk_t kind)
 {
-  Val* v = (Val*)arena_alloc(e->arena, sizeof(Val));
+  val_t* v = (val_t*)arena_alloc(e->arena, sizeof(val_t));
 
   if (!v)
   {
@@ -202,9 +202,9 @@ static Val* mkVal(Emit* e, Vk kind)
   return v;
 }
 
-static Val* mkImm(Emit* e, const char* text)
+static val_t* mk_imm(emit_t* e, const char* text)
 {
-  Val* v = mkVal(e, VK_IMM);
+  val_t* v = mk_val(e, VK_IMM);
 
   if (v)
     v->text = text;
@@ -212,9 +212,9 @@ static Val* mkImm(Emit* e, const char* text)
   return v;
 }
 
-static Val* mkVar(Emit* e, VarDecl* var)
+static val_t* mk_var(emit_t* e, var_decl_t* var)
 {
-  Val* v = mkVal(e, VK_VAR);
+  val_t* v = mk_val(e, VK_VAR);
 
   if (v)
     v->var = var;
@@ -222,12 +222,12 @@ static Val* mkVar(Emit* e, VarDecl* var)
   return v;
 }
 
-static Val* mkLabelRef(Emit* e, int label)
+static val_t* mk_label_ref(emit_t* e, int label)
 {
   char name[32];
   snprintf(name, sizeof(name), "_label_%d", label);
 
-  Val* v = mkVal(e, VK_LABEL);
+  val_t* v = mk_val(e, VK_LABEL);
 
   if (v)
     v->text = arena_dup(e->arena, name, strlen(name));
@@ -235,9 +235,9 @@ static Val* mkLabelRef(Emit* e, int label)
   return v;
 }
 
-static Val* mkBinaryForm(Emit* e, Vk kind, Val* a, Val* b)
+static val_t* mk_binary_form(emit_t* e, vk_t kind, val_t* a, val_t* b)
 {
-  Val* v = mkVal(e, kind);
+  val_t* v = mk_val(e, kind);
 
   if (v)
   {
@@ -254,9 +254,9 @@ static Val* mkBinaryForm(Emit* e, Vk kind, Val* a, Val* b)
  *  `Str` is not NUL-terminated, and immediates render through `buf_puts`, so the text
  *  is copied to a terminated string here. Handing `v->text` a raw slice made the
  *  rendered operand run on to the next NUL in the source buffer. */
-static Val* mkImmStr(Emit* e, Str text)
+static val_t* mk_imm_str(emit_t* e, str_t text)
 {
-  Val* v = mkVal(e, VK_IMM);
+  val_t* v = mk_val(e, VK_IMM);
 
   if (!v)
     return NULL;
@@ -270,18 +270,18 @@ static Val* mkImmStr(Emit* e, Str text)
   return v;
 }
 
-static Val* mkUndefined(Emit* e)
+static val_t* mk_undefined(emit_t* e)
 {
-  return mkImm(e, "undefined");
+  return mk_imm(e, "undefined");
 }
 
 /** A variable reference is "pure": it prints without first being copied to a slot. */
-static bool isPure(const Val* v)
+static bool is_pure(const val_t* v)
 {
   return v != NULL && v->kind == VK_VAR;
 }
 
-static void renderVal(Buf* out, const Val* v)
+static void render_val(buf_t* out, const val_t* v)
 {
   if (!v)
     return;
@@ -308,43 +308,43 @@ static void renderVal(Buf* out, const Val* v)
       break;
 
     case VK_ARRAY:
-      renderVal(out, v->a);
+      render_val(out, v->a);
       buf_putc(out, '[');
-      renderVal(out, v->b);
+      render_val(out, v->b);
       buf_putc(out, ']');
       break;
 
     case VK_GV1:
       buf_puts(out, "var[");
-      renderVal(out, v->a);
+      render_val(out, v->a);
       buf_putc(out, ']');
       break;
 
     case VK_GV2:
       buf_puts(out, "var[");
-      renderVal(out, v->a);
+      render_val(out, v->a);
       buf_puts(out, "][");
-      renderVal(out, v->b);
+      render_val(out, v->b);
       buf_putc(out, ']');
       break;
 
     case VK_STOR1:
       buf_puts(out, "stor[");
-      renderVal(out, v->a);
+      render_val(out, v->a);
       buf_putc(out, ']');
       break;
 
     case VK_STOR2:
       buf_puts(out, "stor[");
-      renderVal(out, v->a);
+      render_val(out, v->a);
       buf_puts(out, ", ");
-      renderVal(out, v->b);
+      render_val(out, v->b);
       buf_putc(out, ']');
       break;
 
     case VK_REG:
       buf_puts(out, "reg[");
-      renderVal(out, v->a);
+      render_val(out, v->a);
       buf_putc(out, ']');
       break;
 
@@ -356,7 +356,7 @@ static void renderVal(Buf* out, const Val* v)
         if (i > 0)
           buf_puts(out, ", ");
 
-        renderVal(out, v->items[i]);
+        render_val(out, v->items[i]);
       }
 
       buf_putc(out, ']');
@@ -370,12 +370,12 @@ static void renderVal(Buf* out, const Val* v)
  *  already a variable reference. The counter is per translation unit, not per
  *  function, which is why `addChar__expr_20` continues where `updateParty` stopped.
  */
-static Val* allocSlot(Emit* e)
+static val_t* alloc_slot(emit_t* e)
 {
   char name[32];
-  snprintf(name, sizeof(name), "_expr_%d", e->exprIndex++);
+  snprintf(name, sizeof(name), "_expr_%d", e->expr_index++);
 
-  return mkVar(e, declareVar(e, name, 1, "0"));
+  return mk_var(e, declare_var(e, name, 1, "0"));
 }
 
 /** @brief Allocate a fresh `_expr_N` slot carrying string data.
@@ -388,10 +388,10 @@ static Val* allocSlot(Emit* e)
  *  @param e    Emission state (owns the arena and the slot counter).
  *  @param body String text without its quotes; not NUL-terminated.
  *  @return The slot value, or NULL if the arena is exhausted (sets `aborted`). */
-static Val* allocStrSlot(Emit* e, Str body)
+static val_t* alloc_str_slot(emit_t* e, str_t body)
 {
   char name[32];
-  snprintf(name, sizeof(name), "_expr_%d", e->exprIndex++);
+  snprintf(name, sizeof(name), "_expr_%d", e->expr_index++);
 
   const int len = (body.len < 0) ? 0 : body.len;
   char* data = (char*)arena_alloc(e->arena, (size_t)len + 8);
@@ -412,7 +412,7 @@ static Val* allocStrSlot(Emit* e, Str body)
   data[4 + len] = ']';
   data[5 + len] = '\0';
 
-  VarDecl* var = declareVar(e, name, 1, data);
+  var_decl_t* var = declare_var(e, name, 1, data);
 
   if (!var)
   {
@@ -420,33 +420,33 @@ static Val* allocStrSlot(Emit* e, Str body)
     return NULL;
   }
 
-  return mkVar(e, var);
+  return mk_var(e, var);
 }
 
 /** @brief Give @p v as an operand, copying it to a slot unless it already is one
  *         (`valueToVariable` in the reference). */
-static Val* toSlot(Emit* e, Val* v)
+static val_t* to_slot(emit_t* e, val_t* v)
 {
-  if (isPure(v))
+  if (is_pure(v))
     return v;
 
-  Val* slot = allocSlot(e);
+  val_t* slot = alloc_slot(e);
 
   if (!slot)
     return NULL;
 
-  Val* const params[2] = {v, slot};
-  putOp(e, "mov", params, 2);
+  val_t* const params[2] = {v, slot};
+  put_op(e, "mov", params, 2);
 
   return slot;
 }
 
 /* ---------------------------------------------------------- function table ------ */
 
-FuncDef* funcTableAdd(FuncTable* t, Arena* arena, Str name, Str params[], int paramCount, int returns, int unitIndex,
-                      int line)
+func_def_t* func_table_add(func_table_t* t, arena_t* arena, str_t name, str_t params[], int param_count, int returns,
+                           int unit_index, int line)
 {
-  FuncDef* slot = NULL;
+  func_def_t* slot = NULL;
 
   /* Last registration for a name wins, matching the reference's `Map.put` after each
    * preprocessed file. */
@@ -463,35 +463,35 @@ FuncDef* funcTableAdd(FuncTable* t, Arena* arena, Str name, Str params[], int pa
   {
     if (t->count == t->cap)
     {
-      const int newCap = t->cap ? t->cap * 2 : 32;
-      FuncDef* grown = (FuncDef*)arena_alloc(arena, (size_t)newCap * sizeof(FuncDef));
+      const int new_cap = t->cap ? t->cap * 2 : 32;
+      func_def_t* grown = (func_def_t*)arena_alloc(arena, (size_t)new_cap * sizeof(func_def_t));
 
       if (!grown)
         return NULL;
 
       if (t->count > 0)
-        memcpy(grown, t->items, (size_t)t->count * sizeof(FuncDef));
+        memcpy(grown, t->items, (size_t)t->count * sizeof(func_def_t));
 
       t->items = grown;
-      t->cap = newCap;
+      t->cap = new_cap;
     }
 
     slot = &t->items[t->count++];
   }
 
   slot->name = name;
-  slot->paramCount = paramCount < 16 ? paramCount : 16;
+  slot->param_count = param_count < 16 ? param_count : 16;
   slot->returns = returns;
-  slot->unitIndex = unitIndex;
+  slot->unit_index = unit_index;
   slot->line = line;
 
-  for (int i = 0; i < slot->paramCount; i++)
+  for (int i = 0; i < slot->param_count; i++)
     slot->params[i] = params[i];
 
   return slot;
 }
 
-const FuncDef* funcTableFind(const FuncTable* t, Str name)
+const func_def_t* func_table_find(const func_table_t* t, str_t name)
 {
   for (int i = 0; i < t->count; i++)
     if (t->items[i].name.len == name.len && memcmp(t->items[i].name.p, name.p, (size_t)name.len) == 0)
@@ -503,13 +503,13 @@ const FuncDef* funcTableFind(const FuncTable* t, Str name)
 /* --------------------------------------------------- pass A: definition scan ----- */
 
 /** Count the values a `return` yields. */
-static int countReturnValues(const Node* r)
+static int count_return_values(const node_t* r)
 {
   if (r->kids.n == 0)
     return 0;
 
   /* `return (a, b);` is a list, one value per element. */
-  if (r->lhsKind == LH_LIST)
+  if (r->lhs_kind == LH_LIST)
     return r->kids.n;
 
   return 1;
@@ -523,45 +523,45 @@ static int countReturnValues(const Node* r)
  *  return sizes; a `return` that is merely the last statement of the body is found by
  *  the plain tail check.
  */
-static int lastReturnValues(const Node* b, int depth)
+static int last_return_values(const node_t* b, int depth)
 {
   if (!b || b->kind != N_BLOCK || b->kids.n == 0 || depth > 16)
     return -1;
 
-  const Node* last = b->kids.v[b->kids.n - 1];
+  const node_t* last = b->kids.v[b->kids.n - 1];
 
   if (last->kind == N_RETURN)
-    return countReturnValues(last);
+    return count_return_values(last);
 
   if (last->kind == N_IF && last->kids.n >= 2)
-    return lastReturnValues(last->kids.v[1], depth + 1);
+    return last_return_values(last->kids.v[1], depth + 1);
 
   if ((last->kind == N_WHILE || last->kind == N_DOWHILE) && last->kids.n >= 1)
   {
     const int bi = (last->kind == N_DOWHILE) ? 0 : 1;
 
-    return lastReturnValues(last->kids.v[bi], depth + 1);
+    return last_return_values(last->kids.v[bi], depth + 1);
   }
 
   return -1;
 }
 
-void emit_scan(Emit* e, const Source* src, int unitIndex, const char* prefix)
+void emit_scan(emit_t* e, const source_t* src, int unit_index, const char* prefix)
 {
   (void)prefix;
 
-  for (int i = 0; i < src->itemCount && !e->aborted; i++)
+  for (int i = 0; i < src->item_count && !e->aborted; i++)
   {
-    const TopItem* it = &src->items[i];
+    const top_item_t* it = &src->items[i];
 
     if (it->kind != TOP_FUNC || it->fn == NULL)
       continue;
 
-    const Func* fn = it->fn;
+    const func_t* fn = it->fn;
 
     /* `missing return` inspects only the tail of the body's statement list, which is
      * why p14 reports it even though its only `return` is inside the `if`. */
-    const Node* last = (fn->body && fn->body->kids.n > 0) ? fn->body->kids.v[fn->body->kids.n - 1] : NULL;
+    const node_t* last = (fn->body && fn->body->kids.n > 0) ? fn->body->kids.v[fn->body->kids.n - 1] : NULL;
 
     if (last == NULL || last->kind != N_RETURN)
     {
@@ -571,9 +571,9 @@ void emit_scan(Emit* e, const Source* src, int unitIndex, const char* prefix)
     }
 
     /* A function named like an ASM op is rejected: `OpType.byName` would win the name. */
-    for (int k = 0; k < kOpNameCount; k++)
+    for (int k = 0; k < op_name_count; k++)
     {
-      if (str_ieq_cstr(fn->name, kOpNames[k].name))
+      if (str_ieq_cstr(fn->name, op_names[k].name))
       {
         char msg[256];
         snprintf(msg, sizeof(msg), "function \"%.*s\" is not a legal name", fn->name.len, fn->name.p);
@@ -582,56 +582,57 @@ void emit_scan(Emit* e, const Source* src, int unitIndex, const char* prefix)
       }
     }
 
-    const int returns = lastReturnValues(fn->body, 0);
+    const int returns = last_return_values(fn->body, 0);
 
-    Str params[16];
-    int nParams = (fn->argc < 16) ? fn->argc : 16;
+    str_t params[16];
+    int n_params = (fn->argc < 16) ? fn->argc : 16;
 
-    for (int k = 0; k < nParams; k++)
+    for (int k = 0; k < n_params; k++)
       params[k] = fn->args[k];
 
-    (void)funcTableAdd(&e->table, e->arena, fn->name, params, nParams, returns < 0 ? 0 : returns, unitIndex, fn->line);
+    (void)func_table_add(&e->table, e->arena, fn->name, params, n_params, returns < 0 ? 0 : returns, unit_index,
+                         fn->line);
   }
 }
 
 /* ------------------------------------------------------- pass B: emission -------- */
 
-static Val* emitExpr(Emit* e, const Node* n);
-static void emitStmt(Emit* e, const Node* n);
+static val_t* emit_expr(emit_t* e, const node_t* n);
+static void emit_stmt(emit_t* e, const node_t* n);
 
-static void pushScope(Emit* e)
+static void push_scope(emit_t* e)
 {
-  if (e->markCount < (int)(sizeof(e->marks) / sizeof(e->marks[0])))
-    e->marks[e->markCount++] = e->bindCount;
+  if (e->mark_count < (int)(sizeof(e->marks) / sizeof(e->marks[0])))
+    e->marks[e->mark_count++] = e->bind_count;
 }
 
-static void popScope(Emit* e)
+static void pop_scope(emit_t* e)
 {
-  if (e->markCount > 0)
-    e->bindCount = e->marks[--e->markCount];
+  if (e->mark_count > 0)
+    e->bind_count = e->marks[--e->mark_count];
 }
 
-static void emitBlock(Emit* e, const Node* b)
+static void emit_block(emit_t* e, const node_t* b)
 {
   if (!b || b->kind != N_BLOCK || e->aborted)
     return;
 
-  pushScope(e);
+  push_scope(e);
 
   for (int i = 0; i < b->kids.n && !e->aborted; i++)
-    emitStmt(e, b->kids.v[i]);
+    emit_stmt(e, b->kids.v[i]);
 
-  popScope(e);
+  pop_scope(e);
 }
 
 /** Lower an identifier used as a value. */
-static Val* emitVar(Emit* e, const Node* n)
+static val_t* emit_var(emit_t* e, const node_t* n)
 {
-  const Str name = str_of(n->name, strlen(n->name));
+  const str_t name = str_of(n->name, strlen(n->name));
 
   /* An enum constant prints verbatim instead of resolving as a variable. */
   if (meta_is_enum_value(e->meta, name))
-    return mkImm(e, n->name);
+    return mk_imm(e, n->name);
 
   /* `true` and `false` are lexer keywords with no parser rule that mentions them; the
    * reference reaches a NullPointerException when one appears in a value position.
@@ -646,21 +647,21 @@ static Val* emitVar(Emit* e, const Node* n)
     return NULL;
   }
 
-  VarDecl* var = lookupVar(e, name);
+  var_decl_t* var = lookup_var(e, name);
 
   if (!var)
   {
     char msg[256];
     snprintf(msg, sizeof(msg), "variable \"%.*s\" is not defined in the current scope", name.len, name.p);
     diag_add(e->diag, n->line, msg);
-    return mkUndefined(e);
+    return mk_undefined(e);
   }
 
-  return mkVar(e, var);
+  return mk_var(e, var);
 }
 
 /** The bare first identifier of a call name, for the ASM-op lookup. */
-static Str bareCallName(const Node* c)
+static str_t bare_call_name(const node_t* c)
 {
   const char* sep = strstr(c->name, "::");
 
@@ -669,11 +670,11 @@ static Str bareCallName(const Node* c)
 
 /** Look an ASM op up the way `OpType.byName` does: ASCII-insensitive, first match in
  *  declaration order wins, which matters for the duplicated display names. */
-static const OpName* findOp(Str name)
+static const op_name_t* find_op(str_t name)
 {
-  for (int i = 0; i < kOpNameCount; i++)
-    if (str_ieq_cstr(name, kOpNames[i].name))
-      return &kOpNames[i];
+  for (int i = 0; i < op_name_count; i++)
+    if (str_ieq_cstr(name, op_names[i].name))
+      return &op_names[i];
 
   return NULL;
 }
@@ -683,23 +684,23 @@ static const OpName* findOp(Str name)
  *  @return The produced value in expression position, or NULL when the call produced
  *  none (ASM ops and engine calls), which the caller reports and renders as
  *  `undefined`. */
-static Val* emitCall(Emit* e, const Node* c, bool inExpr)
+static val_t* emit_call(emit_t* e, const node_t* c, bool in_expr)
 {
   const int argc = c->kids.n;
 
-  if (!c->isEngineCall)
+  if (!c->is_engine_call)
   {
-    const OpName* op = findOp(bareCallName(c));
+    const op_name_t* op = find_op(bare_call_name(c));
 
     if (op != NULL)
     {
-      Val* params[EMIT_MAX_PARAMS];
+      val_t* params[EMIT_MAX_PARAMS];
       int n = 0;
 
-      if (op->paramCount != argc)
+      if (op->param_count != argc)
       {
         char msg[256];
-        snprintf(msg, sizeof(msg), "expected %d params, got %d", op->paramCount, argc);
+        snprintf(msg, sizeof(msg), "expected %d params, got %d", op->param_count, argc);
         diag_add(e->diag, c->line, msg);
       }
 
@@ -708,11 +709,11 @@ static Val* emitCall(Emit* e, const Node* c, bool inExpr)
         if (c->kids.v[i]->kind == E_STR)
         {
           diag_add(e->diag, c->line, "strings cannot be passed to ASM ops");
-          params[n++] = mkUndefined(e);
+          params[n++] = mk_undefined(e);
           continue;
         }
 
-        params[n++] = emitExpr(e, c->kids.v[i]);
+        params[n++] = emit_expr(e, c->kids.v[i]);
       }
 
       /* `wait` clones its operand first. The op counts down inside the slot it is
@@ -723,23 +724,23 @@ static Val* emitCall(Emit* e, const Node* c, bool inExpr)
        * takes no such copy. */
       if (op->opcode == 2 && n == 1 && !e->aborted)
       {
-        Val* const slot = allocSlot(e);
+        val_t* const slot = alloc_slot(e);
 
         if (!slot)
           return NULL;
 
-        Val* const copy[2] = {params[0], slot};
-        putOp(e, "mov", copy, 2);
+        val_t* const copy[2] = {params[0], slot};
+        put_op(e, "mov", copy, 2);
         params[0] = slot;
       }
 
       if (!e->aborted)
-        putOp(e, kOpNames[op - kOpNames].name, params, n);
+        put_op(e, op_names[op - op_names].name, params, n);
 
-      if (inExpr)
+      if (in_expr)
       {
         diag_add(e->diag, c->line, "ASM ops and engine calls cannot be used in expressions");
-        return mkUndefined(e);
+        return mk_undefined(e);
       }
 
       return NULL;
@@ -747,7 +748,7 @@ static Val* emitCall(Emit* e, const Node* c, bool inExpr)
   }
   else
   {
-    const MetaMethod* m = meta_find_method(e->meta, c->name);
+    const meta_method_t* m = meta_find_method(e->meta, c->name);
 
     if (!m)
     {
@@ -758,15 +759,15 @@ static Val* emitCall(Emit* e, const Node* c, bool inExpr)
       return NULL;
     }
 
-    Val* params[EMIT_MAX_PARAMS + 1];
+    val_t* params[EMIT_MAX_PARAMS + 1];
     int n = 0;
 
-    params[n++] = mkImm(e, c->name);
+    params[n++] = mk_imm(e, c->name);
 
-    if (m->paramCount != argc)
+    if (m->param_count != argc)
     {
       char msg[256];
-      snprintf(msg, sizeof(msg), "expected %d params, got %d", m->paramCount, argc);
+      snprintf(msg, sizeof(msg), "expected %d params, got %d", m->param_count, argc);
       diag_add(e->diag, c->line, msg);
     }
 
@@ -778,20 +779,20 @@ static Val* emitCall(Emit* e, const Node* c, bool inExpr)
        * after the method name and printed three `INVALID`s for three real ones. */
       if (c->kids.v[i]->kind == E_STR)
       {
-        params[n++] = allocStrSlot(e, c->kids.v[i]->text);
+        params[n++] = alloc_str_slot(e, c->kids.v[i]->text);
         continue;
       }
 
-      params[n++] = emitExpr(e, c->kids.v[i]);
+      params[n++] = emit_expr(e, c->kids.v[i]);
     }
 
     if (!e->aborted)
-      putOp(e, "call", params, n);
+      put_op(e, "call", params, n);
 
-    if (inExpr)
+    if (in_expr)
     {
       diag_add(e->diag, c->line, "ASM ops and engine calls cannot be used in expressions");
-      return mkUndefined(e);
+      return mk_undefined(e);
     }
 
     return NULL;
@@ -799,14 +800,14 @@ static Val* emitCall(Emit* e, const Node* c, bool inExpr)
 
   /* User-function call. An unknown name still emits the gosub; the reference only
    * records the diagnostic. */
-  const FuncDef* def = funcTableFind(&e->table, bareCallName(c));
+  const func_def_t* def = func_table_find(&e->table, bare_call_name(c));
 
   if (def)
   {
-    if (def->paramCount != argc)
+    if (def->param_count != argc)
     {
       char msg[256];
-      snprintf(msg, sizeof(msg), "expected %d params, got %d", def->paramCount, argc);
+      snprintf(msg, sizeof(msg), "expected %d params, got %d", def->param_count, argc);
       diag_add(e->diag, c->line, msg);
     }
   }
@@ -819,29 +820,29 @@ static Val* emitCall(Emit* e, const Node* c, bool inExpr)
 
   for (int i = 0; i < argc; i++)
   {
-    Val* v;
+    val_t* v;
 
     if (c->kids.v[i]->kind == E_STR)
     {
       diag_add(e->diag, c->line, "strings cannot be passed as parameters");
-      v = mkUndefined(e);
+      v = mk_undefined(e);
     }
     else
     {
-      v = emitExpr(e, c->kids.v[i]);
+      v = emit_expr(e, c->kids.v[i]);
     }
 
-    Val* const push[1] = {v};
-    putOp(e, "push", push, 1);
+    val_t* const push[1] = {v};
+    put_op(e, "push", push, 1);
   }
 
-  char gosubName[288];
-  snprintf(gosubName, sizeof(gosubName), "inl[:%s]", c->name);
+  char gosub_name[288];
+  snprintf(gosub_name, sizeof(gosub_name), "inl[:%s]", c->name);
 
-  Val* ref = mkVal(e, VK_IMM);
+  val_t* ref = mk_val(e, VK_IMM);
 
   if (ref)
-    ref->text = arena_dup(e->arena, gosubName, strlen(gosubName));
+    ref->text = arena_dup(e->arena, gosub_name, strlen(gosub_name));
 
   if (e->aborted)
     return NULL;
@@ -851,11 +852,11 @@ static Val* emitCall(Emit* e, const Node* c, bool inExpr)
    * emitted order push / gosub / pop. Skipping it here dropped the `gosub` line from
    * every expression-position user call. */
   {
-    Val* const op[1] = {ref};
-    putOp(e, "gosub", op, 1);
+    val_t* const op[1] = {ref};
+    put_op(e, "gosub", op, 1);
   }
 
-  if (!inExpr)
+  if (!in_expr)
     return NULL;
 
   /* In expression position the return values are popped out of the stack. An unknown
@@ -867,24 +868,24 @@ static Val* emitCall(Emit* e, const Node* c, bool inExpr)
   if (want <= 0)
   {
     diag_add(e->diag, c->line, "ASM ops and engine calls cannot be used in expressions");
-    return mkUndefined(e);
+    return mk_undefined(e);
   }
 
-  Val** items = NULL;
+  val_t** items = NULL;
 
   if (want > 1)
   {
-    items = (Val**)arena_alloc(e->arena, sizeof(Val*) * (size_t)want);
+    items = (val_t**)arena_alloc(e->arena, sizeof(val_t*) * (size_t)want);
     if (!items)
       return NULL;
   }
 
   for (int i = want - 1; i >= 0; i--)
   {
-    Val* slot = allocSlot(e);
+    val_t* slot = alloc_slot(e);
 
-    Val* const pop[1] = {slot};
-    putOp(e, "pop", pop, 1);
+    val_t* const pop[1] = {slot};
+    put_op(e, "pop", pop, 1);
 
     if (want > 1)
       items[i] = slot;
@@ -892,7 +893,7 @@ static Val* emitCall(Emit* e, const Node* c, bool inExpr)
       return slot;
   }
 
-  Val* list = mkVal(e, VK_LIST);
+  val_t* list = mk_val(e, VK_LIST);
 
   if (list)
   {
@@ -904,11 +905,11 @@ static Val* emitCall(Emit* e, const Node* c, bool inExpr)
 }
 
 /** Lower a binary or unary operator. */
-static Val* emitBinary(Emit* e, const Node* n)
+static val_t* emit_binary(emit_t* e, const node_t* n)
 {
   /* The result slot is allocated before the operands are lowered. Reversing the two
    * shifts every later `_expr_N` number in the file. */
-  Val* out = allocSlot(e);
+  val_t* out = alloc_slot(e);
 
   if (!out)
     return NULL;
@@ -917,39 +918,39 @@ static Val* emitBinary(Emit* e, const Node* n)
 
   if (unary)
   {
-    Val* src = emitExpr(e, n->kids.v[0]);
+    val_t* src = emit_expr(e, n->kids.v[0]);
 
     if (!src)
       return NULL;
 
     if (n->bin == UNY_NOT)
     {
-      Val* const p[4] = {mkImm(e, "=="), src, mkImm(e, "0"), out};
-      putOp(e, "cmp", p, 4);
+      val_t* const p[4] = {mk_imm(e, "=="), src, mk_imm(e, "0"), out};
+      put_op(e, "cmp", p, 4);
       return out;
     }
 
     {
-      Val* const p2[2] = {src, out};
-      putOp(e, "mov", p2, 2);
+      val_t* const p2[2] = {src, out};
+      put_op(e, "mov", p2, 2);
 
       if (n->bin == UNY_SUB)
       {
-        Val* const p1[1] = {out};
-        putOp(e, "neg", p1, 1);
+        val_t* const p1[1] = {out};
+        put_op(e, "neg", p1, 1);
       }
       else if (n->bin == UNY_NOTA)
       {
-        Val* const p1[1] = {out};
-        putOp(e, "not", p1, 1);
+        val_t* const p1[1] = {out};
+        put_op(e, "not", p1, 1);
       }
 
       return out;
     }
   }
 
-  Val* lhs = emitExpr(e, n->kids.v[0]);
-  Val* rhs = emitExpr(e, n->kids.v[1]);
+  val_t* lhs = emit_expr(e, n->kids.v[0]);
+  val_t* rhs = emit_expr(e, n->kids.v[1]);
 
   if (!lhs || !rhs)
     return NULL;
@@ -967,8 +968,8 @@ static Val* emitBinary(Emit* e, const Node* n)
     case BIN_ORA:
     case BIN_XORA:
     {
-      Val* const p2[2] = {lhs, out};
-      putOp(e, "mov", p2, 2);
+      val_t* const p2[2] = {lhs, out};
+      put_op(e, "mov", p2, 2);
 
       const char* op = "add";
 
@@ -1008,64 +1009,64 @@ static Val* emitBinary(Emit* e, const Node* n)
           break;
       }
 
-      Val* const p3[2] = {rhs, out};
-      putOp(e, op, p3, 2);
+      val_t* const p3[2] = {rhs, out};
+      put_op(e, op, p3, 2);
       return out;
     }
 
     case BIN_GT:
     {
-      Val* const p[4] = {mkImm(e, ">"), lhs, rhs, out};
-      putOp(e, "cmp", p, 4);
+      val_t* const p[4] = {mk_imm(e, ">"), lhs, rhs, out};
+      put_op(e, "cmp", p, 4);
       return out;
     }
 
     case BIN_LT:
     {
-      Val* const p[4] = {mkImm(e, "<"), lhs, rhs, out};
-      putOp(e, "cmp", p, 4);
+      val_t* const p[4] = {mk_imm(e, "<"), lhs, rhs, out};
+      put_op(e, "cmp", p, 4);
       return out;
     }
 
     case BIN_GTE:
     {
-      Val* const p[4] = {mkImm(e, ">="), lhs, rhs, out};
-      putOp(e, "cmp", p, 4);
+      val_t* const p[4] = {mk_imm(e, ">="), lhs, rhs, out};
+      put_op(e, "cmp", p, 4);
       return out;
     }
 
     case BIN_LTE:
     {
-      Val* const p[4] = {mkImm(e, "<="), lhs, rhs, out};
-      putOp(e, "cmp", p, 4);
+      val_t* const p[4] = {mk_imm(e, "<="), lhs, rhs, out};
+      put_op(e, "cmp", p, 4);
       return out;
     }
 
     case BIN_EQ:
     {
-      Val* const p[4] = {mkImm(e, "=="), lhs, rhs, out};
-      putOp(e, "cmp", p, 4);
+      val_t* const p[4] = {mk_imm(e, "=="), lhs, rhs, out};
+      put_op(e, "cmp", p, 4);
       return out;
     }
 
     case BIN_NEQ:
     {
-      Val* const p[4] = {mkImm(e, "!="), lhs, rhs, out};
-      putOp(e, "cmp", p, 4);
+      val_t* const p[4] = {mk_imm(e, "!="), lhs, rhs, out};
+      put_op(e, "cmp", p, 4);
       return out;
     }
 
     case BIN_ANDC:
     {
-      Val* const p[4] = {mkImm(e, "&&"), lhs, rhs, out};
-      putOp(e, "cmp", p, 4);
+      val_t* const p[4] = {mk_imm(e, "&&"), lhs, rhs, out};
+      put_op(e, "cmp", p, 4);
       return out;
     }
 
     case BIN_ORC:
     {
-      Val* const p[4] = {mkImm(e, "||"), lhs, rhs, out};
-      putOp(e, "cmp", p, 4);
+      val_t* const p[4] = {mk_imm(e, "||"), lhs, rhs, out};
+      put_op(e, "cmp", p, 4);
       return out;
     }
 
@@ -1080,7 +1081,7 @@ static Val* emitBinary(Emit* e, const Node* n)
   return out;
 }
 
-static Val* emitExpr(Emit* e, const Node* n)
+static val_t* emit_expr(emit_t* e, const node_t* n)
 {
   if (!n)
     return NULL;
@@ -1088,50 +1089,51 @@ static Val* emitExpr(Emit* e, const Node* n)
   switch (n->kind)
   {
     case E_NUM:
-      return mkImmStr(e, n->text);
+      return mk_imm_str(e, n->text);
     case E_STR:
-      return mkImm(e, "INVALID");
+      return mk_imm(e, "INVALID");
     case E_VAR:
-      return emitVar(e, n);
+      return emit_var(e, n);
 
     case E_ARRAY:
     {
-      Val* base = emitVar(e, n);
+      val_t* base = emit_var(e, n);
 
       if (!base)
         return NULL;
 
-      Val* idx = toSlot(e, emitExpr(e, n->kids.v[0]));
+      val_t* idx = to_slot(e, emit_expr(e, n->kids.v[0]));
 
-      return mkBinaryForm(e, VK_ARRAY, base, idx);
+      return mk_binary_form(e, VK_ARRAY, base, idx);
     }
 
     case E_STOR:
     {
       if (n->kids.n == 1)
-        return mkBinaryForm(e, VK_STOR1, toSlot(e, emitExpr(e, n->kids.v[0])), NULL);
+        return mk_binary_form(e, VK_STOR1, to_slot(e, emit_expr(e, n->kids.v[0])), NULL);
 
-      return mkBinaryForm(e, VK_STOR2, toSlot(e, emitExpr(e, n->kids.v[0])), toSlot(e, emitExpr(e, n->kids.v[1])));
+      return mk_binary_form(e, VK_STOR2, to_slot(e, emit_expr(e, n->kids.v[0])),
+                            to_slot(e, emit_expr(e, n->kids.v[1])));
     }
 
     case E_GAMEVAR:
     {
       if (n->kids.n == 1)
-        return mkBinaryForm(e, VK_GV1, toSlot(e, emitExpr(e, n->kids.v[0])), NULL);
+        return mk_binary_form(e, VK_GV1, to_slot(e, emit_expr(e, n->kids.v[0])), NULL);
 
-      return mkBinaryForm(e, VK_GV2, toSlot(e, emitExpr(e, n->kids.v[0])), toSlot(e, emitExpr(e, n->kids.v[1])));
+      return mk_binary_form(e, VK_GV2, to_slot(e, emit_expr(e, n->kids.v[0])), to_slot(e, emit_expr(e, n->kids.v[1])));
     }
 
     case E_REG:
       /* The register index prints verbatim: no slot is allocated for it. */
-      return mkBinaryForm(e, VK_REG, emitExpr(e, n->kids.v[0]), NULL);
+      return mk_binary_form(e, VK_REG, emit_expr(e, n->kids.v[0]), NULL);
 
     case E_UNARY:
     case E_BINARY:
-      return emitBinary(e, n);
+      return emit_binary(e, n);
 
     case E_CALL:
-      return emitCall(e, n, true);
+      return emit_call(e, n, true);
 
     default:
       break;
@@ -1141,109 +1143,110 @@ static Val* emitExpr(Emit* e, const Node* n)
   snprintf(msg, sizeof(msg), "unimplemented value");
   diag_add(e->diag, n->line, msg);
 
-  return mkUndefined(e);
+  return mk_undefined(e);
 }
 
 /** Lower the destination of an assignment or postfix op. */
-static Val* emitAssignable(Emit* e, const Node* n)
+static val_t* emit_assignable(emit_t* e, const node_t* n)
 {
   switch (n->kind)
   {
     case E_VAR:
-      return emitVar(e, n);
+      return emit_var(e, n);
     case E_CALL:
       return NULL; /* a call target is not a value position */
 
     case E_STOR:
     {
       if (n->kids.n == 1)
-        return mkBinaryForm(e, VK_STOR1, toSlot(e, emitExpr(e, n->kids.v[0])), NULL);
+        return mk_binary_form(e, VK_STOR1, to_slot(e, emit_expr(e, n->kids.v[0])), NULL);
 
-      return mkBinaryForm(e, VK_STOR2, toSlot(e, emitExpr(e, n->kids.v[0])), toSlot(e, emitExpr(e, n->kids.v[1])));
+      return mk_binary_form(e, VK_STOR2, to_slot(e, emit_expr(e, n->kids.v[0])),
+                            to_slot(e, emit_expr(e, n->kids.v[1])));
     }
 
     case E_GAMEVAR:
     {
       if (n->kids.n == 1)
-        return mkBinaryForm(e, VK_GV1, toSlot(e, emitExpr(e, n->kids.v[0])), NULL);
+        return mk_binary_form(e, VK_GV1, to_slot(e, emit_expr(e, n->kids.v[0])), NULL);
 
-      return mkBinaryForm(e, VK_GV2, toSlot(e, emitExpr(e, n->kids.v[0])), toSlot(e, emitExpr(e, n->kids.v[1])));
+      return mk_binary_form(e, VK_GV2, to_slot(e, emit_expr(e, n->kids.v[0])), to_slot(e, emit_expr(e, n->kids.v[1])));
     }
 
     case E_REG:
-      return mkBinaryForm(e, VK_REG, emitExpr(e, n->kids.v[0]), NULL);
+      return mk_binary_form(e, VK_REG, emit_expr(e, n->kids.v[0]), NULL);
 
     default:
       break;
   }
 
-  return mkUndefined(e);
+  return mk_undefined(e);
 }
 
 /* --------------------------------------------------------------- statements ----- */
 
-static void emitAssignment(Emit* e, const Node* rhs, Val** targets, int targetCount)
+static void emit_assignment(emit_t* e, const node_t* rhs, val_t** targets, int target_count)
 {
-  Val* src = emitExpr(e, rhs);
+  val_t* src = emit_expr(e, rhs);
 
   if (!src)
     return;
 
-  for (int i = 0; i < targetCount; i++)
+  for (int i = 0; i < target_count; i++)
   {
-    Val* const p[2] = {src, targets[i]};
-    putOp(e, "mov", p, 2);
+    val_t* const p[2] = {src, targets[i]};
+    put_op(e, "mov", p, 2);
   }
 }
 
-static void emitDecl(Emit* e, const Node* n)
+static void emit_decl(emit_t* e, const node_t* n)
 {
-  Val* targets[EMIT_MAX_PARAMS];
+  val_t* targets[EMIT_MAX_PARAMS];
   int count = 0;
 
   for (int i = 0; i < n->names.n && count < EMIT_MAX_PARAMS; i++)
   {
-    const Node* nameNode = n->names.v[i];
-    const Str name = str_of(nameNode->name, strlen(nameNode->name));
+    const node_t* name_node = n->names.v[i];
+    const str_t name = str_of(name_node->name, strlen(name_node->name));
 
-    if (hasVar(e, name))
+    if (has_var(e, name))
     {
       char msg[256];
       snprintf(msg, sizeof(msg), "variable %.*s already defined in scope", name.len, name.p);
       diag_add(e->diag, n->line, msg);
     }
 
-    targets[count++] = mkVar(e, declareVar(e, name.p ? name.p : "", 1, "0"));
+    targets[count++] = mk_var(e, declare_var(e, name.p ? name.p : "", 1, "0"));
   }
 
-  if (n->initKind == INIT_EXPR && n->init)
-    emitAssignment(e, n->init, targets, count);
-  else if (n->initKind == INIT_ARRAY)
+  if (n->init_kind == INIT_EXPR && n->init)
+    emit_assignment(e, n->init, targets, count);
+  else if (n->init_kind == INIT_ARRAY)
   {
     for (int i = 0; i < count; i++)
     {
       for (int k = 0; k < n->kids.n; k++)
       {
-        Val* src = emitExpr(e, n->kids.v[k]);
+        val_t* src = emit_expr(e, n->kids.v[k]);
 
         if (!src)
           continue;
 
-        Val* const p[2] = {src, targets[i]};
-        putOp(e, "mov", p, 2);
+        val_t* const p[2] = {src, targets[i]};
+        put_op(e, "mov", p, 2);
       }
     }
   }
 }
 
-static void emitReturn(Emit* e, const Node* n)
+static void emit_return(emit_t* e, const node_t* n)
 {
-  Val* values[EMIT_MAX_PARAMS];
+  val_t* values[EMIT_MAX_PARAMS];
   int count = 0;
 
   for (int i = 0; i < n->kids.n && count < EMIT_MAX_PARAMS; i++)
   {
-    Val* v = emitExpr(e, n->kids.v[i]);
+    val_t* v = emit_expr(e, n->kids.v[i]);
 
     if (v)
       values[count++] = v;
@@ -1258,213 +1261,213 @@ static void emitReturn(Emit* e, const Node* n)
 
   for (int i = 0; i < count; i++)
   {
-    Val* const p[1] = {values[i]};
-    putOp(e, "push", p, 1);
+    val_t* const p[1] = {values[i]};
+    put_op(e, "push", p, 1);
   }
 
-  putOp(e, "return", NULL, 0);
+  put_op(e, "return", NULL, 0);
 }
 
-static void emitIf(Emit* e, const Node* n)
+static void emit_if(emit_t* e, const node_t* n)
 {
-  Val* cond = emitExpr(e, n->kids.v[0]);
+  val_t* cond = emit_expr(e, n->kids.v[0]);
 
   if (!cond)
     return;
 
-  const int target = e->labelIndex++;
-  const int hasElse = (n->kids.n >= 3);
+  const int target = e->label_index++;
+  const int has_else = (n->kids.n >= 3);
   int end = -1;
 
-  if (hasElse)
+  if (has_else)
   {
     /* The jump-over label is allocated only after the then-block has been lowered, so
      * a nested `if` inside it claims the lower number. */
     end = -2; /* reserved, numbered below */
   }
 
-  Val* const jumpToTarget[4] = {mkImm(e, "=="), mkImm(e, "0"), cond, mkLabelRef(e, target)};
-  putOp(e, "jmp_cmp", jumpToTarget, 4);
+  val_t* const jump_to_target[4] = {mk_imm(e, "=="), mk_imm(e, "0"), cond, mk_label_ref(e, target)};
+  put_op(e, "jmp_cmp", jump_to_target, 4);
 
-  emitBlock(e, n->kids.v[1]);
+  emit_block(e, n->kids.v[1]);
 
-  if (hasElse)
+  if (has_else)
   {
-    end = e->labelIndex++;
-    Val* const skip[1] = {mkLabelRef(e, end)};
-    putOp(e, "jmp", skip, 1);
+    end = e->label_index++;
+    val_t* const skip[1] = {mk_label_ref(e, end)};
+    put_op(e, "jmp", skip, 1);
   }
 
-  putLabelLine(e, target);
+  put_label_line(e, target);
 
-  if (hasElse)
+  if (has_else)
   {
-    const Node* alt = n->kids.v[2];
+    const node_t* alt = n->kids.v[2];
 
     if (alt->kind == N_IF)
-      emitIf(e, alt);
+      emit_if(e, alt);
     else
-      emitBlock(e, alt);
+      emit_block(e, alt);
 
-    putLabelLine(e, end);
+    put_label_line(e, end);
   }
 }
 
-static void emitWhile(Emit* e, const Node* n)
+static void emit_while(emit_t* e, const node_t* n)
 {
-  const int start = e->labelIndex++;
-  const int end = e->labelIndex++;
+  const int start = e->label_index++;
+  const int end = e->label_index++;
 
-  if (e->loopCount < (int)(sizeof(e->loops) / sizeof(e->loops[0])))
+  if (e->loop_count < (int)(sizeof(e->loops) / sizeof(e->loops[0])))
   {
-    e->loops[e->loopCount].start = start;
-    e->loops[e->loopCount].end = end;
-    e->loopCount++;
+    e->loops[e->loop_count].start = start;
+    e->loops[e->loop_count].end = end;
+    e->loop_count++;
   }
 
-  putLabelLine(e, start);
+  put_label_line(e, start);
 
-  Val* cond = emitExpr(e, n->kids.v[0]);
+  val_t* cond = emit_expr(e, n->kids.v[0]);
 
   if (!cond)
   {
-    e->loopCount--;
+    e->loop_count--;
     return;
   }
 
-  Val* const test[4] = {mkImm(e, "=="), mkImm(e, "0"), cond, mkLabelRef(e, end)};
-  putOp(e, "jmp_cmp", test, 4);
+  val_t* const test[4] = {mk_imm(e, "=="), mk_imm(e, "0"), cond, mk_label_ref(e, end)};
+  put_op(e, "jmp_cmp", test, 4);
 
-  emitBlock(e, n->kids.v[1]);
+  emit_block(e, n->kids.v[1]);
 
-  Val* const back[1] = {mkLabelRef(e, start)};
-  putOp(e, "jmp", back, 1);
+  val_t* const back[1] = {mk_label_ref(e, start)};
+  put_op(e, "jmp", back, 1);
 
-  putLabelLine(e, end);
+  put_label_line(e, end);
 
-  e->loopCount--;
+  e->loop_count--;
 }
 
-static void emitDoWhile(Emit* e, const Node* n)
+static void emit_do_while(emit_t* e, const node_t* n)
 {
-  const int start = e->labelIndex++;
-  const int end = e->labelIndex++;
+  const int start = e->label_index++;
+  const int end = e->label_index++;
 
-  if (e->loopCount < (int)(sizeof(e->loops) / sizeof(e->loops[0])))
+  if (e->loop_count < (int)(sizeof(e->loops) / sizeof(e->loops[0])))
   {
-    e->loops[e->loopCount].start = start;
-    e->loops[e->loopCount].end = end;
-    e->loopCount++;
+    e->loops[e->loop_count].start = start;
+    e->loops[e->loop_count].end = end;
+    e->loop_count++;
   }
 
-  putLabelLine(e, start);
-  emitBlock(e, n->kids.v[0]);
+  put_label_line(e, start);
+  emit_block(e, n->kids.v[0]);
 
-  Val* cond = emitExpr(e, n->kids.v[1]);
+  val_t* cond = emit_expr(e, n->kids.v[1]);
 
   if (!cond)
   {
-    e->loopCount--;
+    e->loop_count--;
     return;
   }
 
   /* A do-while loops *while* the condition holds, hence `!=`, and it falls through to
    * its end label rather than jumping back. */
-  Val* const test[4] = {mkImm(e, "!="), mkImm(e, "0"), cond, mkLabelRef(e, end)};
-  putOp(e, "jmp_cmp", test, 4);
+  val_t* const test[4] = {mk_imm(e, "!="), mk_imm(e, "0"), cond, mk_label_ref(e, end)};
+  put_op(e, "jmp_cmp", test, 4);
 
-  putLabelLine(e, end);
+  put_label_line(e, end);
 
-  e->loopCount--;
+  e->loop_count--;
 }
 
-static void emitStmt(Emit* e, const Node* n)
+static void emit_stmt(emit_t* e, const node_t* n)
 {
   switch (n->kind)
   {
     case N_DECL:
-      emitDecl(e, n);
+      emit_decl(e, n);
       break;
 
     case N_RETURN:
-      emitReturn(e, n);
+      emit_return(e, n);
       break;
 
     case N_IF:
-      emitIf(e, n);
+      emit_if(e, n);
       break;
 
     case N_WHILE:
-      emitWhile(e, n);
+      emit_while(e, n);
       break;
 
     case N_DOWHILE:
-      emitDoWhile(e, n);
+      emit_do_while(e, n);
       break;
 
     case N_CALL:
-      (void)emitCall(e, n->kids.v[0], false);
+      (void)emit_call(e, n->kids.v[0], false);
       break;
 
     case N_BREAK:
     {
-      if (e->loopCount == 0)
+      if (e->loop_count == 0)
       {
         diag_add(e->diag, n->line, "break is only valid inside of loop");
         break;
       }
 
-      Val* const p[1] = {mkLabelRef(e, e->loops[e->loopCount - 1].end)};
-      putOp(e, "jmp", p, 1);
+      val_t* const p[1] = {mk_label_ref(e, e->loops[e->loop_count - 1].end)};
+      put_op(e, "jmp", p, 1);
       break;
     }
 
     case N_CONTINUE:
     {
-      if (e->loopCount == 0)
+      if (e->loop_count == 0)
       {
         diag_add(e->diag, n->line, "continue is only valid inside of loop");
         break;
       }
 
-      Val* const p[1] = {mkLabelRef(e, e->loops[e->loopCount - 1].start)};
-      putOp(e, "jmp", p, 1);
+      val_t* const p[1] = {mk_label_ref(e, e->loops[e->loop_count - 1].start)};
+      put_op(e, "jmp", p, 1);
       break;
     }
 
     case N_POSTFIX:
     {
-      Val* dest = emitAssignable(e, n->names.v[0]);
+      val_t* dest = emit_assignable(e, n->names.v[0]);
 
       if (!dest)
         break;
 
-      Val* const p[1] = {dest};
-      putOp(e, n->isUnary ? "decr" : "incr", p, 1);
+      val_t* const p[1] = {dest};
+      put_op(e, n->is_unary ? "decr" : "incr", p, 1);
       break;
     }
 
     case N_AUGASSIGN:
     {
-      Val* dest = emitAssignable(e, n->names.v[0]);
+      val_t* dest = emit_assignable(e, n->names.v[0]);
 
       if (!dest)
         break;
 
-      Val* rhs = emitExpr(e, n->kids.v[0]);
+      val_t* rhs = emit_expr(e, n->kids.v[0]);
 
       if (!rhs)
         break;
 
       if (n->aug == AUG_ANDC)
       {
-        Val* const p[4] = {mkImm(e, "&&"), dest, rhs, dest};
-        putOp(e, "cmp", p, 4);
+        val_t* const p[4] = {mk_imm(e, "&&"), dest, rhs, dest};
+        put_op(e, "cmp", p, 4);
       }
       else if (n->aug == AUG_ORC)
       {
-        Val* const p[4] = {mkImm(e, "||"), dest, rhs, dest};
-        putOp(e, "cmp", p, 4);
+        val_t* const p[4] = {mk_imm(e, "||"), dest, rhs, dest};
+        put_op(e, "cmp", p, 4);
       }
       else
       {
@@ -1509,8 +1512,8 @@ static void emitStmt(Emit* e, const Node* n)
             break;
         }
 
-        Val* const p[2] = {rhs, dest};
-        putOp(e, op, p, 2);
+        val_t* const p[2] = {rhs, dest};
+        put_op(e, op, p, 2);
       }
 
       break;
@@ -1518,19 +1521,19 @@ static void emitStmt(Emit* e, const Node* n)
 
     case N_ASSIGN:
     {
-      Val* targets[EMIT_MAX_PARAMS];
+      val_t* targets[EMIT_MAX_PARAMS];
       int count = 0;
 
       for (int i = 0; i < n->names.n && count < EMIT_MAX_PARAMS; i++)
       {
-        Val* v = emitAssignable(e, n->names.v[i]);
+        val_t* v = emit_assignable(e, n->names.v[i]);
 
         if (v)
           targets[count++] = v;
       }
 
-      if (n->initKind == INIT_EXPR && n->init)
-        emitAssignment(e, n->init, targets, count);
+      if (n->init_kind == INIT_EXPR && n->init)
+        emit_assignment(e, n->init, targets, count);
       break;
     }
 
@@ -1545,18 +1548,18 @@ static void emitStmt(Emit* e, const Node* n)
  *
  *  The three parts are what every golden file shows:
  *  `"\n"`, the deduplicated `name:` / `data 0` block, then `name:` plus its ops. */
-static void emitFunction(Emit* e, const Source* src, const Func* fn)
+static void emit_function(emit_t* e, const source_t* src, const func_t* fn)
 {
   (void)src;
 
   buf_init(&e->body, e->arena);
-  e->varCount = 0;
+  e->var_count = 0;
   /* `_expr_` and `_label_` counters are per translation unit, not per function: the
    * reference hands one FateContext to every file, so a later function continues the
    * numbering the earlier ones started. */
-  e->loopCount = 0;
-  e->bindCount = e->globalMark;
-  e->markCount = 0;
+  e->loop_count = 0;
+  e->bind_count = e->global_mark;
+  e->mark_count = 0;
 
   if (fn->name.len >= (int)sizeof(e->prefix))
     return;
@@ -1564,23 +1567,23 @@ static void emitFunction(Emit* e, const Source* src, const Func* fn)
   memcpy(e->prefix, fn->name.p, (size_t)fn->name.len);
   e->prefix[fn->name.len] = '\0';
 
-  e->fn = funcTableFind(&e->table, fn->name);
+  e->fn = func_table_find(&e->table, fn->name);
 
-  pushScope(e);
+  push_scope(e);
 
   for (int i = 0; i < fn->argc; i++)
   {
     /* `Str` is not NUL-terminated and `declareVar` takes a C string, so copy first:
      * passing `.p` straight through made the prologue print run on into the body. */
-    char argName[128];
-    const int len = (fn->args[i].len < 0)                       ? 0
-                    : (fn->args[i].len >= (int)sizeof(argName)) ? (int)sizeof(argName) - 1
-                                                                : fn->args[i].len;
+    char arg_name[128];
+    const int len = (fn->args[i].len < 0)                        ? 0
+                    : (fn->args[i].len >= (int)sizeof(arg_name)) ? (int)sizeof(arg_name) - 1
+                                                                 : fn->args[i].len;
 
-    memcpy(argName, fn->args[i].p, (size_t)len);
-    argName[len] = '\0';
+    memcpy(arg_name, fn->args[i].p, (size_t)len);
+    arg_name[len] = '\0';
 
-    (void)declareVar(e, argName, 1, "0");
+    (void)declare_var(e, arg_name, 1, "0");
   }
 
   /* The body reads its arguments off the stack, last pushed first. Everything below
@@ -1588,25 +1591,25 @@ static void emitFunction(Emit* e, const Source* src, const Func* fn)
    * touched here or the function gains a stray blank line. */
   for (int i = fn->argc - 1; i >= 0; i--)
   {
-    VarDecl* v = lookupVar(e, fn->args[i]);
+    var_decl_t* v = lookup_var(e, fn->args[i]);
 
     if (!v)
       continue;
 
-    Val* const p[1] = {mkVar(e, v)};
-    putOp(e, "pop", p, 1);
+    val_t* const p[1] = {mk_var(e, v)};
+    put_op(e, "pop", p, 1);
   }
 
-  emitBlock(e, fn->body);
+  emit_block(e, fn->body);
 
   /* Assemble: leading blank line, prologue, header, body. */
   buf_putc(&e->out, '\n');
 
   const char* previous = NULL;
 
-  for (int i = 0; i < e->varCount; i++)
+  for (int i = 0; i < e->var_count; i++)
   {
-    const VarDecl* v = e->vars[i];
+    const var_decl_t* v = e->vars[i];
 
     if (previous && strcmp(previous, v->display) == 0)
       continue;
@@ -1628,13 +1631,13 @@ static void emitFunction(Emit* e, const Source* src, const Func* fn)
   buf_put(&e->out, e->body.data, e->body.len);
 }
 
-Status emit_source(Emit* e, const Source* src)
+status_t emit_source(emit_t* e, const source_t* src)
 {
   buf_puts(&e->out, "\n");
 
-  for (int i = 0; i < src->itemCount; i++)
+  for (int i = 0; i < src->item_count; i++)
   {
-    const TopItem* it = &src->items[i];
+    const top_item_t* it = &src->items[i];
 
     switch (it->kind)
     {
@@ -1646,7 +1649,7 @@ Status emit_source(Emit* e, const Source* src)
 
       case TOP_GLOBAL:
       {
-        const GlobalVar* g = it->globs;
+        const global_var_t* g = it->globs;
 
         if (g != NULL)
         {
@@ -1667,7 +1670,7 @@ Status emit_source(Emit* e, const Source* src)
 
       case TOP_FUNC:
         if (it->fn != NULL)
-          emitFunction(e, src, it->fn);
+          emit_function(e, src, it->fn);
 
         break;
     }

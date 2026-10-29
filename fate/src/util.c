@@ -11,7 +11,7 @@
 #define ARENA_CHUNK (256u * 1024u)
 #define PRINT_MAX 4096
 
-bool str_eq_cstr(Str s, const char* lit)
+bool str_eq_cstr(str_t s, const char* lit)
 {
   const size_t n = strlen(lit);
   if ((size_t)s.len != n)
@@ -19,7 +19,7 @@ bool str_eq_cstr(Str s, const char* lit)
   return memcmp(s.p, lit, n) == 0;
 }
 
-bool str_ieq_cstr(Str s, const char* lit)
+bool str_ieq_cstr(str_t s, const char* lit)
 {
   const size_t n = strlen(lit);
   if ((size_t)s.len != n)
@@ -38,7 +38,7 @@ bool str_ieq_cstr(Str s, const char* lit)
   return true;
 }
 
-bool str_ends_with(Str s, const char* suffix)
+bool str_ends_with(str_t s, const char* suffix)
 {
   const size_t n = strlen(suffix);
   if ((size_t)s.len < n)
@@ -46,18 +46,18 @@ bool str_ends_with(Str s, const char* suffix)
   return memcmp(s.p + (s.len - (int)n), suffix, n) == 0;
 }
 
-void* arena_alloc(Arena* a, size_t n)
+void* arena_alloc(arena_t* a, size_t n)
 {
   if (n == 0)
     n = 1;
   /* Round up so every object starts suitably aligned for any scalar type. */
   const size_t want = (n + 15u) & ~(size_t)15u;
 
-  ArenaChunk* c = a->head;
+  arena_chunk_t* c = a->head;
   if (c == NULL || c->used + want > c->cap)
   {
     size_t cap = want > ARENA_CHUNK ? want : ARENA_CHUNK;
-    ArenaChunk* nc = (ArenaChunk*)malloc(sizeof(ArenaChunk));
+    arena_chunk_t* nc = (arena_chunk_t*)malloc(sizeof(arena_chunk_t));
     if (nc == NULL)
     {
       a->failed = true;
@@ -83,7 +83,7 @@ void* arena_alloc(Arena* a, size_t n)
   return p;
 }
 
-char* arena_dup(Arena* a, const char* p, size_t n)
+char* arena_dup(arena_t* a, const char* p, size_t n)
 {
   char* d = (char*)arena_alloc(a, n + 1);
   if (d == NULL)
@@ -94,12 +94,12 @@ char* arena_dup(Arena* a, const char* p, size_t n)
   return d;
 }
 
-void arena_reset(Arena* a)
+void arena_reset(arena_t* a)
 {
-  ArenaChunk* c = a->head;
+  arena_chunk_t* c = a->head;
   while (c != NULL)
   {
-    ArenaChunk* next = c->next;
+    arena_chunk_t* next = c->next;
     free(c->data);
     free(c);
     c = next;
@@ -109,7 +109,7 @@ void arena_reset(Arena* a)
   a->failed = false;
 }
 
-static bool buf_reserve(Buf* b, size_t extra)
+static bool buf_reserve(buf_t* b, size_t extra)
 {
   if (b->failed || b->arena == NULL)
   {
@@ -136,7 +136,7 @@ static bool buf_reserve(Buf* b, size_t extra)
   return true;
 }
 
-void buf_init(Buf* b, Arena* a)
+void buf_init(buf_t* b, arena_t* a)
 {
   b->arena = a;
   b->data = NULL;
@@ -145,7 +145,7 @@ void buf_init(Buf* b, Arena* a)
   b->failed = false;
 }
 
-void buf_put(Buf* b, const char* p, size_t n)
+void buf_put(buf_t* b, const char* p, size_t n)
 {
   if (p == NULL || n == 0)
     return;
@@ -156,23 +156,23 @@ void buf_put(Buf* b, const char* p, size_t n)
   b->data[b->len] = '\0';
 }
 
-void buf_puts(Buf* b, const char* s)
+void buf_puts(buf_t* b, const char* s)
 {
   buf_put(b, s, strlen(s));
 }
 
-void buf_putc(Buf* b, char c)
+void buf_putc(buf_t* b, char c)
 {
   buf_put(b, &c, 1);
 }
 
-void buf_put_str(Buf* b, Str s)
+void buf_put_str(buf_t* b, str_t s)
 {
   if (s.len > 0)
     buf_put(b, s.p, (size_t)s.len);
 }
 
-void buf_printf(Buf* b, const char* fmt, ...)
+void buf_printf(buf_t* b, const char* fmt, ...)
 {
   char tmp[PRINT_MAX];
   va_list ap;
@@ -188,7 +188,7 @@ void buf_printf(Buf* b, const char* fmt, ...)
   buf_put(b, tmp, len);
 }
 
-void buf_put_lower(Buf* b, Str s)
+void buf_put_lower(buf_t* b, str_t s)
 {
   for (int i = 0; i < s.len; i++)
   {

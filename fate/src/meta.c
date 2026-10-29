@@ -26,7 +26,7 @@
 #define MAX_METHODS 4096
 #define MAX_ENUM_VALUES 8192
 
-static char* readFile(Arena* a, const char* path, size_t* outLen)
+static char* read_file(arena_t* a, const char* path, size_t* out_len)
 {
   FILE* f = fopen(path, "rb");
 
@@ -61,13 +61,13 @@ static char* readFile(Arena* a, const char* path, size_t* outLen)
 
   fclose(f);
   buf[got] = '\0';
-  *outLen = got;
+  *out_len = got;
 
   return buf;
 }
 
 /** Split one CSV line on commas, honouring double-quoted fields. */
-static int splitCsv(Str line, Str* fields, int max)
+static int split_csv(str_t line, str_t* fields, int max)
 {
   int n = 0;
   int i = 0;
@@ -111,46 +111,46 @@ static int splitCsv(Str line, Str* fields, int max)
 }
 
 /** Find the slot for a method, creating it when new. */
-static MetaMethod* methodSlot(Meta* m, Str name)
+static meta_method_t* method_slot(meta_t* m, str_t name)
 {
-  for (int i = 0; i < m->methodCount; i++)
+  for (int i = 0; i < m->method_count; i++)
     if ((int)strlen(m->methods[i].name) == name.len && memcmp(m->methods[i].name, name.p, (size_t)name.len) == 0)
       return &m->methods[i];
 
-  if (m->methodCount == m->methodCap)
+  if (m->method_count == m->method_cap)
   {
-    const int newCap = m->methodCap ? m->methodCap * 2 : 1024;
-    MetaMethod* grown = (MetaMethod*)arena_alloc(m->arena, (size_t)newCap * sizeof(MetaMethod));
+    const int new_cap = m->method_cap ? m->method_cap * 2 : 1024;
+    meta_method_t* grown = (meta_method_t*)arena_alloc(m->arena, (size_t)new_cap * sizeof(meta_method_t));
 
     if (!grown)
       return NULL;
 
-    if (m->methodCount > 0)
-      memcpy(grown, m->methods, (size_t)m->methodCount * sizeof(MetaMethod));
+    if (m->method_count > 0)
+      memcpy(grown, m->methods, (size_t)m->method_count * sizeof(meta_method_t));
 
     m->methods = grown;
-    m->methodCap = newCap;
+    m->method_cap = new_cap;
   }
 
-  if (m->methodCount >= MAX_METHODS)
+  if (m->method_count >= MAX_METHODS)
     return NULL;
 
-  MetaMethod* slot = &m->methods[m->methodCount++];
+  meta_method_t* slot = &m->methods[m->method_count++];
 
   slot->name = arena_dup(m->arena, name.p, (size_t)name.len);
-  slot->paramCount = 0;
+  slot->param_count = 0;
 
   return slot;
 }
 
-static void loadParams(Meta* m, const char* dir)
+static void load_params(meta_t* m, const char* dir)
 {
   char path[1024];
 
   snprintf(path, sizeof(path), "%s/params.csv", dir);
 
   size_t len = 0;
-  char* text = readFile(m->arena, path, &len);
+  char* text = read_file(m->arena, path, &len);
 
   if (!text)
     return;
@@ -164,15 +164,15 @@ static void loadParams(Meta* m, const char* dir)
     if (!end)
       end = line + strlen(line);
 
-    Str fields[MAX_FIELDS];
+    str_t fields[MAX_FIELDS];
 
     /* Rows shorter than method+direction+type+name are not parameter rows. */
-    if (splitCsv(str_of(line, (size_t)(end - line)), fields, MAX_FIELDS) >= 4)
+    if (split_csv(str_of(line, (size_t)(end - line)), fields, MAX_FIELDS) >= 4)
     {
-      MetaMethod* slot = methodSlot(m, fields[0]);
+      meta_method_t* slot = method_slot(m, fields[0]);
 
       if (slot)
-        slot->paramCount++;
+        slot->param_count++;
     }
 
     if (*end == '\0')
@@ -182,44 +182,44 @@ static void loadParams(Meta* m, const char* dir)
   }
 }
 
-static void addEnumValue(Meta* m, Str value)
+static void add_enum_value(meta_t* m, str_t value)
 {
   if (value.len <= 0 || value.len >= 128)
     return;
 
-  if (m->enumValueCount == m->enumValueCap)
+  if (m->enum_value_count == m->enum_value_cap)
   {
-    const int newCap = m->enumValueCap ? m->enumValueCap * 2 : 1024;
-    const char** grown = (const char**)arena_alloc(m->arena, (size_t)newCap * sizeof(char*));
+    const int new_cap = m->enum_value_cap ? m->enum_value_cap * 2 : 1024;
+    const char** grown = (const char**)arena_alloc(m->arena, (size_t)new_cap * sizeof(char*));
 
     if (!grown)
       return;
 
-    if (m->enumValueCount > 0)
-      memcpy(grown, m->enumValues, (size_t)m->enumValueCount * sizeof(char*));
+    if (m->enum_value_count > 0)
+      memcpy(grown, m->enum_values, (size_t)m->enum_value_count * sizeof(char*));
 
-    m->enumValues = grown;
-    m->enumValueCap = newCap;
+    m->enum_values = grown;
+    m->enum_value_cap = new_cap;
   }
 
-  if (m->enumValueCount >= MAX_ENUM_VALUES)
+  if (m->enum_value_count >= MAX_ENUM_VALUES)
     return;
 
-  m->enumValues[m->enumValueCount++] = arena_dup(m->arena, value.p, (size_t)value.len);
+  m->enum_values[m->enum_value_count++] = arena_dup(m->arena, value.p, (size_t)value.len);
 }
 
-static void loadEnumClass(Meta* m, const char* dir, Str className)
+static void load_enum_class(meta_t* m, const char* dir, str_t class_name)
 {
   char path[1024];
   char file[256];
 
-  snprintf(file, sizeof(file), "%.*s.csv", className.len, className.p);
+  snprintf(file, sizeof(file), "%.*s.csv", class_name.len, class_name.p);
   snprintf(path, sizeof(path), "%s/%s", dir, file);
 
   (void)path;
 
   size_t len = 0;
-  char* text = readFile(m->arena, path, &len);
+  char* text = read_file(m->arena, path, &len);
 
   if (!text)
     return;
@@ -233,10 +233,10 @@ static void loadEnumClass(Meta* m, const char* dir, Str className)
     if (!end)
       end = line + strlen(line);
 
-    Str fields[MAX_FIELDS];
+    str_t fields[MAX_FIELDS];
 
-    if (splitCsv(str_of(line, (size_t)(end - line)), fields, MAX_FIELDS) >= 1)
-      addEnumValue(m, fields[0]);
+    if (split_csv(str_of(line, (size_t)(end - line)), fields, MAX_FIELDS) >= 1)
+      add_enum_value(m, fields[0]);
 
     if (*end == '\0')
       break;
@@ -245,14 +245,14 @@ static void loadEnumClass(Meta* m, const char* dir, Str className)
   }
 }
 
-static void loadEnums(Meta* m, const char* dir)
+static void load_enums(meta_t* m, const char* dir)
 {
   char path[1024];
 
   snprintf(path, sizeof(path), "%s/enums.csv", dir);
 
   size_t len = 0;
-  char* text = readFile(m->arena, path, &len);
+  char* text = read_file(m->arena, path, &len);
 
   if (!text)
     return;
@@ -266,10 +266,10 @@ static void loadEnums(Meta* m, const char* dir)
     if (!end)
       end = line + strlen(line);
 
-    Str fields[MAX_FIELDS];
+    str_t fields[MAX_FIELDS];
 
-    if (splitCsv(str_of(line, (size_t)(end - line)), fields, MAX_FIELDS) >= 1 && fields[0].len > 0)
-      loadEnumClass(m, dir, fields[0]);
+    if (split_csv(str_of(line, (size_t)(end - line)), fields, MAX_FIELDS) >= 1 && fields[0].len > 0)
+      load_enum_class(m, dir, fields[0]);
 
     if (*end == '\0')
       break;
@@ -278,7 +278,7 @@ static void loadEnums(Meta* m, const char* dir)
   }
 }
 
-Status meta_load(Meta* m, Arena* arena, const char* dir)
+status_t meta_load(meta_t* m, arena_t* arena, const char* dir)
 {
   memset(m, 0, sizeof(*m));
 
@@ -292,28 +292,28 @@ Status meta_load(Meta* m, Arena* arena, const char* dir)
 
   size_t len = 0;
 
-  if (!readFile(arena, params, &len))
+  if (!read_file(arena, params, &len))
     return ST_IO;
 
-  loadParams(m, dir);
-  loadEnums(m, dir);
+  load_params(m, dir);
+  load_enums(m, dir);
 
   return ST_OK;
 }
 
-const MetaMethod* meta_find_method(const Meta* m, const char* name)
+const meta_method_t* meta_find_method(const meta_t* m, const char* name)
 {
-  for (int i = 0; i < m->methodCount; i++)
+  for (int i = 0; i < m->method_count; i++)
     if (strcmp(m->methods[i].name, name) == 0)
       return &m->methods[i];
 
   return NULL;
 }
 
-bool meta_is_enum_value(const Meta* m, Str value)
+bool meta_is_enum_value(const meta_t* m, str_t value)
 {
-  for (int i = 0; i < m->enumValueCount; i++)
-    if ((int)strlen(m->enumValues[i]) == value.len && memcmp(m->enumValues[i], value.p, (size_t)value.len) == 0)
+  for (int i = 0; i < m->enum_value_count; i++)
+    if ((int)strlen(m->enum_values[i]) == value.len && memcmp(m->enum_values[i], value.p, (size_t)value.len) == 0)
       return true;
 
   return false;

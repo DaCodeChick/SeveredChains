@@ -17,21 +17,21 @@
 #include <stddef.h>
 
 /** Completion status shared by every fallible function in the tool. */
-typedef enum Status
+typedef enum status_t
 {
   ST_OK = 0,  /**< Succeeded. */
   ST_USAGE,   /**< Bad command line; maps to process exit 1. */
   ST_IO,      /**< Input/output failure; maps to process exit 2. */
   ST_COMPILE, /**< Compilation produced diagnostics; maps to process exit 3. */
   ST_OOM,     /**< Allocation failed; maps to process exit 2. */
-} Status;
+} status_t;
 
 /** A borrowed, not-necessarily-NUL-terminated slice of a buffer. */
-typedef struct Str
+typedef struct str_t
 {
   const char* p;
   int len;
-} Str;
+} str_t;
 
 /** @brief Make a slice from a literal's first `n` bytes.
  *
@@ -43,9 +43,9 @@ typedef struct Str
  * @param p Start of the slice; may be NULL for an empty slice.
  * @param n Byte length.
  */
-static inline Str str_of(const char* p, size_t n)
+static inline str_t str_of(const char* p, size_t n)
 {
-  Str s = {p, n > 2147483647u ? 2147483647 : (int)n};
+  str_t s = {p, n > 2147483647u ? 2147483647 : (int)n};
   return s;
 }
 
@@ -53,13 +53,13 @@ static inline Str str_of(const char* p, size_t n)
 #define STR_LITERAL(s) str_of((s), sizeof(s) - 1)
 
 /** Compare a slice against a NUL-terminated literal for exact equality. */
-bool str_eq_cstr(Str s, const char* lit);
+bool str_eq_cstr(str_t s, const char* lit);
 
 /** Case-insensitive counterpart of #str_eq_cstr (ASCII only). */
-bool str_ieq_cstr(Str s, const char* lit);
+bool str_ieq_cstr(str_t s, const char* lit);
 
 /** True when the slice ends with the given NUL-terminated suffix. */
-bool str_ends_with(Str s, const char* suffix);
+bool str_ends_with(str_t s, const char* suffix);
 
 /** @brief True when `path` names an existing directory.
  *
@@ -90,61 +90,61 @@ bool path_is_dir(const char* path);
 bool path_is_regular_file(const char* path);
 
 /** One block in the arena's chunk list. */
-typedef struct ArenaChunk
+typedef struct arena_chunk_t
 {
-  struct ArenaChunk* next;
+  struct arena_chunk_t* next;
   size_t used;
   size_t cap;
   char* data;
-} ArenaChunk;
+} arena_chunk_t;
 
 /** Bump allocator; `arena_reset` releases everything at once. */
-typedef struct Arena
+typedef struct arena_t
 {
-  ArenaChunk* head;
+  arena_chunk_t* head;
   size_t total;
   bool failed;
-} Arena;
+} arena_t;
 
 /** @brief Allocate `n` zeroed bytes from `a`.
  *  @return Pointer, or NULL when the allocation failed (also latches `a->failed`). */
-void* arena_alloc(Arena* a, size_t n);
+void* arena_alloc(arena_t* a, size_t n);
 
 /** @brief Copy `n` bytes from `p` into the arena and NUL-terminate the copy. */
-char* arena_dup(Arena* a, const char* p, size_t n);
+char* arena_dup(arena_t* a, const char* p, size_t n);
 
 /** @brief Release every chunk owned by `a` and reset it to empty. */
-void arena_reset(Arena* a);
+void arena_reset(arena_t* a);
 
 /** A byte buffer that grows through the arena (never realloc, to keep it simple). */
-typedef struct Buf
+typedef struct buf_t
 {
-  Arena* arena;
+  arena_t* arena;
   char* data;
   size_t len;
   size_t cap;
   bool failed;
-} Buf;
+} buf_t;
 
 /** @brief Create an empty buffer drawing its storage from `a`. */
-void buf_init(Buf* b, Arena* a);
+void buf_init(buf_t* b, arena_t* a);
 
 /** @brief Append `n` bytes from `p` (a NULL `p` or zero `n` is a no-op). */
-void buf_put(Buf* b, const char* p, size_t n);
+void buf_put(buf_t* b, const char* p, size_t n);
 
 /** @brief Append a NUL-terminated literal. */
-void buf_puts(Buf* b, const char* s);
+void buf_puts(buf_t* b, const char* s);
 
 /** @brief Append one byte. */
-void buf_putc(Buf* b, char c);
+void buf_putc(buf_t* b, char c);
 
 /** @brief Append a slice. */
-void buf_put_str(Buf* b, Str s);
+void buf_put_str(buf_t* b, str_t s);
 
 /** @brief Append a formatted string (snprintf-based, bounded). */
-void buf_printf(Buf* b, const char* fmt, ...);
+void buf_printf(buf_t* b, const char* fmt, ...);
 
 /** ASCII lower-case a slice into `dst`, truncating safely. */
-void buf_put_lower(Buf* b, Str s);
+void buf_put_lower(buf_t* b, str_t s);
 
 #endif /* FATE_UTIL_H */

@@ -42,17 +42,17 @@
  *
  * Do not "simplify" these into ctype calls; the width is the behaviour. */
 
-static bool isIdentStart(char c)
+static bool is_ident_start(char c)
 {
   return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
 }
 
-static bool isIdentChar(char c)
+static bool is_ident_char(char c)
 {
-  return isIdentStart(c) || (c >= '0' && c <= '9');
+  return is_ident_start(c) || (c >= '0' && c <= '9');
 }
 
-static bool isDigit(char c)
+static bool is_digit(char c)
 {
   return c >= '0' && c <= '9';
 }
@@ -60,20 +60,20 @@ static bool isDigit(char c)
 /* `[a-f0-9]` exactly, per the NUMBER rule's character class. Uppercase is excluded
  * and that exclusion is observable (`0xFF` lexes as `0` + `xFF`), so do not "fix"
  * this to isxdigit — see the note above. */
-static bool isHexDigitLower(char c)
+static bool is_hex_digit_lower(char c)
 {
   return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
 }
 
 /** Keyword table. Order is irrelevant for lookup; membership is decided by the full
  *  identifier run, which already implements ANTLR's longest-match preference. */
-typedef struct KwEntry
+typedef struct kw_entry_t
 {
   const char* text;
-  TokKind kind;
-} KwEntry;
+  tok_kind_t kind;
+} kw_entry_t;
 
-static const KwEntry kKeywords[] = {
+static const kw_entry_t keywords[] = {
   {"entrypoint", TK_ENTRYPOINT},
   {"def", TK_DEF},
   {"var", TK_VAR},
@@ -90,26 +90,26 @@ static const KwEntry kKeywords[] = {
   {"reg", TK_REG},
 };
 
-static TokKind lookupKeyword(Str s)
+static tok_kind_t lookup_keyword(str_t s)
 {
-  const size_t n = sizeof(kKeywords) / sizeof(kKeywords[0]);
+  const size_t n = sizeof(keywords) / sizeof(keywords[0]);
 
   for (size_t i = 0; i < n; ++i)
-    if (str_eq_cstr(s, kKeywords[i].text))
-      return kKeywords[i].kind;
+    if (str_eq_cstr(s, keywords[i].text))
+      return keywords[i].kind;
 
   return TK_IDENTIFIER;
 }
 
 /** Operator table, longest-first within a length class so a 3-character operator is
  *  preferred over its 2- and 1-character prefixes, as ANTLR's longest match requires. */
-typedef struct OpEntry
+typedef struct op_entry_t
 {
   const char* text;
-  TokKind kind;
-} OpEntry;
+  tok_kind_t kind;
+} op_entry_t;
 
-static const OpEntry kOperators[] = {
+static const op_entry_t operators[] = {
   /* 3 characters */
   {"&&=", TK_ANDC_ASSIGN},
   {"||=", TK_ORC_ASSIGN},
@@ -161,47 +161,47 @@ static const OpEntry kOperators[] = {
   {":", TK_COLON},
 };
 
-static TokKind lookupOperator(Str s)
+static tok_kind_t lookup_operator(str_t s)
 {
-  const size_t n = sizeof(kOperators) / sizeof(kOperators[0]);
+  const size_t n = sizeof(operators) / sizeof(operators[0]);
 
   for (size_t i = 0; i < n; ++i)
-    if (str_eq_cstr(s, kOperators[i].text))
-      return kOperators[i].kind;
+    if (str_eq_cstr(s, operators[i].text))
+      return operators[i].kind;
 
   return TK_EOF; /* sentinel: no operator matched */
 }
 
 /* Longest operator prefix of the remaining source, at most 3 bytes. ANTLR would take
  * the longest viable match; doing the same here keeps `>>=` from becoming `>>` + `=`. */
-static TokKind matchOperator(Str rest, int* outLen)
+static tok_kind_t match_operator(str_t rest, int* out_len)
 {
   for (int n = 3; n >= 1; --n)
   {
     if (rest.len < n)
       continue;
 
-    const TokKind k = lookupOperator(str_of(rest.p, (size_t)n));
+    const tok_kind_t k = lookup_operator(str_of(rest.p, (size_t)n));
 
     if (k != TK_EOF)
     {
-      *outLen = n;
+      *out_len = n;
       return k;
     }
   }
 
-  *outLen = 0;
+  *out_len = 0;
   return TK_EOF;
 }
 
 /* ------------------------------------------------------------------ tracking ---- */
 
-static void pushError(Lexer* lx, int line, int col, const char* text)
+static void push_error(lexer_t* lx, int line, int col, const char* text)
 {
-  if (lx->errorCount == lx->errorCap)
+  if (lx->error_count == lx->error_cap)
   {
-    const int newCap = lx->errorCap ? lx->errorCap * 2 : 16;
-    LexerError* grown = (LexerError*)arena_alloc(lx->arena, (size_t)newCap * sizeof(LexerError));
+    const int new_cap = lx->error_cap ? lx->error_cap * 2 : 16;
+    lexer_error_t* grown = (lexer_error_t*)arena_alloc(lx->arena, (size_t)new_cap * sizeof(lexer_error_t));
 
     if (!grown)
     {
@@ -209,11 +209,11 @@ static void pushError(Lexer* lx, int line, int col, const char* text)
       return;
     }
 
-    if (lx->errorCount > 0)
-      memcpy(grown, lx->errors, (size_t)lx->errorCount * sizeof(LexerError));
+    if (lx->error_count > 0)
+      memcpy(grown, lx->errors, (size_t)lx->error_count * sizeof(lexer_error_t));
 
     lx->errors = grown;
-    lx->errorCap = newCap;
+    lx->error_cap = new_cap;
   }
 
   /* Escape the three characters the reference prints escaped, so the recorded text
@@ -243,18 +243,18 @@ static void pushError(Lexer* lx, int line, int col, const char* text)
 
   buf[n] = '\0';
 
-  lx->errors[lx->errorCount].line = line;
-  lx->errors[lx->errorCount].col = col;
-  lx->errors[lx->errorCount].text = str_of(arena_dup(lx->arena, buf, (size_t)n), (size_t)n);
-  lx->errorCount++;
+  lx->errors[lx->error_count].line = line;
+  lx->errors[lx->error_count].col = col;
+  lx->errors[lx->error_count].text = str_of(arena_dup(lx->arena, buf, (size_t)n), (size_t)n);
+  lx->error_count++;
 }
 
-static void pushToken(Lexer* lx, TokKind kind, int line, int col, Str text)
+static void push_token(lexer_t* lx, tok_kind_t kind, int line, int col, str_t text)
 {
   if (lx->count == lx->cap)
   {
-    const int newCap = lx->cap ? lx->cap * 2 : 256;
-    Token* grown = (Token*)arena_alloc(lx->arena, (size_t)newCap * sizeof(Token));
+    const int new_cap = lx->cap ? lx->cap * 2 : 256;
+    token_t* grown = (token_t*)arena_alloc(lx->arena, (size_t)new_cap * sizeof(token_t));
 
     if (!grown)
     {
@@ -263,10 +263,10 @@ static void pushToken(Lexer* lx, TokKind kind, int line, int col, Str text)
     }
 
     if (lx->count > 0)
-      memcpy(grown, lx->tok, (size_t)lx->count * sizeof(Token));
+      memcpy(grown, lx->tok, (size_t)lx->count * sizeof(token_t));
 
     lx->tok = grown;
-    lx->cap = newCap;
+    lx->cap = new_cap;
   }
 
   lx->tok[lx->count].kind = kind;
@@ -289,7 +289,7 @@ static void pushToken(Lexer* lx, TokKind kind, int line, int col, Str text)
  * matched by either alternative, so `"a\q"` is *not* a string: the quote becomes a
  * lexer error. Reproducing that matters for the string fixture being added now.
  */
-static int matchString(const char* src, int len, int i)
+static int match_string(const char* src, int len, int i)
 {
   int j = i + 1;
 
@@ -319,17 +319,17 @@ static int matchString(const char* src, int len, int i)
 
 /* ---------------------------------------------------------------------- entry ---- */
 
-Status lex_run(Arena* arena, Str src, Lexer* lx)
+status_t lex_run(arena_t* arena, str_t src, lexer_t* lx)
 {
   lx->arena = arena;
   lx->count = 0;
   lx->cap = 0;
-  lx->errorCount = 0;
-  lx->errorCap = 0;
+  lx->error_count = 0;
+  lx->error_cap = 0;
   lx->errors = NULL;
   lx->tok = NULL;
 
-  pushToken(lx, TK_EOF, 1, 0, str_of("", 0));
+  push_token(lx, TK_EOF, 1, 0, str_of("", 0));
 
   if (src.len <= 0)
     return lx->arena->failed ? ST_OOM : ST_OK;
@@ -367,8 +367,8 @@ Status lex_run(Arena* arena, Str src, Lexer* lx)
   while (i < len)
   {
     const char c = s[i];
-    const int startLine = line;
-    const int startCol = col;
+    const int start_line = line;
+    const int start_col = col;
 
     /* Whitespace: space and LF only (`WHITESPACE : [ \n]` in the reference lexer).
      * Tab and CR are not whitespace and fall through to the unrecognized-character
@@ -417,7 +417,7 @@ Status lex_run(Arena* arena, Str src, Lexer* lx)
     /* `include ` plus the raw filename, consumed as one lexical unit. The space run is
      * part of the INCLUDE token; the filename keeps any trailing space, which is why
      * `include char_utils.fate ;` resolves the file but not its functions. */
-    if (isIdentStart(c) && (len - i >= 7) && strncmp(s + i, "include", 7) == 0)
+    if (is_ident_start(c) && (len - i >= 7) && strncmp(s + i, "include", 7) == 0)
     {
       int j = i + 7;
       int spaces = 0;
@@ -430,7 +430,7 @@ Status lex_run(Arena* arena, Str src, Lexer* lx)
 
       if (spaces > 0)
       {
-        pushToken(lx, TK_INCLUDE, startLine, startCol, str_of(s + i, (size_t)(j - i)));
+        push_token(lx, TK_INCLUDE, start_line, start_col, str_of(s + i, (size_t)(j - i)));
         ADV(j - i);
 
         int f = j;
@@ -440,7 +440,7 @@ Status lex_run(Arena* arena, Str src, Lexer* lx)
 
         if (f > j)
         {
-          pushToken(lx, TK_INCLUDE_FILE, line, col, str_of(s + j, (size_t)(f - j)));
+          push_token(lx, TK_INCLUDE_FILE, line, col, str_of(s + j, (size_t)(f - j)));
           ADV(f - j);
         }
 
@@ -449,21 +449,21 @@ Status lex_run(Arena* arena, Str src, Lexer* lx)
     }
 
     /* Identifier or keyword: take the whole run first, then decide. */
-    if (isIdentStart(c))
+    if (is_ident_start(c))
     {
       int j = i;
 
-      while (j < len && isIdentChar(s[j]))
+      while (j < len && is_ident_char(s[j]))
         ++j;
 
       const int n = j - i;
-      Str run = str_of(s + i, (size_t)n);
-      TokKind k = lookupKeyword(run);
+      str_t run = str_of(s + i, (size_t)n);
+      tok_kind_t k = lookup_keyword(run);
 
       if (k == TK_IDENTIFIER)
-        pushToken(lx, TK_IDENTIFIER, startLine, startCol, run);
+        push_token(lx, TK_IDENTIFIER, start_line, start_col, run);
       else
-        pushToken(lx, k, startLine, startCol, run);
+        push_token(lx, k, start_line, start_col, run);
 
       ADV(n);
       continue;
@@ -471,35 +471,35 @@ Status lex_run(Arena* arena, Str src, Lexer* lx)
 
     /* Number: `-`? ( decimal | 0x hex-lowercase ). Uppercase hex digits are outside the
      * class, so `0xFF` becomes `0` + identifier `xFF` and compiles to `mov 0, ...`. */
-    if (isDigit(c) ||
+    if (is_digit(c) ||
         (c == '-' && i + 1 < len &&
-         (isDigit(s[i + 1]) || (s[i + 1] == '0' && i + 3 < len && s[i + 2] == 'x' && isHexDigitLower(s[i + 3])))))
+         (is_digit(s[i + 1]) || (s[i + 1] == '0' && i + 3 < len && s[i + 2] == 'x' && is_hex_digit_lower(s[i + 3])))))
     {
       int j = i;
 
       if (s[j] == '-')
         ++j;
 
-      const int digitsStart = j;
+      const int digits_start = j;
 
-      if (s[j] == '0' && j + 1 < len && s[j + 1] == 'x' && j + 2 < len && isHexDigitLower(s[j + 2]))
+      if (s[j] == '0' && j + 1 < len && s[j + 1] == 'x' && j + 2 < len && is_hex_digit_lower(s[j + 2]))
       {
         j += 2;
 
-        while (j < len && isHexDigitLower(s[j]))
+        while (j < len && is_hex_digit_lower(s[j]))
           ++j;
       }
       else
       {
-        while (j < len && isDigit(s[j]))
+        while (j < len && is_digit(s[j]))
           ++j;
 
         /* A lone `0` followed by `x` and no lowercase digit is still just `0`. */
-        if (j == digitsStart)
+        if (j == digits_start)
           ++j;
       }
 
-      pushToken(lx, TK_NUMBER, startLine, startCol, str_of(s + i, (size_t)(j - i)));
+      push_token(lx, TK_NUMBER, start_line, start_col, str_of(s + i, (size_t)(j - i)));
       ADV(j - i);
       continue;
     }
@@ -507,11 +507,11 @@ Status lex_run(Arena* arena, Str src, Lexer* lx)
     /* String literal. */
     if (c == '"')
     {
-      const int n = matchString(s, len, i);
+      const int n = match_string(s, len, i);
 
       if (n > 0)
       {
-        pushToken(lx, TK_STRING, startLine, startCol, str_of(s + i, (size_t)n));
+        push_token(lx, TK_STRING, start_line, start_col, str_of(s + i, (size_t)n));
         ADV(n);
         continue;
       }
@@ -520,11 +520,11 @@ Status lex_run(Arena* arena, Str src, Lexer* lx)
     /* Operators, longest match first. */
     {
       int n = 0;
-      const TokKind k = matchOperator(str_of(s + i, (len - i) < 3 ? (size_t)(len - i) : 3u), &n);
+      const tok_kind_t k = match_operator(str_of(s + i, (len - i) < 3 ? (size_t)(len - i) : 3u), &n);
 
       if (k != TK_EOF && n > 0)
       {
-        pushToken(lx, k, startLine, startCol, str_of(s + i, (size_t)n));
+        push_token(lx, k, start_line, start_col, str_of(s + i, (size_t)n));
         ADV(n);
         continue;
       }
@@ -536,7 +536,7 @@ Status lex_run(Arena* arena, Str src, Lexer* lx)
      * statement still parses. Recording the message and consuming the character without
      * emitting a token is what reproduces that, and it is why the tab-indented fixture
      * still compiles cleanly. */
-    pushError(lx, line, col, &s[i]);
+    push_error(lx, line, col, &s[i]);
     ADV(1);
   }
 
@@ -545,12 +545,12 @@ Status lex_run(Arena* arena, Str src, Lexer* lx)
   /* Terminate the stream with a real EOF token. `parse.c` clamps out-of-range peeks to
    * the last slot, so without this a recovery loop that scans "until EOF" never sees one
    * and spins forever. The index-0 entry pushed above is padding, not this terminator. */
-  pushToken(lx, TK_EOF, line, col, str_of("", 0));
+  push_token(lx, TK_EOF, line, col, str_of("", 0));
 
   return lx->arena->failed ? ST_OOM : ST_OK;
 }
 
-const char* tok_kind_name(TokKind k)
+const char* tok_kind_name(tok_kind_t k)
 {
   switch (k)
   {

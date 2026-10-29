@@ -24,36 +24,36 @@
 #include <stdbool.h>
 
 /** One engine-call declaration: its qualified name and its parameter count. */
-typedef struct MetaMethod
+typedef struct meta_method_t
 {
   const char* name;
-  int paramCount;
-} MetaMethod;
+  int param_count;
+} meta_method_t;
 
 /** Loaded metadata. All storage belongs to the arena handed to @ref meta_load. */
-typedef struct Meta
+typedef struct meta_t
 {
-  Arena* arena;
-  MetaMethod* methods;
-  int methodCount;
-  int methodCap;
-  const char** enumValues;
-  int enumValueCount;
-  int enumValueCap;
-} Meta;
+  arena_t* arena;
+  meta_method_t* methods;
+  int method_count;
+  int method_cap;
+  const char** enum_values;
+  int enum_value_count;
+  int enum_value_cap;
+} meta_t;
 
 /** @brief Load `descriptions.csv`, `params.csv`, `enums.csv` and the per-enum files.
  *  @param dir Directory holding the bundle.
  *  @errors ST_IO when the directory or a referenced file is missing or unreadable,
  *  ST_OOM on allocation failure. The reference throws in this situation and writes
  *  no output, so failing here is the matching behaviour. */
-Status meta_load(Meta* m, Arena* arena, const char* dir);
+status_t meta_load(meta_t* m, arena_t* arena, const char* dir);
 
 /** @brief Find a method by exact qualified name (case-sensitive, as the reference is).
  *  @return NULL when the call is unknown. */
-const MetaMethod* meta_find_method(const Meta* m, const char* name);
+const meta_method_t* meta_find_method(const meta_t* m, const char* name);
 
 /** @brief True when `s` names a value in any loaded enum class. */
-bool meta_is_enum_value(const Meta* m, Str s);
+bool meta_is_enum_value(const meta_t* m, str_t s);
 
 #endif /* FATE_META_H */

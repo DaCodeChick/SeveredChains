@@ -26,92 +26,92 @@
 #define EMIT_MAX_PARAMS 5
 
 /** One collected function definition, keyed by its bare name. */
-typedef struct FuncDef
+typedef struct func_def_t
 {
-  Str name;
-  Str params[16];
-  int paramCount;
-  int returns;   /**< value count of the last `return` in visit order */
-  int unitIndex; /**< index into `emit_prefix` / the parsed-unit list */
+  str_t name;
+  str_t params[16];
+  int param_count;
+  int returns;    /**< value count of the last `return` in visit order */
+  int unit_index; /**< index into `emit_prefix` / the parsed-unit list */
   int line;
-} FuncDef;
+} func_def_t;
 
 /** Function definitions gathered across the main file and its includes. */
-typedef struct FuncTable
+typedef struct func_table_t
 {
-  FuncDef* items;
+  func_def_t* items;
   int count;
   int cap;
-} FuncTable;
+} func_table_t;
 
 /** @brief Look up a definition by exact name.
  *  @return NULL when the name is not a known function. */
-const FuncDef* funcTableFind(const FuncTable* t, Str name);
+const func_def_t* func_table_find(const func_table_t* t, str_t name);
 
 /** @brief Register (or overwrite) a definition. Last registration for a name wins,
  *  which matches the reference's `Map.put` after each preprocessed file. */
-FuncDef* funcTableAdd(FuncTable* t, Arena* arena, Str name, Str params[], int paramCount, int returns, int unitIndex,
-                      int line);
+func_def_t* func_table_add(func_table_t* t, arena_t* arena, str_t name, str_t params[], int param_count, int returns,
+                           int unit_index, int line);
 
 /** Scratch state for one compile. Allocated by the caller; fields set in emit_scan. */
-typedef struct Emit
+typedef struct emit_t
 {
-  Arena* arena;
-  const Meta* meta;
-  Diag* diag;
-  FuncTable table;
+  arena_t* arena;
+  const meta_t* meta;
+  diag_t* diag;
+  func_table_t table;
 
   /* Prefixes that `updateVariableNames` would have applied. One entry per parsed
    * unit, indexed by `FuncDef.unitIndex`. */
   const char** prefixes;
-  int prefixCount;
+  int prefix_count;
 
   /* Per-function emission state, rebuilt by `emitBeginFunction`. */
-  const FuncDef* fn; /**< definition of the function being emitted, or NULL */
-  char prefix[192];  /**< resolved display prefix for the current function */
-  Buf body;          /**< rendered op lines of the current function */
-  Buf out;           /**< the whole rendered translation unit */
+  const func_def_t* fn; /**< definition of the function being emitted, or NULL */
+  char prefix[192];     /**< resolved display prefix for the current function */
+  buf_t body;           /**< rendered op lines of the current function */
+  buf_t out;            /**< the whole rendered translation unit */
 
   /** Variable slots of the function being emitted, in allocation order. The prologue
    *  walks this and skips repeats, so a slot used twice prints once. */
-  struct VarDecl* vars[1024];
-  int varCount;
+  struct var_decl_t* vars[1024];
+  int var_count;
 
   /* Scope chain: flat binding list plus one mark per pushed scope. */
-  struct Binding* binds;
-  int bindCount;
-  int bindCap;
+  struct binding_t* binds;
+  int bind_count;
+  int bind_cap;
   int marks[64];
-  int markCount;
+  int mark_count;
 
-  int exprIndex;     /**< next `_expr_N` slot number (per translation unit) */
-  int labelIndex;    /**< next `_label_N` number (per translation unit) */
-  int globalMark;    /**< binding count of the global scope, restored per function */
+  int expr_index;    /**< next `_expr_N` slot number (per translation unit) */
+  int label_index;   /**< next `_label_N` number (per translation unit) */
+  int global_mark;   /**< binding count of the global scope, restored per function */
   char scratch[288]; /**< shared staging buffer for NUL-terminated name copies */
 
-  struct LoopInfo
+  struct loop_info_t
   {
     int start;
     int end;
   } loops[32];
 
-  int loopCount;
+  int loop_count;
   bool aborted; /**< set when a construct cannot be lowered at all (see p10) */
-} Emit;
+} emit_t;
 
 /** @brief Pass A over one parsed unit: collect definitions, report definition errors.
  *  @param unitIndex Index of `src` in the unit list, used to record its prefix.
  *  @param prefix Function-name prefix for that unit ("" for the main file). */
-void emit_scan(Emit* e, const Source* src, int unitIndex, const char* prefix);
+void emit_scan(emit_t* e, const source_t* src, int unit_index, const char* prefix);
 
 /** @brief Pass B: render @p src into `e->out` (already initialised by the caller). */
-Status emit_source(Emit* e, const Source* src);
+status_t emit_source(emit_t* e, const source_t* src);
 
 /** @brief Make a top-level `var` visible to every function.
  *  @param name Variable name, NUL-terminated, used verbatim (no function prefix).
  *  @param length Number of `data` lines its prologue entry occupies.
  *  @param value Initialiser text printed after `data `.
  *  @note Must be called after every `emit_scan` and before `emit_source`. */
-void emit_bindGlobal(Emit* e, const char* name, int length, const char* value);
+void emit_bind_global(emit_t* e, const char* name, int length, const char* value);
 
 #endif /* FATE_EMIT_H */

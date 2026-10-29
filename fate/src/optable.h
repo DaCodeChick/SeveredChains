@@ -6,14 +6,14 @@
 #define FATE_OPTABLE_H
 
 /** One ASM op name, in reference declaration order. */
-typedef struct OpName
+typedef struct op_name_t
 {
   const char* name;
   int opcode;
-  int paramCount;
-} OpName;
+  int param_count;
+} op_name_t;
 
-static const OpName kOpNames[] = {
+static const op_name_t op_names[] = {
   {"yield", 0, 0},       {"rewind", 1, 0},        {"wait", 2, 1},
   {"wait_cmp", 3, 2},    {"wait_cmp", 4, 1},      {"rewind", 5, 0},
   {"rewind", 6, 0},      {"rewind", 7, 0},        {"mov", 8, 2},
@@ -39,6 +39,6 @@ static const OpName kOpNames[] = {
   {"pop", 102, 1},       {"cmp", 103, 3},
 };
 
-#define kOpNameCount ((int)(sizeof(kOpNames) / sizeof(kOpNames[0])))
+#define op_name_count ((int)(sizeof(op_names) / sizeof(op_names[0])))
 
 #endif /* FATE_OPTABLE_H */

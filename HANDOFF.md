@@ -273,8 +273,11 @@ CLI surface: `--help`, argument validation, "missing required arg" messages, and
 5. Python harness (`run_golden.py`) is the retained acceptance harness; the old `test_diff.c`
    plan is amended in the docs — specs that still cite it are stale.
 6. assemble/decompile/strip/genpatch/versions stay deferred.
-7. C style in `fate/` = psx-style snake_case, **no** `fate_` prefix (exempt from
-   `check_naming.py`'s acronym rule via `is_snake_or_macro`).
+7. C style in `fate/` = psx-style snake_case, **no** `fate_` prefix. Until 2026-10-28 this was
+   enforced by nothing: `check_naming.py` scanned only `.h/.hpp/.cpp/.cc`, and its acronym rule
+   cannot see camelCase anyway. It now scans production C and has a grammar check for it (§5.5).
+   The naming spec's "documented + reviewed, not lint-enforced" line described an arrangement
+   that had already failed, which is why it was replaced rather than obeyed.
 8. Project default stays C17; only the `fate` target is C23. Measured fact: **all 7 fate `.c`
    files currently compile clean under `-std=c17`** — nothing requires C23 yet; the probe guards
    the declared standard for future use.
@@ -315,7 +318,9 @@ CLI surface: `--help`, argument validation, "missing required arg" messages, and
 - `run_golden.py` needs `from __future__ import annotations` — the system `python3` here is 3.9
   and `X | None` in a signature raises `TypeError` (which looked like a test failure, not a skip).
 - `fate/` is a `check_format.py` SCAN_ROOTS entry and a naming-gate C root. Don't let edits to
-  `fate/` drift out of them.
+  `fate/` drift out of them. Both gates now genuinely read C: `check_naming.py` checks `.c` and
+  non-`psx/cpp` `.h` files for the C identifier grammar, so a PascalCase type or camelCase
+  function in `fate/src` is a build failure rather than something a reviewer has to notice.
 - No RTTI/exceptions crossing boundaries does not apply to `fate` (pure C), but the gates do.
 - **Argument-position `N` in a probe script is not a stable way to address a file.** On
   2026-10-28 a stub used `cat > "$6"` to fake compiler output; for the 17 fixtures with no

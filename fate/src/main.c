@@ -30,36 +30,36 @@
 #define FATE_MAX_INCLUDE_DIRS 32
 #define FATE_MAX_UNITS 32
 
-typedef struct Job
+typedef struct job_t
 {
-  Arena arena;
-  Meta meta;
-  Emit emit;
-  Diag diag;
+  arena_t arena;
+  meta_t meta;
+  emit_t emit;
+  diag_t diag;
 
   /** Rendered lexer complaints, printed before @ref Job::diag. Kept apart because the
    *  reference does not count them as errors: a tab-indented file still exits 0. */
-  Buf warn;
-  const char* includeDirs[FATE_MAX_INCLUDE_DIRS];
-  int includeDirCount;
+  buf_t warn;
+  const char* include_dirs[FATE_MAX_INCLUDE_DIRS];
+  int include_dir_count;
 
   /** Set when an `include` could not be loaded. That is fatal, not a diagnostic to
    *  collect and carry on past: see the abort branch in @ref main. */
-  bool includeFailed;
+  bool include_failed;
 
   /** The one line printed instead of `diag` when @ref Job::includeFailed is set. */
-  char fatalMsg[600];
-} Job;
+  char fatal_msg[600];
+} job_t;
 
 /** Options after the `compile` subcommand. */
-typedef struct Options
+typedef struct options_t
 {
-  const char* metaDir;
+  const char* meta_dir;
   const char* output;
   const char* input;
-} Options;
+} options_t;
 
-static char* readFileToArena(Arena* a, const char* path, Str* out)
+static char* read_file_to_arena(arena_t* a, const char* path, str_t* out)
 {
   FILE* f = fopen(path, "rb");
 
@@ -115,13 +115,13 @@ static char* readFileToArena(Arena* a, const char* path, Str* out)
  *          when the name resolves nowhere.
  *  @note Thread: not thread-safe — the probe buffer is function-static; one compile is
  *        one job. */
-static const char* resolveInclude(Job* job, const char* name)
+static const char* resolve_include(job_t* job, const char* name)
 {
   static char path[1024];
 
-  for (int i = 0; i < job->includeDirCount; i++)
+  for (int i = 0; i < job->include_dir_count; i++)
   {
-    snprintf(path, sizeof(path), "%s/%s", job->includeDirs[i], name);
+    snprintf(path, sizeof(path), "%s/%s", job->include_dirs[i], name);
     FILE* f = fopen(path, "rb");
 
     if (f)
@@ -140,27 +140,27 @@ static const char* resolveInclude(Job* job, const char* name)
  *  rather than to the diagnostic list: the reference prints them from its tokenizer,
  *  they do not enter the errors list, and a file that only has them still compiles and
  *  exits 0. The recorded text is already escaped for display (a tab prints as `\t`). */
-static Status parseUnit(Job* job, Source* src, const char* displayName)
+static status_t parse_unit(job_t* job, source_t* src, const char* display_name)
 {
-  Str text;
+  str_t text;
 
-  if (!readFileToArena(&job->arena, displayName, &text))
+  if (!read_file_to_arena(&job->arena, display_name, &text))
     return ST_IO;
 
-  Lexer lx;
+  lexer_t lx;
 
   if (lex_run(&job->arena, text, &lx) != ST_OK)
     return ST_IO;
 
-  for (int i = 0; i < lx.errorCount; i++)
+  for (int i = 0; i < lx.error_count; i++)
   {
-    const LexerError* le = &lx.errors[i];
+    const lexer_error_t* le = &lx.errors[i];
 
     buf_printf(&job->warn, "line %d:%d token recognition error at: '%.*s'\n", le->line, le->col, le->text.len,
                le->text.p ? le->text.p : "");
   }
 
-  if (parse_translationUnit(&job->arena, &lx, src, &job->diag) != ST_OK)
+  if (parse_translation_unit(&job->arena, &lx, src, &job->diag) != ST_OK)
     return ST_COMPILE;
 
   return ST_OK;
@@ -171,12 +171,12 @@ static Status parseUnit(Job* job, Source* src, const char* displayName)
  *  The queue used to hold bare filename strings, which was enough while an unresolvable
  *  include was a diagnostic and the compile carried on. It is not enough once the run
  *  stops: the operator needs the file and the line that asked for the missing one. */
-typedef struct IncludeReq
+typedef struct include_req_t
 {
-  char token[256];      /**< verbatim filename token, trailing space preserved */
-  int line;             /**< line the directive appeared on, 0 when unknown */
-  const char* fromUnit; /**< file that asked for it; NULL for the script named on the command line */
-} IncludeReq;
+  char token[256];       /**< verbatim filename token, trailing space preserved */
+  int line;              /**< line the directive appeared on, 0 when unknown */
+  const char* from_unit; /**< file that asked for it; NULL for the script named on the command line */
+} include_req_t;
 
 /** @brief Stop the compile because an include could not be loaded.
  *
@@ -185,14 +185,14 @@ typedef struct IncludeReq
  *  @param what The message, already naming the include file.
  *
  *  @note Thread: single-threaded; writes only @ref Job fields. */
-static void includeFatal(Job* job, const IncludeReq* req, const char* what)
+static void include_fatal(job_t* job, const include_req_t* req, const char* what)
 {
-  job->includeFailed = true;
+  job->include_failed = true;
 
   if (req->line > 0)
-    snprintf(job->fatalMsg, sizeof(job->fatalMsg), "%d: %s", req->line, what);
+    snprintf(job->fatal_msg, sizeof(job->fatal_msg), "%d: %s", req->line, what);
   else
-    snprintf(job->fatalMsg, sizeof(job->fatalMsg), "%s", what);
+    snprintf(job->fatal_msg, sizeof(job->fatal_msg), "%s", what);
 }
 
 /** @brief Name of the file the emitted assembly would go to.
@@ -206,7 +206,7 @@ static void includeFatal(Job* job, const IncludeReq* req, const char* what)
  *  reference does and what the goldens were taken with. Kept as one function because the
  *  abort paths need the same name as the write, to decide what to do with a file already
  *  sitting there. */
-static const char* resolveOutputPath(const Options* opt, char* buf, size_t cap)
+static const char* resolve_output_path(const options_t* opt, char* buf, size_t cap)
 {
   if (opt->output != NULL)
     return opt->output;
@@ -239,13 +239,13 @@ static const char* resolveOutputPath(const Options* opt, char* buf, size_t cap)
  *  input file — @ref main settles that before anything is read or written.
  *
  *  @note Thread: single-threaded; touches the filesystem. */
-static void discardStaleOutput(const char* outPath)
+static void discard_stale_output(const char* out_path)
 {
-  if (outPath == NULL || !path_is_regular_file(outPath))
+  if (out_path == NULL || !path_is_regular_file(out_path))
     return;
 
-  if (remove(outPath) == 0)
-    fprintf(stderr, "removed stale output %s (this run produced no output)\n", outPath);
+  if (remove(out_path) == 0)
+    fprintf(stderr, "removed stale output %s (this run produced no output)\n", out_path);
 }
 
 int main(int argc, char** argv)
@@ -266,11 +266,11 @@ int main(int argc, char** argv)
     return 1;
   }
 
-  Job job;
+  job_t job;
 
   memset(&job, 0, sizeof(job));
 
-  Options opt;
+  options_t opt;
 
   memset(&opt, 0, sizeof(opt));
 
@@ -281,18 +281,18 @@ int main(int argc, char** argv)
     if (strcmp(a, "-o") == 0 && i + 1 < argc)
       opt.output = argv[++i];
     else if (strcmp(a, "-m") == 0 && i + 1 < argc)
-      opt.metaDir = argv[++i];
+      opt.meta_dir = argv[++i];
     else if (strcmp(a, "-L") == 0 && i + 1 < argc)
     {
       /* A dropped `-L` would silently change where includes resolve, so a full table is
        * a usage error rather than something to ignore. */
-      if (job.includeDirCount == FATE_MAX_INCLUDE_DIRS)
+      if (job.include_dir_count == FATE_MAX_INCLUDE_DIRS)
       {
         fprintf(stderr, "too many -L directories (limit %d)\n", FATE_MAX_INCLUDE_DIRS);
         return 1;
       }
 
-      job.includeDirs[job.includeDirCount++] = argv[++i];
+      job.include_dirs[job.include_dir_count++] = argv[++i];
     }
     else if (a[0] == '-' && a[1] != '\0')
     {
@@ -314,7 +314,7 @@ int main(int argc, char** argv)
     return 1;
   }
 
-  if (opt.metaDir == NULL)
+  if (opt.meta_dir == NULL)
   {
     fprintf(stderr, "compile needs a metadata directory: pass -m <dir>\n");
     return 1;
@@ -323,24 +323,24 @@ int main(int argc, char** argv)
   /* The output name is needed before anything is read: the abort paths below have to
    * decide what to do with a file already sitting at it, and a `.txt` source would
    * otherwise resolve to its own name as the default output. */
-  char defaultOut[1024];
+  char default_out[1024];
 
-  const char* outPath = resolveOutputPath(&opt, defaultOut, sizeof(defaultOut));
+  const char* out_path = resolve_output_path(&opt, default_out, sizeof(default_out));
 
-  if (strcmp(outPath, opt.input) == 0)
+  if (strcmp(out_path, opt.input) == 0)
   {
     /* Reached by `-o <the source itself>`, and by a `.txt` source whose default output
      * name is the source itself. Checked before the file is opened for reading, so no
      * run can damage the program text it was asked to compile. */
-    fprintf(stderr, "refusing to write the output file: %s is also the input file\n", outPath);
+    fprintf(stderr, "refusing to write the output file: %s is also the input file\n", out_path);
     return 2;
   }
 
   /* The metadata bundle is a required input, not an optional extra: an engine call's
    * emitted name comes out of it, so compiling without it would invent output. */
-  if (meta_load(&job.meta, &job.arena, opt.metaDir) != ST_OK)
+  if (meta_load(&job.meta, &job.arena, opt.meta_dir) != ST_OK)
   {
-    fprintf(stderr, "could not read metadata from %s\n", opt.metaDir);
+    fprintf(stderr, "could not read metadata from %s\n", opt.meta_dir);
     return 2;
   }
 
@@ -359,11 +359,11 @@ int main(int argc, char** argv)
    * outside the compile `try`, so nothing is caught and nothing is written. Pinned by
    * `c1_missing_incdir` / `c2_incdir_is_file`, with `c3_valid_include_control` as the control that a
    * usable `-L` still compiles (fate/testdata/manifest.json, `cli_contract`). */
-  for (int i = 0; i < job.includeDirCount; i++)
+  for (int i = 0; i < job.include_dir_count; i++)
   {
-    if (!path_is_dir(job.includeDirs[i]))
+    if (!path_is_dir(job.include_dirs[i]))
     {
-      fprintf(stderr, "no such include directory: %s\n", job.includeDirs[i]);
+      fprintf(stderr, "no such include directory: %s\n", job.include_dirs[i]);
       return 2;
     }
   }
@@ -379,14 +379,14 @@ int main(int argc, char** argv)
   buf_init(&job.emit.out, &job.arena);
   buf_init(&job.emit.body, &job.arena);
 
-  Source units[FATE_MAX_UNITS];
-  int unitCount = 0;
+  source_t units[FATE_MAX_UNITS];
+  int unit_count = 0;
 
-  units[0] = (Source){0};
-  units[0].displayName = opt.input;
-  unitCount = 1;
+  units[0] = (source_t){0};
+  units[0].display_name = opt.input;
+  unit_count = 1;
 
-  if (parseUnit(&job, &units[0], opt.input) != ST_OK)
+  if (parse_unit(&job, &units[0], opt.input) != ST_OK)
   {
     fprintf(stderr, "could not read %s\n", opt.input);
     return 2;
@@ -406,30 +406,30 @@ int main(int argc, char** argv)
    * `5: unknown function charIsInActiveParty` line that p13's golden carries; the
    * emitted `gosub inl[:charIsInActiveParty]` is the same either way, which is exactly
    * why the missing message needed a differential to be seen at all. */
-  static IncludeReq pending[FATE_MAX_UNITS + 1];
+  static include_req_t pending[FATE_MAX_UNITS + 1];
   static char done[FATE_MAX_UNITS + 1][256];
 
-  int pendingCount = 0;
-  int doneCount = 0;
+  int pending_count = 0;
+  int done_count = 0;
 
-  for (int i = 0; i < units[0].includeCount; i++)
+  for (int i = 0; i < units[0].include_count; i++)
   {
-    if (!units[0].includes[i].raw || pendingCount >= (int)(sizeof(pending) / sizeof(pending[0])))
+    if (!units[0].includes[i].raw || pending_count >= (int)(sizeof(pending) / sizeof(pending[0])))
       continue;
 
     /* The token keeps its trailing space for the gate above; the line and the origin are
      * recorded so a failure can name both. */
-    snprintf(pending[pendingCount].token, sizeof(pending[0].token), "%s", units[0].includes[i].raw);
-    pending[pendingCount].line = units[0].includes[i].line;
-    pending[pendingCount].fromUnit = NULL;
-    pendingCount++;
+    snprintf(pending[pending_count].token, sizeof(pending[0].token), "%s", units[0].includes[i].raw);
+    pending[pending_count].line = units[0].includes[i].line;
+    pending[pending_count].from_unit = NULL;
+    pending_count++;
   }
 
   /* One failed include ends the loop: `includeFailed` is part of the condition, so a
    * queued include behind the failed one is never opened either. */
-  for (int head = 0; head < pendingCount && unitCount < FATE_MAX_UNITS && !job.includeFailed; head++)
+  for (int head = 0; head < pending_count && unit_count < FATE_MAX_UNITS && !job.include_failed; head++)
   {
-    const IncludeReq* req = &pending[head];
+    const include_req_t* req = &pending[head];
     char token[256];
 
     snprintf(token, sizeof(token), "%s", req->token);
@@ -450,20 +450,20 @@ int main(int argc, char** argv)
 
     bool already = false;
 
-    for (int i = 0; i < doneCount; i++)
+    for (int i = 0; i < done_count; i++)
       if (strcmp(done[i], name) == 0)
         already = true;
 
     if (already)
       continue;
 
-    if (doneCount < (int)(sizeof(done) / sizeof(done[0])))
-      snprintf(done[doneCount++], sizeof(done[0]), "%s", name);
+    if (done_count < (int)(sizeof(done) / sizeof(done[0])))
+      snprintf(done[done_count++], sizeof(done[0]), "%s", name);
 
     if (!str_ends_with(str_of(token, strlen(token)), ".fate"))
       continue;
 
-    const char* path = resolveInclude(&job, name);
+    const char* path = resolve_include(&job, name);
 
     if (!path)
     {
@@ -474,27 +474,27 @@ int main(int argc, char** argv)
 
       tail[0] = '\0';
 
-      if (req->fromUnit != NULL)
-        snprintf(tail, sizeof(tail), " asked for by %s", req->fromUnit);
+      if (req->from_unit != NULL)
+        snprintf(tail, sizeof(tail), " asked for by %s", req->from_unit);
 
-      if (job.includeDirCount == 0)
+      if (job.include_dir_count == 0)
         snprintf(what, sizeof(what), "include file not found: %s%s - no include path given, pass -L <dir>", name, tail);
       else
         snprintf(what, sizeof(what), "include file not found: %s%s", name, tail);
 
-      includeFatal(&job, req, what);
+      include_fatal(&job, req, what);
       break;
     }
 
-    Source* unit = &units[unitCount];
+    source_t* unit = &units[unit_count];
 
-    *unit = (Source){0};
+    *unit = (source_t){0};
 
     /* Copied into the arena because `name` lives on this iteration's stack and
      * `displayName` outlives the loop (it is the unit's "as it appeared" path). */
-    unit->displayName = arena_dup(&job.arena, name, strlen(name));
+    unit->display_name = arena_dup(&job.arena, name, strlen(name));
 
-    if (parseUnit(&job, unit, path) != ST_OK)
+    if (parse_unit(&job, unit, path) != ST_OK)
     {
       /* Found but unreadable or unparseable. The file exists, so this is not "not
        * found", and its functions are still missing from the table, which makes the
@@ -503,24 +503,24 @@ int main(int argc, char** argv)
       char what[512];
 
       snprintf(what, sizeof(what), "include file could not be read: %s", name);
-      includeFatal(&job, req, what);
+      include_fatal(&job, req, what);
       break;
     }
 
-    emit_scan(&job.emit, unit, unitCount, "");
-    unitCount++;
+    emit_scan(&job.emit, unit, unit_count, "");
+    unit_count++;
 
     /* Nested includes are queued in the same verbatim form, so they meet the same
      * gate as the top-level ones. */
-    for (int i = 0; i < unit->includeCount && pendingCount < (int)(sizeof(pending) / sizeof(pending[0])); i++)
+    for (int i = 0; i < unit->include_count && pending_count < (int)(sizeof(pending) / sizeof(pending[0])); i++)
     {
       if (!unit->includes[i].raw)
         continue;
 
-      snprintf(pending[pendingCount].token, sizeof(pending[0].token), "%s", unit->includes[i].raw);
-      pending[pendingCount].line = unit->includes[i].line;
-      pending[pendingCount].fromUnit = unit->displayName;
-      pendingCount++;
+      snprintf(pending[pending_count].token, sizeof(pending[0].token), "%s", unit->includes[i].raw);
+      pending[pending_count].line = unit->includes[i].line;
+      pending[pending_count].from_unit = unit->display_name;
+      pending_count++;
     }
   }
 
@@ -540,28 +540,28 @@ int main(int argc, char** argv)
    *
    * Only the abort reason is printed. `job.diag` can already hold `missing return` lines
    * from the definition scan, and those describe a program this run refused to build. */
-  if (job.includeFailed)
+  if (job.include_failed)
   {
-    fprintf(stderr, "%s\n", job.fatalMsg);
-    discardStaleOutput(outPath);
+    fprintf(stderr, "%s\n", job.fatal_msg);
+    discard_stale_output(out_path);
     return 2;
   }
 
   /* Globals live in the scope every function starts from. */
-  for (int i = 0; i < units[0].itemCount; i++)
+  for (int i = 0; i < units[0].item_count; i++)
   {
     if (units[0].items[i].kind != TOP_GLOBAL)
       continue;
 
     /* One GlobalVar per TOP_GLOBAL item: `globs` is a single binding, not a run of
      * them, so walking it as an array would read past the allocation. */
-    const GlobalVar* g = units[0].items[i].globs;
+    const global_var_t* g = units[0].items[i].globs;
 
     if (g != NULL)
-      emit_bindGlobal(&job.emit, g->name, g->length, g->values[0]);
+      emit_bind_global(&job.emit, g->name, g->length, g->values[0]);
   }
 
-  const Status st = emit_source(&job.emit, &units[0]);
+  const status_t st = emit_source(&job.emit, &units[0]);
 
   /* Stream order follows the reference: tokenizer complaints are emitted while the
    * source is read, so they come out above the compile diagnostics. Neither group is
@@ -575,7 +575,7 @@ int main(int argc, char** argv)
   if (st == ST_OOM)
   {
     fprintf(stderr, "out of memory\n");
-    discardStaleOutput(outPath);
+    discard_stale_output(out_path);
     return 2;
   }
 
@@ -586,15 +586,15 @@ int main(int argc, char** argv)
      * reference prints on its way out is a JVM stack trace, which ruling R1 keeps out
      * of the goldens. The diagnostic that caused the abort is already on stderr, and
      * exit 3 plus the missing output file carry the rest. */
-    discardStaleOutput(outPath);
+    discard_stale_output(out_path);
     return 3;
   }
 
-  FILE* out = fopen(outPath, "wb");
+  FILE* out = fopen(out_path, "wb");
 
   if (!out)
   {
-    fprintf(stderr, "could not write %s\n", outPath);
+    fprintf(stderr, "could not write %s\n", out_path);
     return 2;
   }
 
