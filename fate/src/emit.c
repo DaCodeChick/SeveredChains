@@ -571,7 +571,7 @@ void emit_scan(emit_t* e, const source_t* src, int unit_index, const char* prefi
     }
 
     /* A function named like an ASM op is rejected: `OpType.byName` would win the name. */
-    for (int k = 0; k < op_name_count; k++)
+    for (int k = 0; k < OP_NAME_COUNT; k++)
     {
       if (str_ieq_cstr(fn->name, op_names[k].name))
       {
@@ -672,7 +672,7 @@ static str_t bare_call_name(const node_t* c)
  *  declaration order wins, which matters for the duplicated display names. */
 static const op_name_t* find_op(str_t name)
 {
-  for (int i = 0; i < op_name_count; i++)
+  for (int i = 0; i < OP_NAME_COUNT; i++)
     if (str_ieq_cstr(name, op_names[i].name))
       return &op_names[i];
 

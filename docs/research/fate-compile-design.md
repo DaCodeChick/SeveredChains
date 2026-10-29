@@ -863,9 +863,17 @@ Per D1, the mechanical gates must see the C tool:
   - The `fate` code was **not** snake_case throughout, so the "a clean result is expected"
     prediction here was false. 169 distinct camelCase identifiers (1 744 occurrences) were live
     in `fate/src` while this document asserted the opposite and no check disagreed with it.
+  - And a snake_case **constant** was still invisible, which is a third class, not a leftover of
+    the first two. `#define op_name_count` is correctly `lower_snake` as far as identifier
+    grammar goes, but the data convention fixes named constants at `UPPER_SNAKE_CASE`, so it read
+    as an ordinary variable. `scan_c_style` cannot see this: it passes anything all-lower by
+    design, or it would reject every correct variable in the tree. Macro names are decidable
+    from the text alone (a `#define` name is prescribed, an ordinary identifier's casing is not),
+    so `scan_macro_names` checks exactly that and nothing more.
 
-  `scan_c_style` is now that check: it flags any identifier in production C that is neither
-  `lower_snake` nor `UPPER_SNAKE`, after blanking comments and literals newline-preservingly.
+  `scan_c_style` is now one of the two checks: it flags any identifier in production C that is
+  neither `lower_snake` nor `UPPER_SNAKE`, after blanking comments and literals
+  newline-preservingly.
   Two implementation traps are worth keeping: the literal pattern must accept backslash escapes
   (a help string containing `Fate Script` was otherwise reported as two identifiers), and the
   blanking must keep newlines or every reported line number drifts. `psx/cpp` is excluded —

@@ -107,6 +107,9 @@ IDENT = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*\b")
 DOC_STRICT_ROOTS = re.compile(r"^(docs/(architecture|guidelines)/|README\.md$)")
 HUMP = re.compile(r"[A-Z]+(?![a-z])|[A-Z][a-z0-9]*|[a-z][a-z0-9]*|[0-9]+")
 COMMENT_LINE = re.compile(r"^\s*(//|/\*|\*)")
+
+# `#define NAME` / `#  define NAME(x)` — the macro name only, not its body.
+DEFINE_NAME = re.compile(r"^\s*#\s*define\s+([A-Za-z_][A-Za-z0-9_]*)")
 # `SomeName`, `ns::Name`, `Name(x)` — the identifier part before punctuation.
 DOC_TOKEN = re.compile(r"`([^`]*)`")
 DOC_IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
@@ -191,6 +194,39 @@ def scan_c_style(path: Path) -> list[str]:
           f"{path}:{number}: {identifier}: C code uses snake_case identifiers "
           f"(types take a `_t` suffix); PascalCase and camelCase belong to the "
           f"C++ grammar (psx-c-api.md §2)"
+      )
+  return findings
+
+
+def scan_macro_names(path: Path) -> list[str]:
+  """Macro / named-constant spellings must be UPPER_SNAKE_CASE.
+
+  This is the check that would have caught `op_name_count`, which scan_c_style
+  cannot see: that check deliberately passes anything all-lowercase, because
+  snake_case is the correct C grammar for ordinary identifiers. A macro name is not
+  an ordinary identifier - its spelling is fixed by policy (AGENTS.md naming table
+  and data convention, psx-c-api.md §2), so `#define op_name_count ...` is
+  decidable from the text alone, without first deciding whether the thing is
+  'really' a constant.
+
+  Deliberately NOT attempted: the same rule over `const`-qualified objects. Most
+  `const int x = ...` in this codebase are read-only locals whose value is computed
+  at runtime (`const int len = text.len < 0 ? 0 : ...`), not named constants, and
+  spelling cannot distinguish the two. A check that guessed would either flag
+  correct code or stay quiet, so that distinction stays a review matter.
+  """
+  findings = []
+  for number, line in enumerate(path.read_text(encoding="utf-8",
+                                                errors="replace").splitlines(), 1):
+    match = DEFINE_NAME.match(line)
+    if match is None:
+      continue
+    name = match.group(1)
+    if name != name.upper():
+      findings.append(
+          f"{path}:{number}: {name}: a macro or named constant is UPPER_SNAKE_CASE; "
+          f"a lower-case spelling reads as a variable (AGENTS.md naming table, data "
+          f"convention)"
       )
   return findings
 
@@ -423,6 +459,7 @@ def main(argv: list[str]) -> int:
     c_code = c_root and "tests" not in path.parts and "cpp" not in path.parts
     if path.suffix in {".c", ".h"} and c_code and not opts.docs_only:
       findings.extend(scan_c_style(path))
+      findings.extend(scan_macro_names(path))
     elif path.suffix in {".h", ".hpp", ".cpp", ".cc"} and not opts.docs_only:
       findings.extend(scan_code(path))
       # The psx library keeps its own conventions: snake_case in the C17 core (a
@@ -445,7 +482,7 @@ def main(argv: list[str]) -> int:
     print(f"\n{len(findings)} naming violation(s): acronyms are fully capitalised in "
           f"every PascalCase position, public data members are PascalCase and private "
           f"ones are camelCase_ (AGENTS.md naming table); C code is snake_case with "
-          f"`_t` types (psx-c-api.md §2).")
+          f"`_t` types and UPPER_SNAKE macros (psx-c-api.md §2).")
     return 1
   print("naming: clean (acronym policy + data-member casing + C identifier grammar)")
   return 0

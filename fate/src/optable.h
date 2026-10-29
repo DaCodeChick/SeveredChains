@@ -1,7 +1,13 @@
-/* optable.h — generated from the reference `OpType` enum. Do not hand-edit.
-   Regenerate with: python3 tools/gen_optable.py
+/* optable.h — the ASM op name table, transcribed from the reference `OpType` enum.
    `byName` in the reference is a case-insensitive first-match over declaration
-   order, so order and duplicates are part of the behaviour, not noise. */
+   order, so order and duplicates are part of the behaviour, not noise — keep them
+   verbatim if this table is ever revised.
+
+   There is no generator for this file. An earlier version of this comment said
+   "generated … regenerate with tools/gen_optable.py"; that script has never existed
+   in the repository (never committed, absent from a clean clone), so the file was
+   hand-maintained while claiming not to be. Edits here are made directly — check
+   them against the reference `OpType` declaration order rather than regenerating. */
 #ifndef FATE_OPTABLE_H
 #define FATE_OPTABLE_H
 
@@ -39,6 +45,6 @@ static const op_name_t op_names[] = {
   {"pop", 102, 1},       {"cmp", 103, 3},
 };
 
-#define op_name_count ((int)(sizeof(op_names) / sizeof(op_names[0])))
+#define OP_NAME_COUNT ((int)(sizeof(op_names) / sizeof(op_names[0])))
 
 #endif /* FATE_OPTABLE_H */
