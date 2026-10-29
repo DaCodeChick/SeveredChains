@@ -195,7 +195,7 @@ a machine with no playable data.
 | Library smoke + error-name stability | 2 | `psx/tests/test_smoke.cpp` |
 | C++ wrapper contract (delegation, span aliasing, move-only RAII, error propagation) | 8 | `psx/tests/test_wrapper.cpp` |
 | C header usable from C++ under `extern "C"`, layout/linkage stability | 1 | `psx/tests/test_c_linkage.cpp` |
-| Pure C17 consumer: every entry point, every error code, NULL rejection, malformed contract | 261 checks | `psx/tests/c_consumer/main.c` |
+| Pure C17 consumer: every entry point, every error code, NULL rejection, malformed contract | 294 checks | `psx/tests/c_consumer/main.c` |
 | Exported-symbol audit (39 exports, no C++ symbol in or out) | — | `psx/tests/abi_symbols.cmake` |
 | Old-vs-new equivalence corpus (opt-in) | 4 | `psx/migration/differential/` |
 | Kind detection, root validation, ownership, path confinement, I/O taxonomy, scan, inspect, decode mapping, diagnostics | 15 | `tests/engine/test_resources.cpp` |

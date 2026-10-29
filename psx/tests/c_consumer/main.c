@@ -818,34 +818,28 @@ static void test_xa(void)
   xa_build_sector(sector, sizeof(sector));
 
   /* --- one-shot decode: NULL stream means no state, in either direction. --- */
-  check_eq_err(
-      psx_xa_decode_sector(NULL, (psx_bytes_t){sector, sizeof(sector)}, 0x05u, (psx_writable_bytes_t){out, sizeof(out)},
-                           &written),
-      PSX_OK, "one-shot decode");
+  check_eq_err(psx_xa_decode_sector(NULL, (psx_bytes_t){sector, sizeof(sector)}, 0x05u,
+                                    (psx_writable_bytes_t){out, sizeof(out)}, &written),
+               PSX_OK, "one-shot decode");
   check_eq_u64(written, 4032ull, "one-shot wrote a full stereo sector");
   memcpy(one_shot, out, written * 2u);
 
   /* --- rejection paths, each isolated so one cannot mask another. ---------- */
+  check_eq_err(psx_xa_decode_sector(NULL, (psx_bytes_t){sector, sizeof(sector)}, 0x05u,
+                                    (psx_writable_bytes_t){out, sizeof(out)}, NULL),
+               PSX_ERROR_INVALID_ARGUMENT, "decode refuses a null out_samples");
   check_eq_err(
-      psx_xa_decode_sector(NULL, (psx_bytes_t){sector, sizeof(sector)}, 0x05u, (psx_writable_bytes_t){out, sizeof(out)},
-                           NULL),
-      PSX_ERROR_INVALID_ARGUMENT, "decode refuses a null out_samples");
+    psx_xa_decode_sector(NULL, (psx_bytes_t){sector, 2327u}, 0x05u, (psx_writable_bytes_t){out, sizeof(out)}, &written),
+    PSX_ERROR_TRUNCATED, "2327 bytes is one short of the minimum");
   check_eq_err(
-      psx_xa_decode_sector(NULL, (psx_bytes_t){sector, 2327u}, 0x05u, (psx_writable_bytes_t){out, sizeof(out)},
-                           &written),
-      PSX_ERROR_TRUNCATED, "2327 bytes is one short of the minimum");
-  check_eq_err(
-      psx_xa_decode_sector(NULL, (psx_bytes_t){sector, 2328u}, 0x05u, (psx_writable_bytes_t){out, sizeof(out)},
-                           &written),
-      PSX_OK, "2328 bytes is exactly the minimum");
-  check_eq_err(
-      psx_xa_decode_sector(NULL, (psx_bytes_t){sector, sizeof(sector)}, 0x15u, (psx_writable_bytes_t){out, sizeof(out)},
-                           &written),
-      PSX_ERROR_XA_UNSUPPORTED_CODING, "decode refuses 8-bit coding");
-  check_eq_err(
-      psx_xa_decode_sector(NULL, (psx_bytes_t){sector, sizeof(sector)}, 0x05u, (psx_writable_bytes_t){out, 16u},
-                           &written),
-      PSX_ERROR_XA_OUTPUT_TOO_LARGE, "decode refuses an undersized destination");
+    psx_xa_decode_sector(NULL, (psx_bytes_t){sector, 2328u}, 0x05u, (psx_writable_bytes_t){out, sizeof(out)}, &written),
+    PSX_OK, "2328 bytes is exactly the minimum");
+  check_eq_err(psx_xa_decode_sector(NULL, (psx_bytes_t){sector, sizeof(sector)}, 0x15u,
+                                    (psx_writable_bytes_t){out, sizeof(out)}, &written),
+               PSX_ERROR_XA_UNSUPPORTED_CODING, "decode refuses 8-bit coding");
+  check_eq_err(psx_xa_decode_sector(NULL, (psx_bytes_t){sector, sizeof(sector)}, 0x05u,
+                                    (psx_writable_bytes_t){out, 16u}, &written),
+               PSX_ERROR_XA_OUTPUT_TOO_LARGE, "decode refuses an undersized destination");
 
   /* --- independence: the reference keeps these taps in process-wide statics.
      A second stream must not see the first one's tail, or two tracks would
@@ -857,24 +851,21 @@ static void test_xa(void)
   psx_xa_stream_init(&clean);
   CHECK(primed.prev[0] == 0 && primed.prev[1] == 0 && primed.prev2[0] == 0 && primed.prev2[1] == 0);
 
-  check_eq_err(
-      psx_xa_decode_sector(&primed, (psx_bytes_t){sector, sizeof(sector)}, 0x05u,
-                           (psx_writable_bytes_t){carried, sizeof(carried)}, &written),
-      PSX_OK, "first decode through a stream");
+  check_eq_err(psx_xa_decode_sector(&primed, (psx_bytes_t){sector, sizeof(sector)}, 0x05u,
+                                    (psx_writable_bytes_t){carried, sizeof(carried)}, &written),
+               PSX_OK, "first decode through a stream");
   CHECK(memcmp(carried, one_shot, written * 2u) == 0); /* zero history == one-shot */
 
-  check_eq_err(
-      psx_xa_decode_sector(&clean, (psx_bytes_t){sector, sizeof(sector)}, 0x05u,
-                           (psx_writable_bytes_t){again, sizeof(again)}, &written),
-      PSX_OK, "a fresh stream is unaffected by a used one");
+  check_eq_err(psx_xa_decode_sector(&clean, (psx_bytes_t){sector, sizeof(sector)}, 0x05u,
+                                    (psx_writable_bytes_t){again, sizeof(again)}, &written),
+               PSX_OK, "a fresh stream is unaffected by a used one");
   CHECK(memcmp(again, one_shot, written * 2u) == 0);
 
   /* And the primed stream must now differ, otherwise none of the above proves
      anything: identical results would mean the taps are never read. */
-  check_eq_err(
-      psx_xa_decode_sector(&primed, (psx_bytes_t){sector, sizeof(sector)}, 0x05u,
-                           (psx_writable_bytes_t){carried, sizeof(carried)}, &written),
-      PSX_OK, "second decode through the primed stream");
+  check_eq_err(psx_xa_decode_sector(&primed, (psx_bytes_t){sector, sizeof(sector)}, 0x05u,
+                                    (psx_writable_bytes_t){carried, sizeof(carried)}, &written),
+               PSX_OK, "second decode through the primed stream");
   CHECK(memcmp(carried, one_shot, written * 2u) != 0);
   CHECK(primed.prev[0] != 0 || primed.prev[1] != 0);
 

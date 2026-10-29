@@ -180,7 +180,8 @@ psx_error_t psx_xa_decode_sector(psx_xa_stream_t* stream, psx_bytes_t sector, ui
    * caller can chain sectors of one track. */
   psx_xa_stream_t local;
   psx_xa_stream_init(&local);
-  /* MUTATION A: ignore incoming history */
+  if (stream != NULL)
+    local = *stream;
 
   const int stereo = (coding_info & PSX_XA_FLAG_STEREO) != 0u;
 
@@ -243,6 +244,7 @@ psx_error_t psx_xa_decode_sector(psx_xa_stream_t* stream, psx_bytes_t sector, ui
   }
 
   *out_samples = w / 2u;
-  /* MUTATION A: do not write history back */
+  if (stream != NULL)
+    *stream = local;
   return PSX_OK;
 }

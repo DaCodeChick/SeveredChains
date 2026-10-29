@@ -26,5 +26,5 @@
 #include "psx/error.h"
 #include "psx/export.h"
 #include "psx/tim.h"
-#include "psx/xa.h"
 #include "psx/version.h"
+#include "psx/xa.h"
