@@ -1,3 +1,4 @@
+#pragma once
 /**
  * @file emit.h
  * @brief Code generation: Fate Script syntax tree to assembly text.
@@ -13,8 +14,6 @@
  *
  * @note Thread: single-threaded; all state lives in the caller-owned arena.
  */
-#ifndef FATE_EMIT_H
-#define FATE_EMIT_H
 
 #include "ast.h"
 #include "fate.h"
@@ -113,5 +112,3 @@ status_t emit_source(emit_t* e, const source_t* src);
  *  @param value Initialiser text printed after `data `.
  *  @note Must be called after every `emit_scan` and before `emit_source`. */
 void emit_bind_global(emit_t* e, const char* name, int length, const char* value);
-
-#endif /* FATE_EMIT_H */

@@ -1,3 +1,4 @@
+#pragma once
 /**
  * @file model.h
  * @brief Shared data model for the Fate compiler: diagnostics, symbols, scopes, ops.
@@ -9,8 +10,6 @@
  *
  * @note Thread: single-threaded.
  */
-#ifndef FATE_MODEL_H
-#define FATE_MODEL_H
 
 #include "ast.h"
 #include "util.h"
@@ -98,5 +97,3 @@ typedef struct scope_t
   int count;
   int cap;
 } scope_t;
-
-#endif /* FATE_MODEL_H */

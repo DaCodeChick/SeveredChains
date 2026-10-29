@@ -1,3 +1,4 @@
+#pragma once
 /* parse.h — recursive-descent parser for Fate Script.
 
    The parser turns a token vector (from `lexer.h`) into the parse model in
@@ -7,8 +8,6 @@
 
    Thread safety: a `Parser` is single-threaded and owns no persistent state
    beyond the arena and the lexer it is handed. */
-#ifndef FATE_PARSE_H
-#define FATE_PARSE_H
 
 #include "fate.h"
 #include "lexer.h"
@@ -25,5 +24,3 @@ typedef struct parser_t parser_t;
  *  @return #ST_OK, #ST_COMPILE on a structural failure, or #ST_OOM.
  *  @note Thread: single-threaded. */
 status_t parse_translation_unit(arena_t* arena, lexer_t* lx, source_t* src, diag_t* diag);
-
-#endif /* FATE_PARSE_H */

@@ -1,3 +1,4 @@
+#pragma once
 /* fate.h — shared data model for the Fate toolchain.
 
    Two vocabulary classes live here:
@@ -12,8 +13,6 @@
 
    Thread safety: nothing here is thread-safe; one translation unit is compiled at
    a time on the calling thread. */
-#ifndef FATE_FATE_H
-#define FATE_FATE_H
 
 #include "ast.h"
 #include "util.h"
@@ -114,5 +113,3 @@ bool add_argument(func_t* fn, arena_t* a, str_t name);
 
 /** Append a parsed function body to a translation unit. */
 bool add_body(source_t* src, arena_t* a, const node_t* body);
-
-#endif /* FATE_FATE_H */

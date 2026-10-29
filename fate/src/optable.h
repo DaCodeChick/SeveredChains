@@ -1,3 +1,4 @@
+#pragma once
 /* optable.h — the ASM op name table, transcribed from the reference `OpType` enum.
    `byName` in the reference is a case-insensitive first-match over declaration
    order, so order and duplicates are part of the behaviour, not noise — keep them
@@ -8,8 +9,6 @@
    in the repository (never committed, absent from a clean clone), so the file was
    hand-maintained while claiming not to be. Edits here are made directly — check
    them against the reference `OpType` declaration order rather than regenerating. */
-#ifndef FATE_OPTABLE_H
-#define FATE_OPTABLE_H
 
 /** One ASM op name, in reference declaration order. */
 typedef struct op_name_t
@@ -19,7 +18,7 @@ typedef struct op_name_t
   int param_count;
 } op_name_t;
 
-static const op_name_t op_names[] = {
+static const op_name_t OP_NAMES[] = {
   {"yield", 0, 0},       {"rewind", 1, 0},        {"wait", 2, 1},
   {"wait_cmp", 3, 2},    {"wait_cmp", 4, 1},      {"rewind", 5, 0},
   {"rewind", 6, 0},      {"rewind", 7, 0},        {"mov", 8, 2},
@@ -45,6 +44,4 @@ static const op_name_t op_names[] = {
   {"pop", 102, 1},       {"cmp", 103, 3},
 };
 
-#define OP_NAME_COUNT ((int)(sizeof(op_names) / sizeof(op_names[0])))
-
-#endif /* FATE_OPTABLE_H */
+#define OP_NAME_COUNT ((int)(sizeof(OP_NAMES) / sizeof(OP_NAMES[0])))

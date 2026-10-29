@@ -278,6 +278,8 @@ CLI surface: `--help`, argument validation, "missing required arg" messages, and
    cannot see camelCase anyway. It now scans production C and has a grammar check for it (§5.5).
    The naming spec's "documented + reviewed, not lint-enforced" line described an arrangement
    that had already failed, which is why it was replaced rather than obeyed.
+   Two more C-grammar rules became enforced on 2026-10-29 (item 11): macro names and
+   file-scope read-only tables must be `UPPER_SNAKE_CASE`.
 8. Project default stays C17; only the `fate` target is C23. Measured fact: **all 7 fate `.c`
    files currently compile clean under `-std=c17`** — nothing requires C23 yet; the probe guards
    the declared standard for future use.
@@ -300,6 +302,19 @@ CLI surface: `--help`, argument validation, "missing required arg" messages, and
     it also writes nothing in every one of those cases, and the only thing not reproduced is its
     exit status (`0` for an unresolved include, `1` for an unreadable `-L`), which the contract
     treats as a failure class to be raised, not matched. Pins are `c4`–`c9` in `cli_contract`.
+11. **Ruling of 2026-10-29 (three directives, implemented).** (a) Named constants in C are
+    `UPPER_SNAKE_CASE`: `op_name_count` renamed, and the three file-scope lookup tables
+    (`op_names`, `keywords`, `operators`) renamed with it. (b) **`#pragma once` everywhere, not
+    just in `fate`** — measurement showed 29 of 38 headers already used it on line 1, so this
+    removed an outlier rather than setting a new rule; all 38 are now uniform. (c) The `FATE_`
+    prefix stays on the three limit macros (`FATE_MAX_DEPTH`, `FATE_MAX_INCLUDE_DIRS`,
+    `FATE_MAX_UNITS`); the nine `FATE_*_H` guard names ceased to exist with the conversion, so
+    the prefix question now concerns only those three and is closed.
+    Both (a) and (b) are gate-enforced, not just written down: `check_naming.py` gained
+    `scan_macro_names` + `scan_table_constants`, `check_format.py` gained `check_header_style`.
+    Each was proved non-vacuous by reverting the change in a scratch tree and watching the
+    check fire. Behaviour was proved unchanged by an A/B run of the old and new binaries over
+    all 28 manifest entries (exit + stdout + stderr + emitted bytes): no differences.
 
 ---
 
@@ -321,6 +336,17 @@ CLI surface: `--help`, argument validation, "missing required arg" messages, and
   `fate/` drift out of them. Both gates now genuinely read C: `check_naming.py` checks `.c` and
   non-`psx/cpp` `.h` files for the C identifier grammar, so a PascalCase type or camelCase
   function in `fate/src` is a build failure rather than something a reviewer has to notice.
+- **A gate that crashes on a scratch path is not a gate.** `check_format.py` built its finding
+  strings with `path.relative_to(ROOT)`, which throws for any path outside the repo — so the
+  standard way of proving a check bites (point it at a scratch tree) crashed instead of
+  reporting. Fixed with a `display()` helper on 2026-10-29; the lesson is to run every new
+  check against an out-of-tree path once, not only against the real tree.
+- **`optable.h` is hand-maintained.** Its header used to say "generated … regenerate with
+  `tools/gen_optable.py`", but that script has never existed in the repository — never
+  committed, absent from a clean clone. Nobody could have regenerated the file; anyone
+  trusting the comment would either hunt for a missing tool or hand-edit and call it a
+  regeneration. The comment now states the real provenance and what to check edits against
+  (the reference `OpType` declaration order, where order and duplicates are behavioural).
 - No RTTI/exceptions crossing boundaries does not apply to `fate` (pure C), but the gates do.
 - **Argument-position `N` in a probe script is not a stable way to address a file.** On
   2026-10-28 a stub used `cat > "$6"` to fake compiler output; for the 17 fixtures with no

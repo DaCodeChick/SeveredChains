@@ -1,3 +1,4 @@
+#pragma once
 /**
  * @file lexer.h
  * @brief Fate Script tokenizer, deliberately matched to the reference ANTLR lexer.
@@ -11,8 +12,6 @@
  *
  * @note Thread: single-threaded.
  */
-#ifndef FATE_LEXER_H
-#define FATE_LEXER_H
 
 #include "util.h"
 
@@ -144,5 +143,3 @@ status_t lex_run(arena_t* arena, str_t src, lexer_t* lx);
 
 /** @brief Human-readable name of a token class (diagnostics and --dump-ast). */
 const char* tok_kind_name(tok_kind_t k);
-
-#endif /* FATE_LEXER_H */

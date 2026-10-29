@@ -232,6 +232,29 @@ util::Logger::Instance().Log(util::LogLevel::Info, "window",
   behind `Entries()` / `At()` / `VirtualCount()` / `View()`, and `psx/tests/test_wrapper.cpp`
   pins that with a `static_assert` so re-publicising a field fails the build.
 
+### 6.3 Header inclusion style
+
+- Headers use **`#pragma once` on line 1**, not `#ifndef`/`#define` include guards. This is a
+  whole-tree convention, not a per-directory choice: 29 of the 38 headers already used it —
+  including every public `psx` C17 header, which is the exported ABI surface — and the 9 that
+  did not were all in `fate`, which had not picked it up. `fate/src` was converted on
+  2026-10-29; nothing in the tree uses a guard now.
+- `#pragma once` is supported by all three target toolchains (it is a documented MSVC
+  extension that Clang and GCC both implement), and it is quiet under the strictest C flag set
+  the project uses — **measured on this host with clang only**: `-std=c17 -Wall -Wextra
+  -Wshadow -Wconversion -Werror -pedantic-errors`, and again under `-std=c23`. The MSVC side
+  is documented-and-expected, not measured here; the known caveat is path-identity for headers
+  reached over network shares or symlinks, which does not apply to an in-tree `src/` include
+  graph. Anyone who wants that leg covered should say so rather than assume it is tested.
+- It is not cosmetic here. The `fate` headers really are re-included: a TU that includes
+  `model.h` twice — once directly, once through `ast.h` — compiles clean with the pragma and
+  yields 21 redefinition errors (`redefinition of 'status_t'` first) with protection stripped.
+  Anyone tempted to drop protection entirely should run that comparison first.
+- `tools/check_format.py` fails on a header that uses an include guard or carries no
+  protection at all. It does not consult clang-format, so it still runs when clang-format is
+  missing or older than 17, and it is reported separately from formatting offenders because
+  the remedy is an edit, not `clang-format -i`.
+
 ## 7. Naming and documentation
 
 - Naming follows the AGENTS.md table exactly: **library** namespaces only —
@@ -253,6 +276,15 @@ util::Logger::Instance().Log(util::LogLevel::Info, "window",
   above, which is why the same operation appears as `psx_bpe_decompress` and
   `psx::bpe::DecompressBPE`. `tools/check_naming.py` knows both grammars. Third-party names (SDL_*, luau_*, Qt) are preserved
   verbatim.
+- **Named constants inside the C grammar are `UPPER_SNAKE_CASE`, not `snake_case`.** Object-like
+  macros and file-scope read-only tables are named constants — `#define OP_NAME_COUNT`,
+  `static const op_entry_t OPERATORS[]` — and a lower-case spelling reads as a variable.
+  Function-local `const` is *not* covered and stays camelCase: most of those are read-only
+  temporaries whose value is computed at run time, and spelling cannot distinguish them from
+  constants, so the gate keys on file scope (a declaration at column 0) rather than guessing.
+  Both the macro rule and the table rule are enforced by `tools/check_naming.py`; before
+  2026-10-29 neither was, which is how `op_name_count`, `op_names`, `keywords` and
+  `operators` sat in `fate/src` against a rule this section already stated.
 - **Prefixes by domain.** C++ code identifiers (namespaces, types, C++
   macros, C-linkage symbols, C++ file names) use `LoD`/`LOD`/`lod` — The
   Legend of Dragoon is what the code implements. The build system (CMake
@@ -469,3 +501,6 @@ requires it — never legacy by habit*.
       and what they mirror (§6.2).
 - [ ] `clang-format` applied; Allman braces and **no braces on single-statement
       bodies** per `.clang-format` (§6.1); `tools/check_format.py` clean.
+- [ ] New headers open with `#pragma once` on line 1 — no `#ifndef` guard (§6.3); named
+      constants and file-scope read-only tables are `UPPER_SNAKE_CASE` (§7); both are gate-
+      enforced, so the check fails rather than the review catching it later.

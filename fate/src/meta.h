@@ -1,3 +1,4 @@
+#pragma once
 /**
  * @file meta.h
  * @brief Engine-call and enum metadata used to resolve `Module::method` calls.
@@ -16,8 +17,6 @@
  *
  * @note Thread: read-only after `meta_load`.
  */
-#ifndef FATE_META_H
-#define FATE_META_H
 
 #include "util.h"
 
@@ -55,5 +54,3 @@ const meta_method_t* meta_find_method(const meta_t* m, const char* name);
 
 /** @brief True when `s` names a value in any loaded enum class. */
 bool meta_is_enum_value(const meta_t* m, str_t s);
-
-#endif /* FATE_META_H */

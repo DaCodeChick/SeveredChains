@@ -573,7 +573,7 @@ void emit_scan(emit_t* e, const source_t* src, int unit_index, const char* prefi
     /* A function named like an ASM op is rejected: `OpType.byName` would win the name. */
     for (int k = 0; k < OP_NAME_COUNT; k++)
     {
-      if (str_ieq_cstr(fn->name, op_names[k].name))
+      if (str_ieq_cstr(fn->name, OP_NAMES[k].name))
       {
         char msg[256];
         snprintf(msg, sizeof(msg), "function \"%.*s\" is not a legal name", fn->name.len, fn->name.p);
@@ -673,8 +673,8 @@ static str_t bare_call_name(const node_t* c)
 static const op_name_t* find_op(str_t name)
 {
   for (int i = 0; i < OP_NAME_COUNT; i++)
-    if (str_ieq_cstr(name, op_names[i].name))
-      return &op_names[i];
+    if (str_ieq_cstr(name, OP_NAMES[i].name))
+      return &OP_NAMES[i];
 
   return NULL;
 }
@@ -735,7 +735,7 @@ static val_t* emit_call(emit_t* e, const node_t* c, bool in_expr)
       }
 
       if (!e->aborted)
-        put_op(e, op_names[op - op_names].name, params, n);
+        put_op(e, OP_NAMES[op - OP_NAMES].name, params, n);
 
       if (in_expr)
       {

@@ -871,16 +871,26 @@ Per D1, the mechanical gates must see the C tool:
     from the text alone (a `#define` name is prescribed, an ordinary identifier's casing is not),
     so `scan_macro_names` checks exactly that and nothing more.
 
-  `scan_c_style` is now one of the two checks: it flags any identifier in production C that is
-  neither `lower_snake` nor `UPPER_SNAKE`, after blanking comments and literals
-  newline-preservingly.
+  `scan_c_style` is the identifier-grammar check. Three checks now read production C, and they
+  are independent because the defects they catch are independent:
+  `scan_c_style` (anything neither `lower_snake` nor `UPPER_SNAKE`), `scan_macro_names` (a
+  `#define` whose name is not `UPPER_SNAKE`) and `scan_table_constants` (a file-scope
+  `static const T name[]` whose name is not `UPPER_SNAKE`). The last two exist because
+  `scan_c_style` passes all-lower names **by design**, so a second class of drift — correct
+  identifier grammar, wrong role — had no detector at all.
   Two implementation traps are worth keeping: the literal pattern must accept backslash escapes
   (a help string containing `Fate Script` was otherwise reported as two identifiers), and the
   blanking must keep newlines or every reported line number drifts. `psx/cpp` is excluded —
   PascalCase is correct there — and `tests/` is excluded as a scope choice, not an oversight.
+  The table check keys on column 0 rather than on indentation-in-general, which is what keeps
+  function-local `const` out of its scope without guessing at intent.
 * **Prove the extension bites**: before declaring F1 done, plant a deliberately mis-cased
   identifier (camelCase) in a scratch copy of a `fate/` file and confirm both gates fail, then
   remove it. A gate that "passes" without actually scanning `fate/` is a silent exemption.
+  Amend 2026-10-29: a camelCase-only probe is not sufficient, because it cannot fail a check
+  that was never looking for lower-case. Probe each rule with its own defect shape — a
+  camelCase identifier, a lower-case `#define`, a lower-case file-scope table — and check the
+  reported line numbers, or a broken check reads as a clean tree.
 
 ---
 

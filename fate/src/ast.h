@@ -1,3 +1,4 @@
+#pragma once
 /**
  * @file ast.h
  * @brief Fate Script syntax tree.
@@ -16,8 +17,6 @@
  *
  * @note Thread: single-threaded.
  */
-#ifndef FATE_AST_H
-#define FATE_AST_H
 
 #include "lexer.h"
 #include "util.h"
@@ -184,5 +183,3 @@ void node_add_name(arena_t* a, node_t* parent, node_t* child);
 
 /** @brief Allocate a zeroed node of `kind` at a source position. */
 node_t* node_new(arena_t* a, node_kind_t kind, int line, int col);
-
-#endif /* FATE_AST_H */

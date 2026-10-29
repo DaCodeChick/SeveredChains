@@ -1,3 +1,4 @@
+#pragma once
 /**
  * @file util.h
  * @brief Arena allocation, growable byte buffer, and string helpers shared by every
@@ -10,8 +11,6 @@
  *
  * @note Thread: single-threaded. No lock is taken anywhere in this file.
  */
-#ifndef FATE_UTIL_H
-#define FATE_UTIL_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -146,5 +145,3 @@ void buf_printf(buf_t* b, const char* fmt, ...);
 
 /** ASCII lower-case a slice into `dst`, truncating safely. */
 void buf_put_lower(buf_t* b, str_t s);
-
-#endif /* FATE_UTIL_H */

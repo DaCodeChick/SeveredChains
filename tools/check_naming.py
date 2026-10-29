@@ -110,6 +110,11 @@ COMMENT_LINE = re.compile(r"^\s*(//|/\*|\*)")
 
 # `#define NAME` / `#  define NAME(x)` — the macro name only, not its body.
 DEFINE_NAME = re.compile(r"^\s*#\s*define\s+([A-Za-z_][A-Za-z0-9_]*)")
+
+# A file-scope read-only table: no leading whitespace, so function-local `const`
+# declarations are structurally out of scope here.
+TABLE_DECL = re.compile(
+    r"^(?:static\s+)?const\s+[A-Za-z_][A-Za-z0-9_]*(?:\s*\*)?\s+([A-Za-z_][A-Za-z0-9_]*)\s*\[")
 # `SomeName`, `ns::Name`, `Name(x)` — the identifier part before punctuation.
 DOC_TOKEN = re.compile(r"`([^`]*)`")
 DOC_IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
@@ -227,6 +232,33 @@ def scan_macro_names(path: Path) -> list[str]:
           f"{path}:{number}: {name}: a macro or named constant is UPPER_SNAKE_CASE; "
           f"a lower-case spelling reads as a variable (AGENTS.md naming table, data "
           f"convention)"
+      )
+  return findings
+
+
+def scan_table_constants(path: Path) -> list[str]:
+  """File-scope `static const` tables must be UPPER_SNAKE_CASE.
+
+  This is the half of the constants rule that IS decidable, and it is what catches
+  `op_names` / `keywords` / `operators`. The discriminator is indentation, not
+  intuition: a declaration at column 0 is file scope, and a file-scope read-only
+  array is a named table, not a temporary. Function-local `const` sits at least two
+  spaces in and is deliberately not touched — most of those are runtime values.
+
+  The three tables this was written for were renamed on 2026-10-29; without this
+  check the same drift had nowhere to be caught, which is how they stayed lower-case.
+  """
+  findings = []
+  for number, line in enumerate(path.read_text(encoding="utf-8",
+                                                errors="replace").splitlines(), 1):
+    match = TABLE_DECL.match(line)
+    if match is None:
+      continue
+    name = match.group(1)
+    if name != name.upper():
+      findings.append(
+          f"{path}:{number}: {name}: a file-scope read-only table is a named "
+          f"constant and is UPPER_SNAKE_CASE"
       )
   return findings
 
@@ -460,6 +492,7 @@ def main(argv: list[str]) -> int:
     if path.suffix in {".c", ".h"} and c_code and not opts.docs_only:
       findings.extend(scan_c_style(path))
       findings.extend(scan_macro_names(path))
+      findings.extend(scan_table_constants(path))
     elif path.suffix in {".h", ".hpp", ".cpp", ".cc"} and not opts.docs_only:
       findings.extend(scan_code(path))
       # The psx library keeps its own conventions: snake_case in the C17 core (a

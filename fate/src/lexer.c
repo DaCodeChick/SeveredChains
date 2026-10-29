@@ -73,7 +73,7 @@ typedef struct kw_entry_t
   tok_kind_t kind;
 } kw_entry_t;
 
-static const kw_entry_t keywords[] = {
+static const kw_entry_t KEYWORDS[] = {
   {"entrypoint", TK_ENTRYPOINT},
   {"def", TK_DEF},
   {"var", TK_VAR},
@@ -92,11 +92,11 @@ static const kw_entry_t keywords[] = {
 
 static tok_kind_t lookup_keyword(str_t s)
 {
-  const size_t n = sizeof(keywords) / sizeof(keywords[0]);
+  const size_t n = sizeof(KEYWORDS) / sizeof(KEYWORDS[0]);
 
   for (size_t i = 0; i < n; ++i)
-    if (str_eq_cstr(s, keywords[i].text))
-      return keywords[i].kind;
+    if (str_eq_cstr(s, KEYWORDS[i].text))
+      return KEYWORDS[i].kind;
 
   return TK_IDENTIFIER;
 }
@@ -109,7 +109,7 @@ typedef struct op_entry_t
   tok_kind_t kind;
 } op_entry_t;
 
-static const op_entry_t operators[] = {
+static const op_entry_t OPERATORS[] = {
   /* 3 characters */
   {"&&=", TK_ANDC_ASSIGN},
   {"||=", TK_ORC_ASSIGN},
@@ -163,11 +163,11 @@ static const op_entry_t operators[] = {
 
 static tok_kind_t lookup_operator(str_t s)
 {
-  const size_t n = sizeof(operators) / sizeof(operators[0]);
+  const size_t n = sizeof(OPERATORS) / sizeof(OPERATORS[0]);
 
   for (size_t i = 0; i < n; ++i)
-    if (str_eq_cstr(s, operators[i].text))
-      return operators[i].kind;
+    if (str_eq_cstr(s, OPERATORS[i].text))
+      return OPERATORS[i].kind;
 
   return TK_EOF; /* sentinel: no operator matched */
 }
