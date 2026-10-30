@@ -251,6 +251,13 @@ Status ToStatus(psx::Error err) noexcept
       return Status::DecodeUnsupported;
     case E::XAOutputTooLarge:
       return Status::IOTooLarge; // Same shape as BPEOutputTooLarge.
+
+    case E::CdromBadSectorType:
+      // Submode type bits outside VIDEO/AUDIO/DATA mean the sector is not
+      // readable as anything, which is corruption rather than an unsupported
+      // but well-formed variant (compare XAUnsupportedCoding above). The
+      // reference throws here; the engine must not.
+      return Status::DecodeCorrupt;
   }
   return Status::Error;
 }

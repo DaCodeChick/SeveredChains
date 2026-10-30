@@ -12,10 +12,14 @@
 ///  - psx_tim_*   — TIM texture images (tim.h)
 ///  - psx_archive_* / psx_mrg_* / psx_deff_* — MRG / DEFF containers (archive.h)
 ///  - psx_xa_*    — XA 4-bit ADPCM sector decoding (xa.h)
+///  - psx_sector_* — CD-ROM XA sector geometry and header decode (cdrom.h)
 ///
 /// Documented but not yet implemented (psx-library.md §2): gte, gpu, spu,
-/// sssq, cdrom, tmd, anm, tag. Nothing here guesses at their layouts; each lands
-/// with the evidence and golden tests that pin it down.
+/// sssq, tmd, anm, tag. Nothing here guesses at their layouts; each lands
+/// with the evidence and golden tests that pin it down. The ISO 9660 half of
+/// cdrom (volume descriptor, directory records, path tables) is also still
+/// open — see the scope note at the top of psx/cdrom.h for the measurement it
+/// is waiting on.
 ///
 /// @see docs/architecture/psx-c-api.md for the API conventions, ABI versioning,
 ///      ownership rules, error-code table and C/C++ integration examples.
@@ -23,6 +27,7 @@
 #include "psx/archive.h"
 #include "psx/bpe.h"
 #include "psx/bytes.h"
+#include "psx/cdrom.h"
 #include "psx/error.h"
 #include "psx/export.h"
 #include "psx/tim.h"

@@ -63,6 +63,9 @@ enum class Error : int
   // --- XA audio (170..199) --------------------------------------------------
   XAUnsupportedCoding = PSX_ERROR_XA_UNSUPPORTED_CODING, ///< Coding byte asks for 8-bit.
   XAOutputTooLarge = PSX_ERROR_XA_OUTPUT_TOO_LARGE,      ///< Output span cannot hold a sector.
+
+  // --- CD-ROM sector (200..229) ---------------------------------------------
+  CdromBadSectorType = PSX_ERROR_CDROM_BAD_SECTOR_TYPE, ///< Submode type bits unrecognised.
 };
 
 /* The C++ enumerators must keep the C values: the wrapper translates by cast, and
@@ -92,6 +95,7 @@ static_assert(static_cast<int>(Error::DEFFOffsetsBad) == PSX_ERROR_DEFF_OFFSETS_
 static_assert(static_cast<int>(Error::DEFFEntryMissing) == PSX_ERROR_DEFF_ENTRY_MISSING);
 static_assert(static_cast<int>(Error::XAUnsupportedCoding) == PSX_ERROR_XA_UNSUPPORTED_CODING);
 static_assert(static_cast<int>(Error::XAOutputTooLarge) == PSX_ERROR_XA_OUTPUT_TOO_LARGE);
+static_assert(static_cast<int>(Error::CdromBadSectorType) == PSX_ERROR_CDROM_BAD_SECTOR_TYPE);
 
 /// @brief Human-readable name for an Error value (logs, tests, crash context).
 /// @param Code Any Error value; a code the library never produced yields

@@ -4,9 +4,10 @@
 /// (psx-library.md §2.1, psx-c-api.md §7).
 ///
 /// Include this from C++ instead of the C headers when you want the
-/// `psx::bpe` / `psx::tim` / `psx::archive` / `psx::xa` surface with `std::span`
-/// in and `std::expected<T, psx::Error>` out. The wrappers are header-only and
-/// contain no decoding logic: everything routes into the C shared library.
+/// `psx::bpe` / `psx::tim` / `psx::archive` / `psx::xa` / `psx::cdrom` surface
+/// with `std::span` in and `std::expected<T, psx::Error>` out. The wrappers are
+/// header-only and contain no decoding logic: everything routes into the C
+/// shared library.
 ///
 /// @code
 /// #include "psx/cpp/psx.hpp"
@@ -25,6 +26,7 @@
 #include "psx/cpp/archive.hpp"
 #include "psx/cpp/bpe.hpp"
 #include "psx/cpp/bytes.hpp"
+#include "psx/cpp/cdrom.hpp"
 #include "psx/cpp/error.hpp"
 #include "psx/cpp/tim.hpp"
 #include "psx/cpp/xa.hpp"

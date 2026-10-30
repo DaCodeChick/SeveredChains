@@ -18,6 +18,8 @@
 ///  80..109   TIM
 /// 110..139   MRG
 /// 140..169   DEFF
+/// 170..199   XA audio
+/// 200..229   CD-ROM sector
 /// ```
 
 #include "psx/export.h"
@@ -127,7 +129,16 @@ typedef enum
   /// @brief The output buffer cannot hold the interleaved sample count this
   ///        sector produces (4032 stereo / 8064 mono, x2 bytes each). Nothing is
   ///        written; query psx_xa_decoded_samples() for the exact requirement.
-  PSX_ERROR_XA_OUTPUT_TOO_LARGE = 171
+  PSX_ERROR_XA_OUTPUT_TOO_LARGE = 171,
+
+  /* --- CD-ROM sector (200..229) ------------------------------------------- */
+
+  /// @brief The submode type bits (1..3) are none of VIDEO, AUDIO, or DATA.
+  /// @note The reference throws `IllegalArgumentException("Invalid type")` for
+  ///       these patterns (SectorHeader.Submode.getType default branch). It is
+  ///       reproduced as an error code, not as a crash: a malformed sector on
+  ///       disc must be reportable, not fatal.
+  PSX_ERROR_CDROM_BAD_SECTOR_TYPE = 200
 } psx_error_t;
 
 /// @brief ABI guard: `psx_error_t` crosses the shared-library boundary as a function
@@ -190,6 +201,12 @@ PSX_API int psx_error_is_deff(psx_error_t error);
 /// @return Non-zero when the code is an XA decoding failure.
 /// @note Thread: pure function, no state — thread-safe.
 PSX_API int psx_error_is_xa(psx_error_t error);
+
+/// @brief Whether a code belongs to the CD-ROM sector group (200..229).
+/// @param Error Code to classify.
+/// @return Non-zero when the code is a CD-ROM sector failure.
+/// @note Thread: pure function, no state — thread-safe.
+PSX_API int psx_error_is_cdrom(psx_error_t error);
 
 #ifdef __cplusplus
 } /* extern "C" */

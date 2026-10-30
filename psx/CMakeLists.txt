@@ -42,6 +42,7 @@ set(PSX_PUBLIC_HEADERS
   include/psx/archive.h
   include/psx/bpe.h
   include/psx/bytes.h
+  include/psx/cdrom.h
   include/psx/error.h
   include/psx/export.h
   include/psx/psx.h
@@ -53,6 +54,7 @@ set(PSX_WRAPPER_HEADERS
   include/psx/cpp/archive.hpp
   include/psx/cpp/bpe.hpp
   include/psx/cpp/bytes.hpp
+  include/psx/cpp/cdrom.hpp
   include/psx/cpp/error.hpp
   include/psx/cpp/psx.hpp
   include/psx/cpp/tim.hpp
@@ -61,6 +63,7 @@ set(PSX_WRAPPER_HEADERS
 set(PSX_CORE_SOURCES
   src/archive.c
   src/bpe.c
+  src/cdrom.c
   src/error.c
   src/tim.c
   src/version.c

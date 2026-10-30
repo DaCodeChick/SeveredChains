@@ -14,6 +14,7 @@ add_executable(sc_tests_psx
   test_bpe.cpp
   test_tim.cpp
   test_archive.cpp
+  test_cdrom.cpp
   test_xa.cpp
   test_wrapper.cpp
   test_c_linkage.cpp)
@@ -54,7 +55,7 @@ endif()
 target_compile_definitions(sc_tests_psx PRIVATE
   PSX_XA_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/../testdata/xa_adpcm.bin")
 
-foreach(group psx bpe tim xa archive wrapper clinkage)
+foreach(group psx bpe tim xa cdrom archive wrapper clinkage)
   add_test(NAME psx.${group} COMMAND sc_tests_psx ${group})
 endforeach()
 

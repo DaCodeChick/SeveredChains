@@ -69,6 +69,10 @@ const char* psx_error_name(psx_error_t error)
     case PSX_ERROR_XA_OUTPUT_TOO_LARGE:
       return "XAOutputTooLarge";
 
+    /* --- CD-ROM sector (200..229) --- */
+    case PSX_ERROR_CDROM_BAD_SECTOR_TYPE:
+      return "CdromBadSectorType";
+
     default:
       return "Unknown";
   }
@@ -134,6 +138,9 @@ const char* psx_error_message(psx_error_t error)
     case PSX_ERROR_XA_OUTPUT_TOO_LARGE:
       return "XA output too small: the destination cannot hold this sector's samples";
 
+    case PSX_ERROR_CDROM_BAD_SECTOR_TYPE:
+      return "unrecognised sector: the submode type bits are not VIDEO, AUDIO, or DATA";
+
     default:
       return "unrecognised psx error code";
   }
@@ -162,4 +169,11 @@ int psx_error_is_deff(psx_error_t error)
 int psx_error_is_xa(psx_error_t error)
 {
   return error >= PSX_ERROR_XA_UNSUPPORTED_CODING && error <= PSX_ERROR_XA_OUTPUT_TOO_LARGE;
+}
+
+int psx_error_is_cdrom(psx_error_t error)
+{
+  /* The CD-ROM group is 200..229 but currently holds exactly one code. Widen
+   * this to a range when a second code is appended, not before. */
+  return error == PSX_ERROR_CDROM_BAD_SECTOR_TYPE;
 }
