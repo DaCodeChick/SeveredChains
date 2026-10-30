@@ -39,7 +39,24 @@ enum class Status : std::int32_t
   DecodeUnsupported,  ///< Recognised format, unsupported variant.
   DecodeCorrupt,      ///< Structurally impossible content (bad rect, cycle,
                       ///< non-monotonic table, out-of-range entry).
-  // remaining domains (error-handling.md §2): 300s gpu, 400s audio, 500s save,
+  // GPU domain (error-handling.md §2: 300s). Added with the SDL3 GPU render
+  // layer (rendering-sdl3-gpu.md §2). One code per distinct failure site, so a
+  // log line says which step of the frame path stopped; the failing SDL message
+  // travels beside the code (GpuProbe::LastError / Logger), never inside it.
+  GPUNoBackend = 300,     ///< No GPU backend on this host: no video driver with a
+                          ///< GPU backend (measured: the dummy video driver has
+                          ///< none), or no display and no driver at all.
+  GPUDeviceFailed,        ///< A backend exists but device creation failed.
+  GPUShaderFailed,        ///< Shader source/binary rejected by the backend, or the
+                          ///< entry point was not found.
+  GPUPipelineFailed,      ///< Graphics pipeline state creation failed.
+  GPUTextureFailed,       ///< Render-target or sampled texture creation failed.
+  GPUBufferFailed,        ///< Buffer/transfer-buffer creation, mapping or upload failed.
+  GPUCommandBufferFailed, ///< No command buffer could be acquired.
+  GPUPassFailed,          ///< A render or copy pass could not be begun.
+  GPUSubmitFailed,        ///< Command-buffer submission or fence wait failed.
+  GPUReadbackFailed,      ///< Texture download failed.
+  // remaining domains (error-handling.md §2): 400s audio, 500s save,
   // 600s mod, 700s script — added with their subsystems.
 };
 
@@ -86,6 +103,26 @@ constexpr std::string_view StatusName(Status Code)
       return "DecodeUnsupported";
     case Status::DecodeCorrupt:
       return "DecodeCorrupt";
+    case Status::GPUNoBackend:
+      return "GPUNoBackend";
+    case Status::GPUDeviceFailed:
+      return "GPUDeviceFailed";
+    case Status::GPUShaderFailed:
+      return "GPUShaderFailed";
+    case Status::GPUPipelineFailed:
+      return "GPUPipelineFailed";
+    case Status::GPUTextureFailed:
+      return "GPUTextureFailed";
+    case Status::GPUBufferFailed:
+      return "GPUBufferFailed";
+    case Status::GPUCommandBufferFailed:
+      return "GPUCommandBufferFailed";
+    case Status::GPUPassFailed:
+      return "GPUPassFailed";
+    case Status::GPUSubmitFailed:
+      return "GPUSubmitFailed";
+    case Status::GPUReadbackFailed:
+      return "GPUReadbackFailed";
   }
   return "Unknown";
 }
