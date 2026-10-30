@@ -527,14 +527,33 @@ skip with exit 77 instead of approximating; `SKIP_RETURN_CODE 77` so CTest says
 *Skipped*). Re-proven non-vacuous after the change: real offenders still exit 1 with a
 formatter present, and a header missing `#pragma once` still exits 1 **without** one.
 
-*Class 3 — Linux `Configure` (8 legs, 24–35 s) and Windows `Build` (2 legs) — still
-open.* Ubuntu 24.04 has no `libsdl3-dev` in its own archive, so those legs select
+*Class 3 — Linux `Configure` (8 legs, 24–35 s) and Windows `Build` (2 legs) — deprioritised, not fixed.*
+Ubuntu 24.04 has no `libsdl3-dev` in its own archive, so those legs select
 `dep_mode=source` and configure through the FetchContent SDL3 path; that same path
 configured cleanly on macOS in ~26 s, so the failure is platform-specific and **not
 reproduced** here. `brew`-equivalent reasoning does not transfer: the macOS cause was
 an exit-status bug in a probe, whereas this one sits inside CMake on a host this
-machine does not have. Resolving it needs a Linux host (Docker is installed here, the
-daemon is stopped) or one authenticated look at a `Configure` log.
+machine does not have. Resolving it would need a Linux host (Docker is installed here,
+the daemon is stopped) or one authenticated look at a `Configure` log.
+
+**Owner ruling, 2026-10-29:** Apple Silicon is the priority platform and Linux/Windows
+are not to be chased before a macOS MVP exists. Class 3 therefore stops being an
+action item and stays recorded as an environment unknown — the two lanes above it are
+kept in `ci.yml` because they cover targets no local run can reach, not because they
+are expected to be green now. Do not spend a session on them, and do not describe
+Linux or Windows as working on the strength of a lane that has never completed.
+
+**What was measured instead, on the priority platform:** the whole suite was run
+headless here with `SDL_VIDEO_DRIVER=dummy` (the exact environment the workflow sets)
+— **31/31 pass**, `repo.format` included. `host.windowed_flag` passes because SDL's
+dummy driver still creates a window (`window 1280x720 ready (driver: dummy)`), so that
+test is exercising real code, not skipping. The forward risk this exposes is *not* a
+current failure: nothing creates a GPU device yet, so nothing was blinded by it. When
+M2 lands, `SDL_CreateGPUDevice` under the dummy driver cannot succeed, and the same
+`SDL_VIDEO_DRIVER: dummy` that makes today's run deterministic will silently make
+every render test unrunnable. That decision — real driver on macOS runners, or an
+explicit skip that says *not verified* — belongs to M2 and must be measured on a
+runner, not assumed from this machine.
 
 What this does **not** establish: that any leg now goes green. Class 1 and 2 were
 confirmed blockers on the path to the tests, and removing them is not evidence that
@@ -563,10 +582,16 @@ mutation gate is not authorised here.
   and locally proven non-vacuous; they are not yet *executed* by CI.
   Two causes are now fixed with local differential evidence: the macOS prerequisite
   step's errexit-on-probe bug, and the formatting gate's false positives on a runner
-  that names its formatter `clang-format-18`. Still unreproduced and unfixed: Linux
-  `Configure` (8 legs) and Windows `Build` (2 legs). Diagnosing those needs a Linux
-  host (start the Docker daemon) or authenticated log access — **not** a speculative
-  rewrite of `ci.yml`.
+  that names its formatter `clang-format-18`. Linux `Configure` (8 legs) and Windows
+  `Build` (2 legs) are **deprioritised by the 2026-10-29 Apple-Silicon-first ruling**
+  and need a Linux host or authenticated log access if they are ever picked up —
+  **not** a speculative rewrite of `ci.yml`.
+- **The macOS CI path has never run past its prerequisites**, so it is unverified
+  end to end: after the prerequisite fix, that job still has to configure, build and
+  test on a runner, and the macOS SDL3-from-source fallback branch has never executed
+  anywhere. This is the CI item that matters for the priority platform, and it needs
+  one push to settle — a local run cannot substitute for it because this machine is
+  not a clean checkout.
 - Java reference test harness for golden value generation: the reference
   repo's tests are excluded from its build (`test { exclude '**/*' }`) —
   generating goldens from Java requires running it (with a user's disc) in
