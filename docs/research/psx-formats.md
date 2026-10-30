@@ -291,3 +291,99 @@ fixture was narrowed to 17 cases; the figures above are the committed ones.
 - **XA is tested single-threaded and single-stream.** The per-stream state change
   (§6) removes the reference's cross-sequence hazard but nothing yet exercises
   concurrent streams.
+- **Sector byte positions are reproduced from the reference, not from hardware
+  documentation** (see §8.4). The 128-byte portion stride (§6 item 1) and the
+  17/18/19 header offsets share that limitation: they are traceable to Java
+  call sites, not to a measured drive.
+- **ISO 9660 parsing is unimplemented.** Its blocking question (where sector
+  data starts) turned out to be answerable from source and is settled in §8.2;
+  what is missing is the parser and real-image goldens, not a measurement.
+
+## 8. CD-ROM sector layer (implemented 2026-10-29)
+
+`psx::cdrom` (`psx/include/psx/cdrom.h`, `psx/src/cdrom.c`, wrappers in
+`psx/include/psx/cpp/cdrom.hpp`) is the **sector geometry and header decode**
+half of the `psx::cdrom` row in psx-library.md §2. The ISO 9660 parsing half is
+still open (§7). Reference sources, all at commit 3433e6f:
+`legend/game/unpacker/IsoReader.java`, `legend/game/unpacker/Unpacker.java`,
+`legend/game/fmv/SectorHeader.java`, `legend/game/fmv/VideoSector.java`,
+`legend/game/fmv/Fmv.java`, `legend/core/spu/XaAdpcm.java`.
+
+### 8.1 Verified from reference source
+
+| Fact | Evidence |
+|---|---|
+| Raw sector = 2352 bytes; sync pattern = 12 bytes | `IsoReader.SECTOR_SIZE = 2352`, `IsoReader.SYNC_PATTER_SIZE = 12` |
+| User data starts at byte 24 | `readSectors` arraycopies from index 24; `XaAdpcm.java:89` walks 18 x 128 = 2304 sample bytes inside the 2324-byte region at 24 (that region is Form 2's 2328 minus a 4-byte EDC); `Unpacker.getIsoReader` and `loadRoot` seek to `sector * 2352 + 12`, advance 12 more, then expect descriptor type `1` as the first byte they read |
+| Form is bit 5 of byte 18 and it selects 2048 vs 2328 | `readSectors`: `sectorSize = raw \|\| ((sectorData[16 + 2] >>> 5) & 1) != 0 ? 0x930 : 0x800`, copy length `Math.min(sectorSize, ...)` from index 24; `SectorHeader.Submode.getForm` reads `data[18] >>> 5 & 1` |
+| Sector count uses a 2048 divisor even when the transfer is raw | `readSectors`: `sectorCount = (length + 0x7ff) / 0x800` with `data = new byte[sectorSize * sectorCount]` and `dataRead += sectorSize`, so a raw read of a 2049-byte file moves 2 x 2352 bytes |
+| Submode bits 7 / 6 / 5 / 4 / 3-1 / 0 and coding bits 4 / 2 / 0, at bytes 18 and 19 | `SectorHeader.Submode` (`isEof` 0x80, `isRealtime` 0x40, `getForm` bit 5, `isTrigger` 0x10, `getType` 0x0E, `isEndAudio` 0x01) and `SectorHeader.Coding` (`getBitsPerSample` 0x10, `getSampleRate` 0x4, `isStereo` 0x1) |
+| Type patterns: 2 = VIDEO, 4 = AUDIO, 8 = DATA; anything else throws | `SectorHeader.Submode.getType` default branch |
+| FMV playback consumes whole 2352-byte sectors, not extracted payloads | `Fmv.play` allocates `new byte[2352]` and passes the same buffer to `SectorHeader`, to `VideoSector`, and to `XaAdpcm.decode(data, data[19])` |
+
+The 2048-divisor row is reproduced **deliberately**. `psx_sector_count_for_bytes`
+keeps the quirk so that a caller can tell "matches the reference" from
+"matches the hardware" instead of silently getting the wrong transfer size.
+
+### 8.2 Corrected during implementation (previously recorded as a gap)
+
+An earlier note in this tranche said the reference carried two conflicting
+definitions of "start of sector data" — 12 (`IsoReader.seekSector`) versus 24
+(`readSectors`) — and that picking between them required a real disc image.
+That was wrong, and the wrong version had already reached a header comment.
+`seekSector` stops after the 12-byte sync, and every caller then skips the rest
+of the header itself: `Unpacker.getIsoReader`, `loadRoot` and
+`populateDirectoryTree` all advance `SYNC_PATTER_SIZE` (or a literal 12) before
+reading. Every path in the reference lands on byte 24.
+
+This is recorded rather than deleted because a stale "these two disagree" note
+invites someone to "fix" the 24-byte boundary later, and because the correction
+changed what is actually missing: not a measurement, but the ISO 9660 parser
+and real-image goldens.
+
+### 8.3 Deliberately not in `psx::cdrom`
+
+- **The FMV mux.** `VideoSector` wraps the same 2352-byte buffer as
+  `SectorHeader`. It reads a 32-byte chunk header from the region at bytes
+  24..55 — chunk number 28, chunk count 30, frame number 32 (4 bytes), demuxed
+  size 36, frame width 40, frame height 42, uncompressed 32-byte block count 44
+  — and copies **one 2016-byte chunk from absolute byte 56** per sector into a
+  frame buffer of `2016 * sectorCount`. A frame is 5 sectors at normal speed,
+  10 at double (`Fmv.play`, "(150\|75) sectors per second / 15 frames per
+  second"), sectors are read with a 2352-byte stride
+  (`fileData.read(sector * data.length, ...)` where `data.length == 2352`),
+  `demuxedSize` comes from the frame's first DATA sector, VIDEO sectors feed
+  the MDEC path and AUDIO sectors feed `XaAdpcm`.
+  This is the mod's own container for the PC remaster, not PS1 sector
+  semantics, so AGENTS.md's separation rule puts it with the video path in the
+  engine/game layer. The layout above is recorded here so that path starts from
+  measurements instead of re-deriving them.
+- **XA interleave groups.** `XaTranscoder.interleaveMode` (4 or 16, chosen from
+  the mod's filename) describes how the mod's files pack audio and video
+  sectors. Same reason, same destination.
+- **ISO 9660 name/directory/path-table parsing.** Reusable PSX technology, so
+  it belongs in `psx::cdrom`; it is unbuilt because a hand-built volume
+  descriptor proves only self-consistency, and the reference's own PVD check
+  (descriptor type, `"CD001"`, version byte, then a 32-byte volume-space
+  identifier read from logical offset 7 and trimmed, which is how
+  `"PLAYSTATION"` matches) is a behaviour to pin against real data, not to copy
+  blind.
+
+### 8.4 Open questions specific to the sector layer
+
+- **Byte positions versus hardware.** Offsets 17/18/19 are the reference's, and
+  only 18 and 19 are corroborated by a second call site (the Form 2 test in
+  `readSectors`, the coding byte in `XaAdpcm.decode(data, data[19])`). Whether
+  they match a real Mode 2 sector layout is **not established**; the port
+  reproduces the reference. Do not "correct" them from a hardware description
+  without an image to measure against.
+- **Byte 15 / `getMode()`.** Declared once, called nowhere in the reference, so
+  the port exposes no mode field. If a real image shows byte 15 carrying a mode
+  byte that something needs, that is new work with evidence, not a gap to fill
+  by guesswork.
+- **No real sector has been parsed.** All 12 sector-layer cases and the C
+  consumer checks run on synthetic sectors built from the source above. They
+  pin bit arithmetic and bounds behaviour; they do not certify any retail disc.
+- **Path tables.** The reference walks directory records only. Whether ISO 9660
+  path-table support is needed for the LoD discs is unresolved until an image is
+  available.

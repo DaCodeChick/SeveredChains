@@ -399,6 +399,14 @@ Decoding expectations:
   vacuously. Unexecuted: the eight Linux x86_64 legs, the three Linux arm64 legs and
   the two Windows legs — see build-system.md §8 for what each would be the first
   to check.
+- **Suite size has grown since those runs.** The 28/29/8 figures above are the
+  counts recorded at the time those legs were exercised, not the current tree.
+  Re-run after the CD-ROM sector layer landed (2026-10-29, macOS/arm64): 32
+  in-tree CTest entries and 10 in the standalone `psx` project, green in both
+  exception modes (`SC_ENABLE_EXCEPTIONS` on and off, `SC_WERROR=ON`), including
+  `psx.abi.symbols` and `psx.c_consumer`. CI assembles no count of its own — it
+  runs `ctest --test-dir build` and `ctest --test-dir build-psx` — so a new test
+  entry joins the existing legs without a workflow edit.
 
 ### 2.15 Rendering fidelity (measurement, not assumption)
 - **Golden screenshots** (Milestone 7): fixed camera poses + fixed RNG +

@@ -109,7 +109,7 @@ typedef enum
   PSX_OK = 0,
   PSX_ERROR_INVALID_ARGUMENT = 1,
   /* … every code in one enumerator list, grouped by domain with comments … */
-  PSX_ERROR_DEFF_ENTRY_MISSING = 143
+  PSX_ERROR_CDROM_BAD_SECTOR_TYPE = 200
 } psx_error_t;
 ```
 
@@ -126,7 +126,7 @@ purpose and both are checked in `psx/include/psx/error.h`:
   Verified to fire that way with `clang -std=c17 -fshort-enums`.
 - **Out-of-range values.** Enumeration *parameters* are not strongly typed in C, so any
   `int`-shaped value may still arrive and stays reportable (`psx_error_name` answers
-  `"Unknown"`). All valid codes are 0..169, so whatever signedness a toolchain picks for
+  `"Unknown"`). All valid codes are 0..200, so whatever signedness a toolchain picks for
   the enumerator set is not observable across the boundary. Callers that *pass* a value
   outside the enumerator set need a cast (C++ requires it, C needs it for negatives); the
   test suite does exactly that to pin the behaviour.
@@ -139,6 +139,12 @@ purpose and both are checked in `psx/include/psx/error.h`:
 | 80–109 | TIM | magic, bpp, no images, section size, rect extent, section out of range |
 | 110–139 | MRG | magic, table truncated, entry out of range, entry missing |
 | 140–169 | DEFF | magic, table truncated, offsets bad, entry missing |
+| 170–199 | XA | unsupported coding byte, output over the caller's ceiling |
+| 200–229 | CD-ROM sector | undefined submode type pattern (`PSX_ERROR_CDROM_BAD_SECTOR_TYPE = 200`) |
+
+A domain with one code implements its predicate with an equality test and says so in a
+comment: `psx_error_is_cdrom` widens to a range check when a second CD-ROM code is
+appended, so the "is this a format problem" answer cannot silently miss a code.
 
 Rules:
 
@@ -155,17 +161,21 @@ Rules:
 - NULL out-parameters are `PSX_ERROR_INVALID_ARGUMENT`, checked before any parsing work.
 - `psx_error_name()` returns the stable identifier (`"TIMRectExtent"`),
   `psx_error_message()` a one-line explanation for operator output, and
-  `psx_error_is_bpe/_tim/_mrg/_deff()` classify a code so a caller can tell "the asset is
-  malformed" from "my buffer is wrong". Unrecognised values yield `"Unknown"` and are
-  never out-of-bounds reads.
+  `psx_error_is_bpe/_tim/_mrg/_deff/_xa/_cdrom()` classify a code so a caller can tell
+  "the asset is malformed" from "my buffer is wrong". Unrecognised values yield
+  `"Unknown"` and are never out-of-bounds reads.
 - Across the engine boundary the precise code becomes a coarse `lod::Status::Decode*` and
   the precise name goes into the log line (error-handling.md §4.1). The C++ wrapper keeps
   the precise code (`psx::Error`), so nothing is lost before that mapping.
 
 ## 5. API surface
 
-39 exported functions plus 3 `static inline` header predicates
-(`psx_bytes_is_valid`, `psx_writable_bytes_is_valid`, `psx_mrg_entry_is_virtual`), which
+49 exported functions plus 12 `static inline` header helpers
+(`psx_bytes_is_valid`, `psx_writable_bytes_is_valid`, `psx_mrg_entry_is_virtual`, and the
+sector predicates `psx_sector_count_for_bytes`, `psx_sector_header_is_eof`,
+`psx_sector_header_is_realtime`, `psx_sector_header_form`, `psx_sector_header_is_trigger`,
+`psx_sector_header_is_end_audio`, `psx_sector_header_coding_bits`,
+`psx_sector_header_coding_rate`, `psx_sector_header_coding_is_stereo`), which
 are deliberately not part of the ABI.
 
 ### 5.1 Version and error
@@ -175,7 +185,7 @@ are deliberately not part of the ABI.
 | `psx_version_major/minor/patch` `psx_version_string` | Library release of the *loaded* library |
 | `psx_abi_version` | ABI number; compare against `PSX_ABI_VERSION` from the header |
 | `psx_error_name` `psx_error_message` | Name / one-line message for any code |
-| `psx_error_is_bpe` `psx_error_is_tim` `psx_error_is_mrg` `psx_error_is_deff` | Range predicates |
+| `psx_error_is_bpe` `psx_error_is_tim` `psx_error_is_mrg` `psx_error_is_deff` `psx_error_is_xa` `psx_error_is_cdrom` | Range predicates (single-code domains use equality, see §4) |
 
 ### 5.2 Format entry points
 
@@ -190,6 +200,8 @@ are deliberately not part of the ABI.
 | `psx_archive_mrg_parse(data, sector_aligned, entries, entry_capacity, out_view)` | **No allocation**: the caller's `entries` array receives the table |
 | `psx_mrg_view_at` `psx_mrg_view_slice` `psx_mrg_entry_is_virtual` | Entry access and bounds-checked slicing from a view |
 | `psx_archive_deff_subfile_count` `psx_archive_deff_parse` `psx_deff_view_at` `psx_deff_view_slice` | Same pattern for DEFF |
+| `psx_xa_stream_init` `psx_xa_coding_info` `psx_xa_decoded_samples` `psx_xa_decode_sector` | Predictor state lives in the caller's `psx_xa_stream_t`; nothing is process-wide. That is a behavioural difference from the reference, explained in research/psx-formats.md §6 |
+| `psx_sector_header_parse` `psx_sector_classify` `psx_sector_payload` `psx_sector_run_extent` | Sector geometry over borrowed bytes: no I/O, no allocation, no sector-number-to-offset arithmetic hidden inside a reader. `psx_sector_payload` refuses spans over 2352 bytes rather than silently re-reading sector 0 |
 
 `sector_aligned` stays a caller-supplied flag: sector scaling is a property of the *path*
 a container was read from (`DRGN*.BIN`), which `psx` does not know. The engine decides it
@@ -277,8 +289,8 @@ library is C. The rules are deliberately narrow:
 
 | Target | Language | Proves |
 |---|---|---|
-| `sc_tests_psx` (groups `psx`, `bpe`, `tim`, `xa`, `archive`, `wrapper`, `clinkage`) | C++23 | Format behaviour (52 cases incl. the authentic `chester.tim` lane and the 17-sector `xa_adpcm.bin` differential), wrapper delegation/move/RAII/error propagation, C-header usability |
-| `sc_psx_c_consumer` (`psx/tests/c_consumer/main.c`) | **C17 only** | The C API stands alone: compiled by the C compiler with `-Wall -Wextra -Wshadow -Wconversion -Wmissing-prototypes -Wstrict-prototypes -Wpointer-arith -Wwrite-strings -Wredundant-decls -pedantic`, 294 checks covering every entry point, every documented error code, NULL-argument rejection, and the malformed-input contract. It includes only `<stdio.h>`, `<string.h>` and `psx/psx.h`, so anything the umbrella omits cannot be exercised from C at all — `psx/tests/test_c_linkage.cpp` is the only other target that compiles the umbrella header. Its XA section covers all four XA entry points, both XA error codes, NULL rejection, the 2327/2328 truncation boundary, an undersized destination and stream independence |
+| `sc_tests_psx` (groups `psx`, `bpe`, `tim`, `xa`, `cdrom`, `archive`, `wrapper`, `clinkage`) | C++23 | Format behaviour (65 cases incl. the authentic `chester.tim` lane, the 17-sector `xa_adpcm.bin` differential, and 12 sector-layer cases pinned to reference bit arithmetic), wrapper delegation/move/RAII/error propagation, C-header usability |
+| `sc_psx_c_consumer` (`psx/tests/c_consumer/main.c`) | **C17 only** | The C API stands alone: compiled by the C compiler with `-Wall -Wextra -Wshadow -Wconversion -Wmissing-prototypes -Wstrict-prototypes -Wpointer-arith -Wwrite-strings -Wredundant-decls -pedantic`, 355 checks covering every entry point, every documented error code, NULL-argument rejection, and the malformed-input contract. It includes only `<stdio.h>`, `<string.h>` and `psx/psx.h`, so anything the umbrella omits cannot be exercised from C at all — `psx/tests/test_c_linkage.cpp` is the only other target that compiles the umbrella header. Its XA section covers all four XA entry points, both XA error codes, NULL rejection, the 2327/2328 truncation boundary, an undersized destination and stream independence; its CD-ROM section is also where the `static inline` sector predicates get compiled and run as C (the C++ group calls them too, but the C consumer is what proves they work without a C++ frontend, and `nm` cannot see them at all — §5) |
 | `psx.abi.symbols` (`psx/tests/abi_symbols.cmake`) | CMake + `nm` (ELF/Mach-O) or the PE export table via `objdump -p`/`dumpbin /EXPORTS` | Exactly the documented symbols are exported, no undocumented export, no C++ symbol in either direction (runs for shared and static; the method is chosen from the artifact, so a cross-built `.dll` audits too) |
 | `psx.differential` (`-DPSX_ENABLE_DIFFERENTIAL_TEST=ON`) | C++23 | Old-vs-new equivalence over a deterministic corpus (§10) |
 
@@ -365,8 +377,11 @@ silently.
   MSVC's own output. Needs a three-platform CI matrix; the audit skips with a visible message
   when neither `objdump` nor `dumpbin` is available, so an unconfigured runner cannot pass
   silently.
-- `psx::cpp` covers the four implemented formats only. As GTE/GPU/SPU/CD-ROM modules land
-  (psx-library.md §2), decide per module whether a C++ wrapper is worth having at all —
-  the wrappers exist for the engine's convenience, not for symmetry.
+- `psx::cpp` covers the implemented surfaces only (BPE, MRG/DEFF, TIM, XA, and the
+  CD-ROM sector layer). As GTE/GPU/SPU land (psx-library.md §2), decide per module
+  whether a C++ wrapper is worth having at all — the wrappers exist for the engine's
+  convenience, not for symmetry. The sector layer is the first case where the C++ side
+  deliberately does *not* re-declare the C bit tests: they are already `static inline`
+  and callable from C++, so a wrapper would be noise.
 - Large-container streaming is unaffected by the language change and remains open
   (resource-management.md §6).

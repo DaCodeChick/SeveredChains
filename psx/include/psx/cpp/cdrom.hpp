@@ -89,8 +89,7 @@ struct Extent
 /// @return A span of 2048 (Form 1) or 2328 (Form 2) bytes borrowing `sector`,
 ///         or Error::InvalidArgument / Error::Truncated.
 /// @note Thread: pure function — thread-safe.
-[[nodiscard]] inline std::expected<std::span<const std::uint8_t>, Error> Payload(
-    std::span<const std::uint8_t> sector)
+[[nodiscard]] inline std::expected<std::span<const std::uint8_t>, Error> Payload(std::span<const std::uint8_t> sector)
 {
   psx_bytes_t payload{};
   if (const auto status = psx_sector_payload(detail::ToBytes(sector), &payload); status != PSX_OK)
@@ -107,12 +106,10 @@ struct Extent
 ///         arithmetic) or Error::Truncated (the run does not fit).
 /// @note Thread: pure function — thread-safe.
 [[nodiscard]] inline std::expected<Extent, Error> RunExtent(std::span<const std::uint8_t> image,
-                                                             std::size_t firstSector,
-                                                             std::size_t count)
+                                                            std::size_t firstSector, std::size_t count)
 {
   psx_sector_extent_t extent{};
-  if (const auto status = psx_sector_run_extent(detail::ToBytes(image), firstSector, count, &extent);
-      status != PSX_OK)
+  if (const auto status = psx_sector_run_extent(detail::ToBytes(image), firstSector, count, &extent); status != PSX_OK)
     return std::unexpected(static_cast<Error>(status));
   return Extent{extent.offset, extent.length};
 }

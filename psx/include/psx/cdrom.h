@@ -15,23 +15,23 @@
 ///
 ///  - **ISO 9660 name/directory parsing.** The reference reads a volume
 ///    descriptor at sector 16 (`Unpacker.PVD_SECTOR`) and walks directory
-///    records. The offset its PVD parse uses disagrees with the offset its
-///    file-data path uses (see the note on `psx_sector_payload`), and no
-///    retail image is available to settle which one the real discs use.
-///    Designing the parser is blocked on that measurement, so it is left for a
-///    later tranche rather than guessed.
+///    records, all of which land on the same 24-byte data boundary this file
+///    uses (see the note on `psx_sector_payload`). What is missing is the
+///    parser itself and goldens to verify it against: a hand-built volume
+///    descriptor would only prove self-consistency, so that work lands with a
+///    real disc image rather than being guessed now.
 ///  - **The FMV mux** (`VideoSector`: 2016-byte chunks at sector offset 56)
 ///    and **XA interleave groups** (`XaTranscoder.interleaveMode`, 4 or 16,
 ///    chosen from the mod's filename). Both are packaging specific to
 ///    The Legend of Dragoon and its mod pipeline; AGENTS.md keeps reusable PSX
 ///    technology separate from Legend of Dragoon-specific code. The measured
-///    layout is recorded in docs/research/psx-formats.md §7 for whoever writes
+///    layout is recorded in docs/research/psx-formats.md §8 for whoever writes
 ///    the video path.
 ///
 /// Provenance of every offset and bit in this header is listed in
-/// docs/research/psx-formats.md §7, traced to `SectorHeader.java`,
-/// `IsoReader.java`, `VideoSector.java`, `XaTranscoder.java`, and
-/// `XaAdpcm.java` in the reference repository at commit 3433e6f.
+/// docs/research/psx-formats.md §8, traced to `SectorHeader.java`,
+/// `IsoReader.java`, `Unpacker.java`, `VideoSector.java`, `XaTranscoder.java`,
+/// and `XaAdpcm.java` in the reference repository at commit 3433e6f.
 
 #include "psx/bytes.h"
 #include "psx/error.h"
@@ -50,14 +50,23 @@ extern "C"
 /// @brief Raw sector size, byte 0..2351 (IsoReader.SECTOR_SIZE = 0x930).
 #define PSX_CDROM_SECTOR_SIZE 2352u
 
-/// @brief Sync pattern length. The reference skips exactly these 12 bytes when
-/// it wants "the data of sector N", which is *not* the same thing as the
-/// 24-byte header skip used for file data — see the note on
-/// psx_sector_payload().
+/// @brief Sync pattern length (IsoReader.SYNC_PATTER_SIZE).
+///
+/// @note Not a payload offset. `IsoReader.seekSector` stops here, and every
+///       caller then skips eight more bytes (`Unpacker` advances
+///       `SYNC_PATTER_SIZE` again before reading a volume descriptor or a
+///       directory record), so the reference's data boundary is still byte 24.
+///       Only `psx_sector_run_extent` and `psx_sector_payload` offer payload
+///       positions, and both use 24.
 #define PSX_CDROM_SYNC_SIZE 12u
 
-/// @brief Bytes before user data: 12 sync + 4 header + 8 subheader.
-/// (SectorHeader.HEADER_SIZE; the same value is the sum, not a coincidence.)
+/// @brief Bytes before user data (SectorHeader.HEADER_SIZE, and the offset
+/// `IsoReader.readSectors` copies from).
+///
+/// @note The *sum* is what the reference pins. The usual CD-ROM description of
+///       those 24 bytes is 12 sync + 4 header + 8 error-check/reserved, but
+///       nothing in the reference or in a real image is consulted here, so do
+///       not read that split as verified — only 24 is.
 #define PSX_CDROM_HEADER_SIZE 24u
 
 /// @brief User-data size for a Form 1 sector.
@@ -76,13 +85,20 @@ extern "C"
 /* The reference reads these from the same 2352-byte buffer it fills per
  * sector, so the numbers below are absolute offsets inside a raw sector.
  *
- * Offsets 17, 18, and 19 are the Mode 2 channel / submode / coding fields,
- * i.e. hardware-consistent. The reference *also* defines getMode() at offset
- * 15, which is the last byte of the MSF field rather than a mode byte (in a
- * Mode 2 sector the mode byte is 16 and 15 carries the frame address).
- * Nothing in the reference calls getMode(), so the quirk is unobservable and
- * is not reproduced here: there is intentionally no `mode` field. Reporting a
- * wrong byte through a reusable API would invite a caller to rely on it. */
+ * These are the reference's positions, reproduced rather than re-derived. Two
+ * of them are corroborated by a second place in the reference: IsoReader's
+ * Form 2 test is `(sectorData[16 + 2] >>> 5) & 1`, which is bit 5 of byte 18,
+ * and the XA decoder takes its coding byte from 19 as well
+ * (`Fmv.play -> XaAdpcm.decode(data, data[19])`).
+ *
+ * Whether those positions match the CD-ROM XA white-book layout is **not
+ * established** — see psx-formats.md §8. Do not "correct" them from a
+ * hardware description without a real image to measure against.
+ *
+ * The reference *also* defines getMode() at offset 15 and never calls it (one
+ * match repo-wide: its own declaration). This header therefore has no `mode`
+ * field: a caller cannot observe it in the reference, and shipping a field
+ * whose byte position is an open question would invite exactly that. */
 
 /// @byte Offset of the Mode 2 channel number.
 #define PSX_CDROM_CHANNEL_OFFSET 17u
@@ -191,8 +207,7 @@ typedef struct psx_sector_extent
 ///         `sector.data` with non-zero size), or PSX_ERROR_TRUNCATED (fewer
 ///         than PSX_CDROM_HEADER_SIZE bytes).
 /// @note Thread: no state — thread-safe.
-PSX_API psx_error_t psx_sector_header_parse(psx_bytes_t sector,
-                                            psx_sector_header_t* out_header);
+PSX_API psx_error_t psx_sector_header_parse(psx_bytes_t sector, psx_sector_header_t* out_header);
 
 /// @brief Resolve what a parsed header says the sector carries.
 ///
@@ -202,8 +217,7 @@ PSX_API psx_error_t psx_sector_header_parse(psx_bytes_t sector,
 ///         PSX_ERROR_CDROM_BAD_SECTOR_TYPE when bits 1..3 are not one of the
 ///         three defined types (patterns 0, 6, 10, 12, and 14).
 /// @note Thread: no state — thread-safe.
-PSX_API psx_error_t psx_sector_classify(psx_sector_header_t header,
-                                        psx_sector_kind_t* out_kind);
+PSX_API psx_error_t psx_sector_classify(psx_sector_header_t header, psx_sector_kind_t* out_kind);
 
 /// @brief Locate one complete sector's payload, using the sector's own form.
 ///
@@ -211,19 +225,19 @@ PSX_API psx_error_t psx_sector_classify(psx_sector_header_t header,
 /// (2048) bytes, Form 2 yields PSX_CDROM_FORM2_DATA_SIZE (2328), both starting
 /// at byte 24.
 ///
-/// @note Offsets 12 and 24, and why only 24 is offered here. The reference has
-///       two different notions of "start of sector data":
-///         - `IsoReader.seekSector(sector)` seeks to `sector * 2352 + 12` and
-///           then reads 2048 bytes, which is what the ISO 9660 volume and
-///           directory reads use.
-///         - `IsoReader.readSectors(...)` copies payload from byte **24** of
-///           each sector, which is what every file extraction uses, and it is
-///           the offset the XA decoder's 18x128-byte block loop assumes.
-///       Those disagree by 12 bytes, and at most one can be right for a given
-///       image. The 24-byte reading is corroborated twice (readSectors,
-///       XaAdpcm) and is the one this function implements; the 12-byte reading
-///       is unreconciled and needs a real disc image to settle. Do not "fix"
-///       one to match the other without that measurement.
+/// @note Where user data starts, and why 24 rather than 12. Three independent
+///       places in the reference put the data boundary at byte 24:
+///         - `IsoReader.readSectors(...)` copies payload from index 24 of the
+///           2352-byte buffer, 2048 bytes for Form 1 and 2328 for Form 2.
+///         - `XaAdpcm` walks 18 x 128-byte portions inside 0x914 = 2324 bytes
+///           starting at 24, which is that Form 2 region minus its 4-byte EDC.
+///         - `Unpacker` seeks to `sector * 2352 + 12` and then advances 12
+///           more bytes before reading a volume descriptor, and expects
+///           descriptor type 1 as the first byte it reads. That is byte 24.
+///       `seekSector`'s lone 12 is a sync-skip, not a competing data offset:
+///       its callers move past the remaining header themselves. There is no
+///      "12 versus 24" discrepancy to reconcile, and an implementation that
+///       started payloads at 12 would read twelve header bytes as data.
 ///
 /// @param sector      One raw sector (borrowed). Must be a whole
 ///                    PSX_CDROM_SECTOR_SIZE bytes: a short span is reported as
@@ -237,8 +251,7 @@ PSX_API psx_error_t psx_sector_classify(psx_sector_header_t header,
 ///         PSX_ERROR_TRUNCATED (span shorter than one sector, or too short for
 ///         the payload its own form promises).
 /// @note Thread: no state — thread-safe.
-PSX_API psx_error_t psx_sector_payload(psx_bytes_t sector,
-                                       psx_bytes_t* out_payload);
+PSX_API psx_error_t psx_sector_payload(psx_bytes_t sector, psx_bytes_t* out_payload);
 
 /// @brief Describe a run of consecutive sectors inside a larger span.
 ///
@@ -258,9 +271,7 @@ PSX_API psx_error_t psx_sector_payload(psx_bytes_t sector,
 ///         the range computation), or PSX_ERROR_TRUNCATED (the run does not fit
 ///         inside `image`, including a `first_sector` already past the end).
 /// @note Thread: no state — thread-safe.
-PSX_API psx_error_t psx_sector_run_extent(psx_bytes_t image,
-                                          size_t first_sector,
-                                          size_t count,
+PSX_API psx_error_t psx_sector_run_extent(psx_bytes_t image, size_t first_sector, size_t count,
                                           psx_sector_extent_t* out_extent);
 
 /// @brief Sector count the reference would compute for a file of `length`

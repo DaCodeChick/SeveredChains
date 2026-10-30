@@ -18,8 +18,8 @@
 /// sssq, tmd, anm, tag. Nothing here guesses at their layouts; each lands
 /// with the evidence and golden tests that pin it down. The ISO 9660 half of
 /// cdrom (volume descriptor, directory records, path tables) is also still
-/// open — see the scope note at the top of psx/cdrom.h for the measurement it
-/// is waiting on.
+/// open: the sector layer is implemented, the parsers are not, and they arrive
+/// with a real disc image to verify against rather than a hand-built one.
 ///
 /// @see docs/architecture/psx-c-api.md for the API conventions, ABI versioning,
 ///      ownership rules, error-code table and C/C++ integration examples.

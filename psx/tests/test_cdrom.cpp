@@ -8,8 +8,9 @@
 ///
 ///  - The synthetic sectors below are built byte-by-byte from that source, so
 ///    they prove the implementation matches the reference's *bit arithmetic*,
-///    not that any real LoD disc decodes. The offset question that needs a real
-///    image (12 vs 24) is recorded in psx/cdrom.h and psx-formats.md §7.
+///    not that any real LoD disc decodes. Byte provenance — which positions are
+///    corroborated by a second call site and which are only reproduced — is
+///    recorded in docs/research/psx-formats.md §8.
 ///  - Every case is written so a wrong offset or a wrong mask makes it fail.
 ///    The payload bytes carry their own index, the classify case sweeps all 256
 ///    submode values, and the run-extent cases include the overflow argument.
@@ -22,6 +23,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string_view>
 #include <vector>
 
 namespace
@@ -47,8 +49,9 @@ Bytes MakeSector(std::uint8_t submode, std::uint8_t coding)
   return sector;
 }
 
-/// @brief Whole-sector span over `sector`, for calling the span-taking API.
-template <std::size_t N>
+/// @brief Span over a whole vector, for calling the span-taking API.
+/// Not a template: nothing here needs the length at compile time, and an
+/// unused template parameter is a warning the CI build treats as an error.
 std::span<const std::uint8_t> Whole(const Bytes& sector)
 {
   return std::span<const std::uint8_t>(sector.data(), sector.size());
@@ -59,20 +62,22 @@ std::span<const std::uint8_t> Whole(const Bytes& sector)
 PSX_TEST(cdrom, header_fields_sit_where_the_reference_puts_them)
 {
   const Bytes sector = MakeSector(0x82u, 0x01u);
-  const auto header = psx::cdrom::ParseHeader(Whole<PSX_CDROM_SECTOR_SIZE>(sector));
+  const auto header = psx::cdrom::ParseHeader(Whole(sector));
   PSX_CHECK(header.has_value());
   PSX_CHECK(header->submode == 0x82u);
   PSX_CHECK(header->coding == 0x01u);
 
-  // The reference also defines getMode() at byte 15, which is the tail of the
-  // MSF field rather than a mode byte (in Mode 2 the mode byte is 16). Nothing
-  // in the reference calls it, so it is deliberately not reproduced: there is
-  // no mode field to be wrong about. Changing bytes 15 and 16 must therefore
-  // change nothing. If a future change starts reading byte 15, this fails.
+  // The reference also defines getMode() at byte 15 and never calls it (its own
+  // declaration is the only match in the reference repo), so there is no
+  // behaviour to reproduce here and no mode field to be wrong about. Changing
+  // bytes 15 and 16 must therefore change nothing: if a future change starts
+  // reading byte 15 as mode, or starts asserting a mode field exists, this
+  // case fails. Whether byte 15 is a mode byte on real hardware is a separate
+  // open question (psx-formats.md §8), not something this test settles.
   Bytes changed = sector;
   changed[15] = 0x41u;
   changed[16] = 0x02u;
-  const auto again = psx::cdrom::ParseHeader(Whole<PSX_CDROM_SECTOR_SIZE>(changed));
+  const auto again = psx::cdrom::ParseHeader(Whole(changed));
   PSX_CHECK(again.has_value());
   PSX_CHECK(again->channel == header->channel);
   PSX_CHECK(again->submode == header->submode);
@@ -85,13 +90,13 @@ PSX_TEST(cdrom, header_rejects_short_spans_and_bad_arguments)
 
   // 23 bytes cannot hold the header region; 24 can, even with no payload.
   const auto tooShort =
-      psx::cdrom::ParseHeader(std::span<const std::uint8_t>(sector.data(), PSX_CDROM_HEADER_SIZE - 1u));
+    psx::cdrom::ParseHeader(std::span<const std::uint8_t>(sector.data(), PSX_CDROM_HEADER_SIZE - 1u));
   PSX_CHECK(!tooShort.has_value());
   PSX_CHECK(tooShort.error() == psx::Error::Truncated);
 
   Bytes headerOnly(PSX_CDROM_HEADER_SIZE, 0u);
   headerOnly[PSX_CDROM_SUBMODE_OFFSET] = 0x08u;
-  const auto justHeader = psx::cdrom::ParseHeader(Whole<PSX_CDROM_HEADER_SIZE>(headerOnly));
+  const auto justHeader = psx::cdrom::ParseHeader(Whole(headerOnly));
   PSX_CHECK(justHeader.has_value());
   PSX_CHECK(justHeader->submode == 0x08u);
 
@@ -102,17 +107,17 @@ PSX_TEST(cdrom, header_rejects_short_spans_and_bad_arguments)
   PSX_CHECK(psx_sector_header_parse(nullWithSize, &out) == PSX_ERROR_INVALID_ARGUMENT);
   const psx_bytes_t empty{nullptr, 0u};
   PSX_CHECK(psx_sector_header_parse(empty, &out) == PSX_ERROR_TRUNCATED);
-  PSX_CHECK(psx_sector_header_parse(Whole<PSX_CDROM_SECTOR_SIZE>(sector), nullptr) == PSX_ERROR_INVALID_ARGUMENT);
+  PSX_CHECK(psx_sector_header_parse({sector.data(), sector.size()}, nullptr) == PSX_ERROR_INVALID_ARGUMENT);
 }
 
 PSX_TEST(cdrom, the_form_bit_selects_the_payload_size)
 {
   // Form 1 = DATA sectors as the reference stores them; Form 2 = XA audio.
-  const Bytes form1 = MakeSector(0x08u, 0x00u);   // submode bit 5 clear
-  const Bytes form2 = MakeSector(0x28u, 0x01u);   // submode bit 5 set
+  const Bytes form1 = MakeSector(0x08u, 0x00u); // submode bit 5 clear
+  const Bytes form2 = MakeSector(0x28u, 0x01u); // submode bit 5 set
 
-  const auto small = psx::cdrom::Payload(Whole<PSX_CDROM_SECTOR_SIZE>(form1));
-  const auto large = psx::cdrom::Payload(Whole<PSX_CDROM_SECTOR_SIZE>(form2));
+  const auto small = psx::cdrom::Payload(Whole(form1));
+  const auto large = psx::cdrom::Payload(Whole(form2));
   PSX_CHECK(small.has_value());
   PSX_CHECK(large.has_value());
   PSX_CHECK(small->size() == PSX_CDROM_FORM1_DATA_SIZE);
@@ -124,8 +129,7 @@ PSX_TEST(cdrom, the_form_bit_selects_the_payload_size)
   PSX_CHECK(large->data() == form2.data() + PSX_CDROM_HEADER_SIZE);
   PSX_CHECK((*small)[0] == form1[PSX_CDROM_HEADER_SIZE]);
   PSX_CHECK((*large)[0] == form2[PSX_CDROM_HEADER_SIZE]);
-  PSX_CHECK((*large)[PSX_CDROM_FORM2_DATA_SIZE - 1u] ==
-            form2[PSX_CDROM_HEADER_SIZE + PSX_CDROM_FORM2_DATA_SIZE - 1u]);
+  PSX_CHECK((*large)[PSX_CDROM_FORM2_DATA_SIZE - 1u] == form2[PSX_CDROM_HEADER_SIZE + PSX_CDROM_FORM2_DATA_SIZE - 1u]);
 
   // The two sizes differ by 280 bytes. A reader that hard-coded 2048 would be
   // quietly wrong for every Form 2 sector; that is the reason the size comes
@@ -148,8 +152,7 @@ PSX_TEST(cdrom, payload_requires_exactly_one_sector)
   const Bytes sector = MakeSector(0x08u, 0x00u);
 
   // Too short: truncation, reported rather than answered with a short payload.
-  const auto shortSpan = psx::cdrom::Payload(
-      std::span<const std::uint8_t>(sector.data(), PSX_CDROM_SECTOR_SIZE - 1u));
+  const auto shortSpan = psx::cdrom::Payload(std::span<const std::uint8_t>(sector.data(), PSX_CDROM_SECTOR_SIZE - 1u));
   PSX_CHECK(!shortSpan.has_value());
   PSX_CHECK(shortSpan.error() == psx::Error::Truncated);
 
@@ -157,11 +160,11 @@ PSX_TEST(cdrom, payload_requires_exactly_one_sector)
   // Answering it by reading the front would decode sector 0 forever and look
   // like a working pipeline that produces nothing.
   const Bytes twoSectors(PSX_CDROM_SECTOR_SIZE * 2u, 0u);
-  const auto tooLong = psx::cdrom::Payload(Whole<PSX_CDROM_SECTOR_SIZE * 2u>(twoSectors));
+  const auto tooLong = psx::cdrom::Payload(Whole(twoSectors));
   PSX_CHECK(!tooLong.has_value());
   PSX_CHECK(tooLong.error() == psx::Error::InvalidArgument);
 
-  const auto exact = psx::cdrom::Payload(Whole<PSX_CDROM_SECTOR_SIZE>(sector));
+  const auto exact = psx::cdrom::Payload(Whole(sector));
   PSX_CHECK(exact.has_value());
   PSX_CHECK(psx::cdrom::Payload({}).error() == psx::Error::Truncated);
 }
@@ -260,15 +263,16 @@ PSX_TEST(cdrom, flags_and_types_do_not_shadow_each_other)
 
 PSX_TEST(cdrom, the_coding_byte_decodes_into_the_reference_matrix)
 {
-  // SectorHeader.Coding: bit 4 width, bit 2 rate, bit 0 stereo. All eight
-  // combinations, because the interesting cases are the mixed ones.
-  for (unsigned coding = 0; coding < 8u; ++coding)
+  // SectorHeader.Coding: bit 4 width, bit 2 rate, bit 0 stereo. All 256 values,
+  // because a loop over 0..7 would never set bit 4 and so could not tell
+  // "8-bit when 0x10 is set" from "always 4-bit".
+  for (unsigned coding = 0; coding < 256u; ++coding)
   {
     psx_sector_header_t header{};
     header.coding = static_cast<std::uint8_t>(coding);
-    PSX_CHECK(psx_sector_header_coding_bits(header) == ((coding & 0x4u) != 0u ? 8 : 4));
-    PSX_CHECK(psx_sector_header_coding_rate(header) == ((coding & 0x4u) != 0u ? 18900 : 37800));
-    PSX_CHECK((psx_sector_header_coding_is_stereo(header) != 0) == ((coding & 0x1u) != 0u));
+    PSX_CHECK(psx_sector_header_coding_bits(header) == ((coding & 0x10u) != 0u ? 8 : 4));
+    PSX_CHECK(psx_sector_header_coding_rate(header) == ((coding & 0x04u) != 0u ? 18900 : 37800));
+    PSX_CHECK((psx_sector_header_coding_is_stereo(header) != 0) == ((coding & 0x01u) != 0u));
   }
 
   // The bits the reference reads are 0x10 / 0x04 / 0x01 — not the contiguous
@@ -278,9 +282,13 @@ PSX_TEST(cdrom, the_coding_byte_decodes_into_the_reference_matrix)
   PSX_CHECK(PSX_CDROM_CODING_HALF_RATE == 0x04u);
   PSX_CHECK(PSX_CDROM_CODING_STEREO == 0x01u);
 
-  // The same byte position the XA header documents for its coding info. If one
-  // of the two headers ever moves, the sector layer and the decoder would
-  // disagree in silence; this makes it a build-time-visible test failure.
+  // Byte 18 is the submode and byte 19 the coding info. The reference reads
+  // data[19]; the standard CD-ROM XA layout says 18 because it counts a
+  // three-byte MSF where the reference's buffer has four. Both headers must
+  // name the same byte or the sector layer and the decoder read different
+  // bytes in silence, so the cross-check is pinned as well as the values.
+  PSX_CHECK(PSX_CDROM_SUBMODE_OFFSET == 18u);
+  PSX_CHECK(PSX_CDROM_CODING_OFFSET == 19u);
   PSX_CHECK(PSX_CDROM_CODING_OFFSET == PSX_XA_CODING_INFO_OFFSET);
   PSX_CHECK(PSX_CDROM_SECTOR_SIZE == PSX_XA_SECTOR_SIZE);
   PSX_CHECK(PSX_CDROM_HEADER_SIZE == PSX_XA_HEADER_SIZE);
@@ -298,21 +306,21 @@ PSX_TEST(cdrom, a_form_1_payload_cannot_feed_the_xa_decoder)
   constexpr std::size_t DecoderReadSize = PSX_XA_PORTION_COUNT * PSX_XA_PORTION_SIZE;
   PSX_CHECK(DecoderReadSize == 2304u);
 
-  const Bytes form1Audio = MakeSector(0x04u, 0x01u);   // AUDIO, Form 1
-  const Bytes form2Audio = MakeSector(0x24u, 0x01u);   // AUDIO, Form 2
+  const Bytes form1Audio = MakeSector(0x04u, 0x01u); // AUDIO, Form 1
+  const Bytes form2Audio = MakeSector(0x24u, 0x01u); // AUDIO, Form 2
 
   psx_sector_header_t header1{};
   psx_sector_header_t header2{};
-  PSX_CHECK(psx_sector_header_parse(Whole<PSX_CDROM_SECTOR_SIZE>(form1Audio), &header1) == PSX_OK);
-  PSX_CHECK(psx_sector_header_parse(Whole<PSX_CDROM_SECTOR_SIZE>(form2Audio), &header2) == PSX_OK);
+  PSX_CHECK(psx_sector_header_parse({form1Audio.data(), form1Audio.size()}, &header1) == PSX_OK);
+  PSX_CHECK(psx_sector_header_parse({form2Audio.data(), form2Audio.size()}, &header2) == PSX_OK);
 
   psx_sector_kind_t kind = PSX_SECTOR_KIND_DATA;
   PSX_CHECK(psx_sector_classify(header1, &kind) == PSX_OK);
   PSX_CHECK(kind == PSX_SECTOR_KIND_AUDIO);
   PSX_CHECK(psx_sector_header_coding_is_stereo(header2) != 0);
 
-  const auto narrow = psx::cdrom::Payload(Whole<PSX_CDROM_SECTOR_SIZE>(form1Audio));
-  const auto wide = psx::cdrom::Payload(Whole<PSX_CDROM_SECTOR_SIZE>(form2Audio));
+  const auto narrow = psx::cdrom::Payload(Whole(form1Audio));
+  const auto wide = psx::cdrom::Payload(Whole(form2Audio));
   PSX_CHECK(narrow.has_value() && narrow->size() < DecoderReadSize);
   PSX_CHECK(wide.has_value() && wide->size() >= DecoderReadSize);
 
@@ -321,15 +329,15 @@ PSX_TEST(cdrom, a_form_1_payload_cannot_feed_the_xa_decoder)
   Bytes pcm(PSX_XA_MAX_SAMPLES * 2u, 0u);
   psx::xa::Stream stream{};
   psx::xa::Stream other{};
-  const auto whole = psx::xa::DecodeSector(stream, Whole<PSX_CDROM_SECTOR_SIZE>(form1Audio), 0x01u,
-                                           std::span<std::uint8_t>(pcm.data(), pcm.size()));
+  const auto whole =
+    psx::xa::DecodeSector(stream, Whole(form1Audio), 0x01u, std::span<std::uint8_t>(pcm.data(), pcm.size()));
   PSX_CHECK(whole.has_value());
   PSX_CHECK(whole.value() == 4032u);
 
   // Feeding the extracted payload instead of the sector is the wrong shape for
   // the decoder API and must be reported, not decoded into noise.
   const auto fromNarrow =
-      psx::xa::DecodeSector(other, narrow.value(), 0x01u, std::span<std::uint8_t>(pcm.data(), pcm.size()));
+    psx::xa::DecodeSector(other, narrow.value(), 0x01u, std::span<std::uint8_t>(pcm.data(), pcm.size()));
   PSX_CHECK(!fromNarrow.has_value());
   PSX_CHECK(fromNarrow.error() == psx::Error::Truncated);
 }
@@ -368,7 +376,7 @@ PSX_TEST(cdrom, run_extent_covers_consecutive_sectors)
   const psx_bytes_t fiveSpan{five.data(), five.size()};
   PSX_CHECK(psx_sector_run_extent(fourSpan, 0u, 5u, &extent) == PSX_ERROR_TRUNCATED);
   PSX_CHECK(psx_sector_run_extent(fiveSpan, 0u, 5u, &extent) == PSX_OK);
-  PSX_CHECK(extent.length == 2016u * 5u + 280u * 5u);
+  PSX_CHECK(extent.length == PSX_CDROM_SECTOR_SIZE * 5u);
 
   // NULL with a size, and a NULL destination.
   const psx_bytes_t nullSpan{nullptr, PSX_CDROM_SECTOR_SIZE};
@@ -395,7 +403,7 @@ PSX_TEST(cdrom, sector_count_uses_the_reference_divisor)
 PSX_TEST(cdrom, the_cplusplus_wrapper_agrees_with_the_c_api)
 {
   const Bytes sector = MakeSector(0x24u, 0x01u);
-  const auto span = Whole<PSX_CDROM_SECTOR_SIZE>(sector);
+  const auto span = Whole(sector);
 
   const auto viaCpp = psx::cdrom::ParseHeader(span);
   psx_sector_header_t viaC{};

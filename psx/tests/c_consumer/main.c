@@ -745,6 +745,149 @@ static void test_deff(void)
   printf("[  OK  ] c.deff_parse_slice_and_handles\n");
 }
 
+/* --- CD-ROM sector geometry ------------------------------------------------ */
+
+/* Build a whole raw sector the way the reference's buffers arrive: sync, four
+   MSF bytes, mode, type, submode, coding, then filler. Written by hand because
+   the C consumer must reproduce identically on every host, so it cannot read a
+   fixture built elsewhere. */
+static void fill_sector(uint8_t* out, uint8_t submode, uint8_t coding)
+{
+  memset(out, 0, PSX_CDROM_SECTOR_SIZE);
+  for (size_t i = 1u; i <= 10u; ++i)
+    out[i] = 0xffu;
+  out[PSX_CDROM_SUBMODE_OFFSET] = submode;
+  out[PSX_CDROM_CODING_OFFSET] = coding;
+  for (size_t i = PSX_CDROM_HEADER_SIZE; i < PSX_CDROM_SECTOR_SIZE; ++i)
+    out[i] = (uint8_t)(i & 0xffu);
+}
+
+static void test_cdrom(void)
+{
+  printf("[ RUN  ] c.cdrom_sector_layer\n");
+
+  uint8_t sector[PSX_CDROM_SECTOR_SIZE];
+  fill_sector(sector, 0x24u, 0x01u);
+  const psx_bytes_t whole = {sector, sizeof(sector)};
+  psx_sector_header_t header = {0u, 0u, 0u};
+
+  /* --- header parse ------------------------------------------------------- */
+  check_eq_err(psx_sector_header_parse(whole, &header), PSX_OK, "parse a whole sector");
+  CHECK(header.submode == 0x24u);
+  CHECK(header.coding == 0x01u);
+
+  uint8_t clipped[PSX_CDROM_HEADER_SIZE - 1u];
+  memset(clipped, 0, sizeof(clipped));
+  check_eq_err(psx_sector_header_parse((psx_bytes_t){clipped, sizeof(clipped)}, &header), PSX_ERROR_TRUNCATED,
+               "header needs 24 bytes");
+  check_eq_err(psx_sector_header_parse((psx_bytes_t){NULL, sizeof(sector)}, &header), PSX_ERROR_INVALID_ARGUMENT,
+               "null data with a size");
+  check_eq_err(psx_sector_header_parse(whole, NULL), PSX_ERROR_INVALID_ARGUMENT, "null out_header");
+
+  /* --- the inline predicates (not in the ABI, so checked from here) ------- */
+  header.submode = 0x24u;
+  CHECK(psx_sector_header_form(header) == PSX_SECTOR_FORM_2);
+  header.submode = 0x04u; /* AUDIO, and no flag bits at all */
+  CHECK(psx_sector_header_form(header) == PSX_SECTOR_FORM_1);
+  CHECK(!psx_sector_header_is_eof(header));
+  CHECK(!psx_sector_header_is_realtime(header));
+  CHECK(!psx_sector_header_is_trigger(header));
+  CHECK(!psx_sector_header_is_end_audio(header));
+
+  header.submode = 0xf5u; /* every flag set, and the type bits still say audio */
+  CHECK(psx_sector_header_form(header) == PSX_SECTOR_FORM_2);
+  CHECK(psx_sector_header_is_eof(header));
+  CHECK(psx_sector_header_is_realtime(header));
+  CHECK(psx_sector_header_is_trigger(header));
+  CHECK(psx_sector_header_is_end_audio(header));
+  {
+    psx_sector_kind_t kind = PSX_SECTOR_KIND_DATA;
+    check_eq_err(psx_sector_classify(header, &kind), PSX_OK, "flags do not change the type");
+    CHECK(kind == PSX_SECTOR_KIND_AUDIO);
+
+    header.submode = 0x01u; /* a flag byte with no type in it */
+    check_eq_err(psx_sector_classify(header, &kind), PSX_ERROR_CDROM_BAD_SECTOR_TYPE, "type bits 0x01 & 0x0e");
+    CHECK(kind == PSX_SECTOR_KIND_AUDIO);
+    header.submode = 0x04u;
+    check_eq_err(psx_sector_classify(header, &kind), PSX_OK, "audio type");
+    CHECK(kind == PSX_SECTOR_KIND_AUDIO);
+    header.submode = 0x02u;
+    check_eq_err(psx_sector_classify(header, &kind), PSX_OK, "video type");
+    CHECK(kind == PSX_SECTOR_KIND_VIDEO);
+    header.submode = 0x08u;
+    check_eq_err(psx_sector_classify(header, &kind), PSX_OK, "data type");
+    CHECK(kind == PSX_SECTOR_KIND_DATA);
+    check_eq_err(psx_sector_classify(header, NULL), PSX_ERROR_INVALID_ARGUMENT, "null out_kind");
+  }
+
+  header.coding = 0x11u; /* 8-bit (0x10), full rate (0x04 clear), stereo */
+  CHECK(psx_sector_header_coding_bits(header) == 8);
+  CHECK(psx_sector_header_coding_rate(header) == 37800);
+  CHECK(psx_sector_header_coding_is_stereo(header));
+  header.coding = 0x05u; /* 4-bit, quarter rate, stereo */
+  CHECK(psx_sector_header_coding_bits(header) == 4);
+  CHECK(psx_sector_header_coding_rate(header) == 18900);
+  header.coding = 0x04u; /* mono when bit 0 is clear */
+  CHECK(!psx_sector_header_coding_is_stereo(header));
+
+  check_eq_u64((unsigned long long)psx_sector_count_for_bytes(0u), 0ull, "empty file needs no sector");
+  check_eq_u64((unsigned long long)psx_sector_count_for_bytes(2048u), 1ull, "one exact sector");
+  check_eq_u64((unsigned long long)psx_sector_count_for_bytes(2049u), 2ull, "one byte over");
+
+  /* --- payload ------------------------------------------------------------ */
+  psx_bytes_t payload = {NULL, 0u};
+  fill_sector(sector, 0x24u, 0x01u); /* Form 2 */
+  check_eq_err(psx_sector_payload(whole, &payload), PSX_OK, "Form 2 payload");
+  check_eq_u64((unsigned long long)payload.size, PSX_CDROM_FORM2_DATA_SIZE, "Form 2 is 2328 bytes");
+  CHECK(payload.data == sector + PSX_CDROM_HEADER_SIZE);
+
+  fill_sector(sector, 0x04u, 0x01u); /* Form 1 */
+  payload = (psx_bytes_t){NULL, 0u};
+  check_eq_err(psx_sector_payload(whole, &payload), PSX_OK, "Form 1 payload");
+  check_eq_u64((unsigned long long)payload.size, PSX_CDROM_FORM1_DATA_SIZE, "Form 1 is 2048 bytes");
+
+  payload = (psx_bytes_t){NULL, 0u};
+  check_eq_err(psx_sector_payload((psx_bytes_t){sector, sizeof(sector) - 1u}, &payload), PSX_ERROR_TRUNCATED,
+               "a short span is not a sector");
+  CHECK(payload.data == NULL && payload.size == 0u);
+
+  uint8_t image[PSX_CDROM_SECTOR_SIZE * 2u];
+  memset(image, 0, sizeof(image));
+  check_eq_err(psx_sector_payload((psx_bytes_t){image, sizeof(image)}, &payload), PSX_ERROR_INVALID_ARGUMENT,
+               "two sectors is not one sector");
+  check_eq_err(psx_sector_payload(whole, NULL), PSX_ERROR_INVALID_ARGUMENT, "null out_payload");
+
+  /* --- run extent --------------------------------------------------------- */
+  psx_sector_extent_t extent = {12345u, 12345u};
+  check_eq_err(psx_sector_run_extent((psx_bytes_t){image, sizeof(image)}, 0u, 2u, &extent), PSX_OK, "both sectors");
+  check_eq_u64((unsigned long long)extent.offset, 0ull, "offset of sector 0");
+  check_eq_u64((unsigned long long)extent.length, PSX_CDROM_SECTOR_SIZE * 2ull, "two whole sectors");
+
+  check_eq_err(psx_sector_run_extent((psx_bytes_t){image, sizeof(image)}, 1u, 1u, &extent), PSX_OK, "last sector");
+  check_eq_u64((unsigned long long)extent.offset, PSX_CDROM_SECTOR_SIZE, "offset of sector 1");
+
+  extent = (psx_sector_extent_t){0u, 0u};
+  check_eq_err(psx_sector_run_extent((psx_bytes_t){image, sizeof(image)}, 1u, 2u, &extent), PSX_ERROR_TRUNCATED,
+               "run past the end");
+  CHECK(extent.length == 0u);
+  check_eq_err(psx_sector_run_extent((psx_bytes_t){image, sizeof(image)}, 0u, 0u, &extent), PSX_ERROR_INVALID_ARGUMENT,
+               "zero sectors");
+  check_eq_err(psx_sector_run_extent((psx_bytes_t){image, sizeof(image)}, 0u, (size_t)-1, &extent),
+               PSX_ERROR_INVALID_ARGUMENT, "count that would wrap");
+  check_eq_err(psx_sector_run_extent((psx_bytes_t){NULL, sizeof(image)}, 0u, 1u, &extent), PSX_ERROR_INVALID_ARGUMENT,
+               "null image");
+  check_eq_err(psx_sector_run_extent((psx_bytes_t){image, sizeof(image)}, 0u, 1u, NULL), PSX_ERROR_INVALID_ARGUMENT,
+               "null out_extent");
+
+  /* --- error group -------------------------------------------------------- */
+  CHECK(psx_error_is_cdrom(PSX_ERROR_CDROM_BAD_SECTOR_TYPE));
+  CHECK(!psx_error_is_cdrom(PSX_ERROR_XA_UNSUPPORTED_CODING));
+  CHECK(psx_error_name(PSX_ERROR_CDROM_BAD_SECTOR_TYPE)[0] != '\0');
+  CHECK(psx_error_message(PSX_ERROR_CDROM_BAD_SECTOR_TYPE)[0] != '\0');
+
+  printf("[  OK  ] c.cdrom_sector_layer\n");
+}
+
 /* --- XA ADPCM -------------------------------------------------------------- */
 
 /* Deterministic nibble filler (xorshift32). No libc RNG and no fixture file:
@@ -891,6 +1034,7 @@ int main(void)
   test_tim();
   test_mrg();
   test_deff();
+  test_cdrom();
   test_xa();
 
   printf("%d check(s), %d failed\n", g_checks, g_failed);
