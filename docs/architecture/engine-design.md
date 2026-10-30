@@ -60,7 +60,11 @@ src/
     dabas/                   # host adapter for the Mogul Dabas minigame
                              #   (DabasScreen, rewards, save blob — dig-dabas.md)
     title/ submap/ wmap/ battle/ inventory/ text/ credits/ fmv/
-    (each state: state object + tick/postScriptTick/overlayTick + save data)
+                             #   (each state: state object + tick/postScriptTick/
+                             #   overlayTick + save data). `fmv/` owns the mod's
+                             #   2016-byte video-chunk demux — that container is
+                             #   not PSX sector format, so it is deliberately not
+                             #   in psx::cdrom (psx-formats.md §8.3)
   libs/
     dabas/                   # scdabas — Mogul Dabas handheld console + minigame
                              #   logic port (no SDL/Qt; host-interface driven)

@@ -341,7 +341,17 @@ invites someone to "fix" the 24-byte boundary later, and because the correction
 changed what is actually missing: not a measurement, but the ISO 9660 parser
 and real-image goldens.
 
-### 8.3 Deliberately not in `psx::cdrom`
+### 8.3 Not `psx::cdrom` scope (ruled by the owner, 2026-10-29)
+
+Ruled, not assumed: neither the FMV mux below nor the interleave grouping is
+part of PlayStation sector hardware, so neither may be folded into
+`psx::cdrom`. AGENTS.md draws the same line (reusable PSX technology kept
+separate from Legend of Dragoon-specific code); the ruling settles these two
+items specifically. `psx_sector_classify` still labels a sector VIDEO or AUDIO —
+that is a routing decision read off a hardware bit, and whatever acts on it
+lives in the engine/game layer. Both layouts are recorded here so that path
+starts from measurements instead of re-deriving them, and `psx` carries no
+placeholder API for either.
 
 - **The FMV mux.** `VideoSector` wraps the same 2352-byte buffer as
   `SectorHeader`. It reads a 32-byte chunk header from the region at bytes
@@ -355,21 +365,25 @@ and real-image goldens.
   `demuxedSize` comes from the frame's first DATA sector, VIDEO sectors feed
   the MDEC path and AUDIO sectors feed `XaAdpcm`.
   This is the mod's own container for the PC remaster, not PS1 sector
-  semantics, so AGENTS.md's separation rule puts it with the video path in the
-  engine/game layer. The layout above is recorded here so that path starts from
-  measurements instead of re-deriving them.
+  semantics, so it is engine/game-layer work when the video path is built. Two
+  notes for whoever picks that up: the chunk-header fields (28..45) sit *inside*
+  the sector payload, so a span from `psx_sector_payload` is not raw video — the
+  2016-byte chunk begins at absolute 56; and nothing establishes that these mux
+  files carry a real sector header in bytes 0..23 at all, which is a second
+  reason the port takes no `mode` value from byte 15 (§8.4).
 - **XA interleave groups.** `XaTranscoder.interleaveMode` (4 or 16, chosen from
   the mod's filename) describes how the mod's files pack audio and video
   sectors. Same reason, same destination.
-- **ISO 9660 name/directory/path-table parsing.** Reusable PSX technology, so
-  it belongs in `psx::cdrom`; it is unbuilt because a hand-built volume
-  descriptor proves only self-consistency, and the reference's own PVD check
-  (descriptor type, `"CD001"`, version byte, then a 32-byte volume-space
-  identifier read from logical offset 7 and trimmed, which is how
-  `"PLAYSTATION"` matches) is a behaviour to pin against real data, not to copy
-  blind.
 
-### 8.4 Open questions specific to the sector layer
+### 8.4 Open questions and unbuilt scope specific to the sector layer
+
+- **ISO 9660 name/directory/path-table parsing.** This one *is* `psx::cdrom`
+  scope — reusable PSX technology, unlike the two items above. It is unbuilt
+  because a hand-built volume descriptor proves only self-consistency, and the
+  reference's own PVD check (descriptor type, `"CD001"`, version byte, then a
+  32-byte volume-space identifier read from logical offset 7 and trimmed, which
+  is how `"PLAYSTATION"` matches) is a behaviour to pin against real data, not
+  to copy blind.
 
 - **Byte positions versus hardware.** Offsets 17/18/19 are the reference's, and
   only 18 and 19 are corroborated by a second call site (the Form 2 test in
@@ -378,9 +392,12 @@ and real-image goldens.
   reproduces the reference. Do not "correct" them from a hardware description
   without an image to measure against.
 - **Byte 15 / `getMode()`.** Declared once, called nowhere in the reference, so
-  the port exposes no mode field. If a real image shows byte 15 carrying a mode
-  byte that something needs, that is new work with evidence, not a gap to fill
-  by guesswork.
+  the port exposes no mode field. Ruled 2026-10-29: it stays omitted, and adding
+  it later needs two things, not one — a concrete caller or verified format
+  requirement, **and** proof that the buffer being parsed is a standard raw
+  CD-ROM sector. The white-book layout alone is explicitly not sufficient
+  evidence. A mode byte read out of a container that never had one is worse than
+  no field at all, because it looks like decoded hardware state.
 - **No real sector has been parsed.** All 12 sector-layer cases and the C
   consumer checks run on synthetic sectors built from the source above. They
   pin bit arithmetic and bounds behaviour; they do not certify any retail disc.

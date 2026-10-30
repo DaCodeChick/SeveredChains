@@ -22,11 +22,15 @@
 ///    real disc image rather than being guessed now.
 ///  - **The FMV mux** (`VideoSector`: 2016-byte chunks at sector offset 56)
 ///    and **XA interleave groups** (`XaTranscoder.interleaveMode`, 4 or 16,
-///    chosen from the mod's filename). Both are packaging specific to
-///    The Legend of Dragoon and its mod pipeline; AGENTS.md keeps reusable PSX
-///    technology separate from Legend of Dragoon-specific code. The measured
-///    layout is recorded in docs/research/psx-formats.md §8 for whoever writes
-///    the video path.
+///    chosen from the mod's filename). Neither is a PlayStation sector format:
+///    the first is a container the mod's own tooling writes for the PC
+///    remaster, the second is how the mod packs audio and video sectors. Both
+///    therefore belong to the engine/game layer under AGENTS.md's rule keeping
+///    reusable PSX technology separate from Legend of Dragoon-specific code,
+///    and both were ruled out of this module explicitly on 2026-10-29 rather
+///    than left ambiguous. The measured layout is recorded in
+///    docs/research/psx-formats.md §8.3 so the video path starts from
+///    measurements; no placeholder API for them exists here.
 ///
 /// Provenance of every offset and bit in this header is listed in
 /// docs/research/psx-formats.md §8, traced to `SectorHeader.java`,
@@ -96,9 +100,15 @@ extern "C"
  * hardware description without a real image to measure against.
  *
  * The reference *also* defines getMode() at offset 15 and never calls it (one
- * match repo-wide: its own declaration). This header therefore has no `mode`
- * field: a caller cannot observe it in the reference, and shipping a field
- * whose byte position is an open question would invite exactly that. */
+ * match repo-wide: its own declaration), and this header exposes no `mode`
+ * field. That is a decision rather than an oversight. A mode byte only means
+ * something if the buffer being parsed is known to be a standard raw CD-ROM
+ * sector, and nothing here can establish that — the white-book layout alone is
+ * not sufficient evidence. The one path that would have used it (FMV playback)
+ * feeds 2352-byte buffers taken from the mod's own mux file, and nothing shows
+ * those files were authored with a standard sector header in bytes 0..23 at
+ * all. Revisit only when a concrete caller or a verified format requirement
+ * needs the field. */
 
 /// @byte Offset of the Mode 2 channel number.
 #define PSX_CDROM_CHANNEL_OFFSET 17u
@@ -181,7 +191,7 @@ typedef enum psx_sector_form
 /// able to abort the process (docs/architecture/error-handling.md §4.1).
 typedef enum psx_sector_kind
 {
-  PSX_SECTOR_KIND_VIDEO = 2, ///< FMV picture data.
+  PSX_SECTOR_KIND_VIDEO = 2, ///< Streamed video/mux payloads (routing label only; decoding is engine-side).
   PSX_SECTOR_KIND_AUDIO = 4, ///< XA audio data.
   PSX_SECTOR_KIND_DATA = 8   ///< Raw / Mode 1 data.
 } psx_sector_kind_t;
