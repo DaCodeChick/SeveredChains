@@ -16,13 +16,18 @@ endif()
 # every project source, which is what makes the style rules *enforceable* rather than
 # advisory — including RemoveBracesLLVM, the project rule that single-statement
 # if/else/for/while bodies carry no braces. clang-format is a development host tool, not
-# a third-party dependency: when it is missing, or older than 17 (so it cannot see
-# RemoveBracesLLVM), the script says so on the same line and falls back to a structural
-# brace scan, so an under-tooled runner reports what it could not verify instead of
-# passing silently.
+# a third-party dependency. When no clang-format >= 17 exists, the script says so and
+# exits 77, which SKIP_RETURN_CODE renders as `Skipped`: an under-tooled host reports what
+# it could not verify instead of passing silently, and it does not fail on code the real
+# formatter considers clean. (It used to run a hand-written brace scan here; that scan
+# flagged 41 lines that clang-format reports clean, including braced bodies where braces
+# are mandatory, so it failed correct code and has been removed.) The script discovers
+# version-suffixed binaries (`clang-format-18`) because that is how the Ubuntu runner
+# image names them.
 if(ScPython3)
   add_test(NAME repo.format COMMAND ${ScPython3} ${CMAKE_SOURCE_DIR}/tools/check_format.py)
-  set_tests_properties(repo.format PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+  set_tests_properties(repo.format PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+                       SKIP_RETURN_CODE 77)
 else()
   message(STATUS "python3 not found: repo.format gate skipped (run tools/check_format.py manually)")
 endif()

@@ -226,8 +226,25 @@ Decoding expectations:
 - **A differential harness must be shown able to fail.** The XA run is accompanied
   by seven mutations (filter coefficient, per-call state reset, mono duplication,
   clamp→wraparound, dropped `+32`, arithmetic-vs-truncating divide, L/R interleave
-  swap), each of which produces mismatches against a 19/19 baseline. A future
+  swap), each of which produces mismatches against a 19/19 baseline, plus three
+  on the C-consumer side (carried stream ignored, stereo/mono sample counts
+  swapped, 8-bit coding accepted as nibbles). A future
   decoder lane is not done until it has the same demonstration.
+- **Mutation experiments run in a scratch copy, never in the live tree.** Copy
+  the tree (or use a `git worktree`), mutate there, and confirm afterwards with
+  `git status --short` that the working tree is clean. This is not ceremony: a
+  mutation left in place can be committed. `fd7d8a6` did exactly that — the
+  "per-call state reset" mutation above was committed as if it were the
+  implementation, which silently destroyed per-stream XA history (a real
+  behaviour change: audio decoded by the C API lost its filter taps at every
+  sector boundary) while the code still *looked* like the reference.
+- **A test run only counts if the build that produced it succeeded.** The
+  residue above was caught the second time by checking the build exit code
+  before the test exit code. With `-DSC_WERROR=ON` (the CI default) the
+  mutated file fails to compile because the mutation made a parameter unused,
+  and `ctest` then re-runs the **stale binaries from the previous build** and
+  reports every test green. Read the build result first; `100% tests passed`
+  after a failed build means nothing.
 - Malformed input: truncation/corruption at every offset class → the
   specific `psx_error_t` / `psx::Error` code (fuzzed — §3), asserted identically from
   C and C++.
@@ -444,8 +461,112 @@ item 6) and pointer *delivery* (no UI consumer exists yet).
   platform-specific gap is documented + user-acknowledged).
 - Nightly: full unit + golden + fuzz (time-boxed) on the matrix.
 
+### 4.1 CI is the authoritative gate — and as of 2026-10-29 it does NOT yet gate the psx suite
+
+**Correction of an earlier claim in this file.** A previous revision of this
+section stated that CI had never run and, separately, that the existing workflow
+already covered `psx.xa` / `psx.c_consumer`. Both were wrong, and the second was
+built on the first. What follows is measured.
+
+**CI has run.** Nine pushes, nine workflow runs, **all nine concluded
+`failure`** — including run #9 on `e091dc1`, the commit that fixed the XA stream
+history. Job- and step-level conclusions were read from the Actions API (the log
+endpoint needs an authenticated request and returns 403 anonymously, so this is
+evidence about *where* things failed, not the failure text).
+
+**No run has ever executed the psx suite.** In run #9 all 21 jobs failed, and
+the engine legs died before the test steps, which GitHub then reports as
+`skipped` (a later step does not run once an earlier one fails):
+
+| Legs | First failing step | Outcome for `psx.xa` / `psx.c_consumer` |
+|---|---|---|
+| 4 × macOS arm64 | `Prerequisites (macOS)` (~10 s per job) | test steps **skipped** — never executed |
+| 8 × Linux (x64 + arm64, incl. sanitizers) | `Configure` (~48 s) | test steps **skipped** — never executed |
+| 2 × Windows | `Build` | test steps **skipped** — never executed |
+| 3 × fate-toolchain | `Tests (fate compile, golden differential)` | reached a test step, and failed there |
+
+So the requirement that these two tests "run in CI against the actual revision,
+with a nonzero exit on failure, with no silent skips" is **not met**. The suite
+being registered in the CTest files is not the same thing as CI executing it, and
+reading the workflow's *steps* as evidence that they *ran* is exactly the mistake
+this section exists to prevent.
+
+**What local reproduction does establish** (unchanged, and still the reason the
+test half is sound): under CI's own flags the two tests are registered in both
+configurations (in-tree: 30 tests, both present; standalone `psx`: 9 tests, both
+present); and against the defective `xa.c`, built cleanly with `SC_WERROR=OFF`
+so the mutation could not hide behind a compile error, 2 of 30 fail and `ctest`
+exits **8**. That proves the tests are non-vacuous. It does not prove CI will
+run them, because CI currently never gets that far.
+
+**Two of the three failure classes are now root-caused and fixed; the third is
+still open, and stays open on purpose.**
+
+*Class 1 — `Prerequisites (macOS)`, 4 legs, ~1–3 s.* Confirmed, reproduced, and it
+was never the `sort -V` logic or a missing `brew`. GitHub Actions runs `shell: bash`
+with **errexit on** (`bash -e {0}`), so the script's own `set -uo pipefail` does not
+turn error handling off. `brew list --versions <formula>` exits **1** for a formula
+that is simply not installed, and that pipeline sat inside `ver="$( … )"`: the
+assignment inherits the pipeline status, pipefail propagates it, errexit aborts the
+step. The step died before writing `DEP_MODE`, so Configure had no dependency mode
+either. Differential proof, run against the block extracted from `ci.yml` rather than
+a retyped copy: HEAD's version exits **1** with brew present-but-sdl3-absent and
+exits **0** with brew reporting sdl3 3.4.18 — which is exactly why it passed on a
+development machine that has SDL3 installed and failed on a runner that does not.
+The repaired block returns 0 in all four brew states (absent / present-but-absent
+formula / 3.4.18 / 3.1.0) and still selects `source` for the too-old case, so the
+probe was made safe without being made blind.
+
+*Class 2 — `Formatting gate`, the repo-gates job, 4 s.* Confirmed and reproduced, two
+defects stacked. The runner image ships clang-format 16.0.6 / 17.0.6 / 18.1.3 as
+`clang-format-16`…`-18`, and the gate probed only the bare name, so a fully-tooled
+runner looked untooled; the degraded path then ran a structural brace scan that flagged
+**41 lines clang-format 23.1 reports clean**, including braced bodies holding two
+statements where braces are mandatory. Both halves are fixed (discover suffixed names;
+skip with exit 77 instead of approximating; `SKIP_RETURN_CODE 77` so CTest says
+*Skipped*). Re-proven non-vacuous after the change: real offenders still exit 1 with a
+formatter present, and a header missing `#pragma once` still exits 1 **without** one.
+
+*Class 3 — Linux `Configure` (8 legs, 24–35 s) and Windows `Build` (2 legs) — still
+open.* Ubuntu 24.04 has no `libsdl3-dev` in its own archive, so those legs select
+`dep_mode=source` and configure through the FetchContent SDL3 path; that same path
+configured cleanly on macOS in ~26 s, so the failure is platform-specific and **not
+reproduced** here. `brew`-equivalent reasoning does not transfer: the macOS cause was
+an exit-status bug in a probe, whereas this one sits inside CMake on a host this
+machine does not have. Resolving it needs a Linux host (Docker is installed here, the
+daemon is stopped) or one authenticated look at a `Configure` log.
+
+What this does **not** establish: that any leg now goes green. Class 1 and 2 were
+confirmed blockers on the path to the tests, and removing them is not evidence that
+nothing else blocks it — after the macOS prerequisites pass, that job still has to
+configure and build, and the macOS source-fallback branch has never run on a runner.
+Because every leg is already red, only the log text (or a Linux host) distinguishes a
+real fix from a second defect, so the remaining step is still *evidence*, not a patch.
+
+**One structural note, independent of the causes:** a leg that dies in a
+prerequisite step skips its tests, so "CI is red" is currently the only signal,
+and it does not say whether code or environment is at fault. That is worth
+fixing once the causes are known, not before.
+
+**Also still open, and untouched on purpose:** enforcement depends on a human
+running the suite before committing. Nothing catches a *committed* mutation
+automatically today — `fd7d8a6` is the proof — and adding a pre-commit or
+mutation gate is not authorised here.
+
+---
+
 ## 5. Gaps / Open
 
+- **CI has never executed the test suites it declares** (§4.1). Nine runs, nine
+  failures, every engine leg dying at a prerequisite/configure/build step, so
+  `psx.xa` and `psx.c_consumer` have run zero times in CI. The gates are declared
+  and locally proven non-vacuous; they are not yet *executed* by CI.
+  Two causes are now fixed with local differential evidence: the macOS prerequisite
+  step's errexit-on-probe bug, and the formatting gate's false positives on a runner
+  that names its formatter `clang-format-18`. Still unreproduced and unfixed: Linux
+  `Configure` (8 legs) and Windows `Build` (2 legs). Diagnosing those needs a Linux
+  host (start the Docker daemon) or authenticated log access — **not** a speculative
+  rewrite of `ci.yml`.
 - Java reference test harness for golden value generation: the reference
   repo's tests are excluded from its build (`test { exclude '**/*' }`) —
   generating goldens from Java requires running it (with a user's disc) in

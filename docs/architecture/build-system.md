@@ -61,7 +61,7 @@ loadable at runtime); the host is always an executable.
 | `psx` | C17 library (`PSX_SHARED`, default shared; `SOVERSION` = `PSX_ABI_VERSION`); **prefix-free**, **zero third-party deps**; hidden visibility, only `PSX_API` symbols exported; no SDL/Qt/Luau/engine | libc allocator only (`malloc`/`calloc`/`free`) |
 | `psx_cpp` | INTERFACE (header-only C++23 wrappers over `psx`) | `psx`, C++23 std |
 | `scdabas` | library (typeless); std only; host-interface driven | C++23 std only |
-| `scengine` | library (typeless); symbol prefix `sc_`, hidden visibility (shared builds) | **psx**, SDL3, SDL3_image, GLM (hdr), EnTT (hdr), Luau, (libcurl/libopus optional) |
+| `scengine` | library (typeless); symbol prefix `sc_`, hidden visibility (shared builds) | **planned:** **psx**, SDL3, GLM (hdr), EnTT (hdr), Luau, (libcurl/libopus optional). **Actual today: `psx::cpp` + `SDL3::SDL3` only** — see the note under this table. SDL3_image is **not** in the list: it is not approved as mandatory (G2 ruling, 2026-10-29). |
 | `scgame` | library (typeless); the "lod" content module | scengine, **scdabas** |
 | `lodsc` (host) | EXECUTABLE (thin) — the app (LoD: Severed Chains) | scgame, scengine |
 | `severed-chains-launcher` / `-settings` / `-modmanager` / `-debugger` / `-inspector` | EXECUTABLE | scengine + Qt6 |
@@ -186,13 +186,23 @@ endif()
 - Third-party: SDL3/SDL3_image/EnTT/GLM/Luau compile under either policy
   (dependencies.md §3); Qt 6 is the documented throwing dependency.
 
+> **Planned vs. built — read the two together.** The table above and the
+> sentence above it are the *target* design. Measured 2026-10-29: `scengine`
+> links exactly two things, `psx::cpp` and `SDL3::SDL3`; `cmake/ScDeps.cmake`
+> mentions no GLM, EnTT, Luau, or SDL3_image target at all. Those libraries are
+> installed on the reference workstation but **unwired**, and per
+> dependencies.md nothing gets fetched until a target needs it. So
+> "GLM/EnTT/Luau/SDL3_image are dependencies" is a statement about the future
+> design, and quoting it as current build fact is wrong.
+
 ## 3. Dependency Resolution
 
 - **Strategy:** `FetchContent` with pinned tags + SHA (no submodules, per
-  requirement) for: GLM, EnTT (header-only), Luau (source build — its
-  `prebuilt/VM` via its CMake), SDL3_image. This makes the
-  clean-clone build self-contained given network access; CI mirrors
-  (cache) for reproducibility.
+  requirement). **Implemented so far: SDL3 only**, and even that as a *fallback*
+  behind `find_package(SDL3 3.2 CONFIG)` (`SC_SDL3_PROVIDER`, default
+  `find`), built static. **Not yet declared:** GLM, EnTT, Luau, SDL3_image —
+  none has a consuming target, so declaring them would fetch code nothing
+  compiles. Add one here when its first consumer is written, not before.
 - **psx / scdabas:** no dependencies at all — nothing to fetch; they build
   from their own sources only (psx-library.md §1 is a hard build rule:
   a CMake audit target fails the build if psx/scdabas link anything but

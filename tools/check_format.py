@@ -1,24 +1,27 @@
 #!/usr/bin/env python3
 """Formatting gate for project-owned C/C++ sources (AGENTS.md, docs/guidelines/cpp.md §6).
 
-Three roles:
+Two roles:
 
 1. **Whole-style gate.** Runs `clang-format --dry-run --Werror` over every project file,
    so the root `.clang-format` is enforceable rather than advisory — including
-   `RemoveBracesLLVM`, which is what encodes the project rule that single-statement
+   `RemoveBracesLLVM`, which encodes the project rule that single-statement
    `if`/`else`/`for`/`while` bodies carry no braces.
-2. **Brace backstop.** A structural scan for that one rule, used when clang-format is
-   absent *or older than 17* (older versions do not know `RemoveBracesLLVM`, so a silent
-   pass there would be a hole rather than a check).
-3. **Header inclusion style.** Every header must open with `#pragma once`. This one is
+2. **Header inclusion style.** Every header must open with `#pragma once`. This is
    independent of role 1: clang-format has no opinion about inclusion guards, so there is
-   no tool whose absence it is covering for.
+   no tool whose absence it is covering for, and it stays a hard gate on every host.
 
-Skips are always loud: the tool prints what it could not verify and exits 0 only after
-saying so, mirroring the exported-symbol audit (psx/tests/abi_symbols.cmake).
+When no clang-format >= 17 exists on the host, role 1 reports that it could not run and
+exits 77. It does not fall back to a hand-written approximation of the style rules. An
+earlier version of this script did, and that backstop was wrong: it flagged 41 lines that
+clang-format 23.1 reports clean, including braced bodies holding *two* statements where
+braces are mandatory (`psx/src/bpe.c`, `src/engine/src/fs.cpp`). A gate that fails correct
+code is worse than no gate — it teaches people to add `|| true`, and to delete braces that
+were carrying a `dangling-else` guarantee. Reporting "unverified" is the honest shape, and
+CTest renders it as `Skipped`, never as `Passed`.
 
-Usage:  python3 tools/check_format.py [path ...]      # paths override the scan roots
-Exit:   0 = clean or skipped with a message, 1 = offenders found.
+Usage:  python3 tools/check_format.py [path ...]   # paths override the scan roots
+Exit:   0 = clean, 1 = offenders found, 77 = could not verify (reported, not passed).
 """
 
 from __future__ import annotations
@@ -39,23 +42,49 @@ SKIP_DIRS = {"build", "third_party", "external", "legacy"}
 SOURCE_SUFFIXES = (".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".hh", ".hxx")
 
 MIN_CLANG_FORMAT = (17, 0)
+SKIPPED = 77
 
-# --- brace backstop ---------------------------------------------------------------
+# --- clang-format discovery ---------------------------------------------------------
+#
+# Probing only the bare name `clang-format` was a defect, not a style choice. The Ubuntu
+# 24.04 CI image ships clang-format 16.0.6 / 17.0.6 / 18.1.3 under version-suffixed
+# names (`clang-format-18`), so a fully-tooled runner looked like a host with no
+# formatter and the gate degraded. Candidates are tried newest-first and the highest
+# version wins.
+#
+# Anything below MIN_CLANG_FORMAT is still unusable, and *finding only a v16 is a skip,
+# not a pass*: clang-format 16 does not implement RemoveBracesLLVM, so a clean report
+# from it says nothing about the one rule this gate exists to enforce.
 
-# A control header whose closing paren is on the same line and whose body is a
-# separate `{` line. Trailing comments are tolerated.
-CONTROL_HEADER = re.compile(
-    r"^(?:\s*)(?:if|for|while|else(?:\s+if)?)(?:\s*\(.*\)\s*(?://.*)?|\s*(?://.*)?)$"
-)
-OPEN_ONLY = re.compile(r"^\s*\{\s*(?://.*)?$")
+CLANG_FORMAT_CANDIDATES = ("clang-format",) + tuple(
+    f"clang-format-{major}" for major in (23, 22, 21, 20, 19, 18, 17))
 
-# Removal is only *safe* (and only what clang-format does) when the braced body is one
-# statement that neither declares anything nor is itself control flow: a nested `if`
-# would create a dangling-else hazard, and a declaration would gain/lose a scope.
-DECLARATION = re.compile(
-    r"^(?:const |constexpr |static |auto |std::|[A-Z][A-Za-z0-9_]*\s+[a-z_]\w*\s*(?:=|;|\())"
-)
-NESTED_CONTROL = re.compile(r"^\s*(?:if|for|while|else|switch|do)\b")
+
+def find_clang_format() -> tuple:
+    """Return ``(executable, version)`` for the newest usable clang-format on this host.
+
+    Returns ``("", ())`` when none is installed or none is new enough. Callers must treat
+    that as "cannot verify" and say so, never as "clean".
+    """
+    best_exe, best_version = "", ()
+    for name in CLANG_FORMAT_CANDIDATES:
+        exe = shutil.which(name)
+        if not exe:
+            continue
+        try:
+            out = subprocess.run([exe, "--version"], capture_output=True, text=True,
+                                 timeout=30).stdout
+        except (OSError, subprocess.SubprocessError):
+            continue
+        match = re.search(r"version (\d+)\.(\d+)", out)
+        if not match:
+            continue
+        version = (int(match.group(1)), int(match.group(2)))
+        if best_version == () or version > best_version:
+            best_exe, best_version = exe, version
+    if best_version >= MIN_CLANG_FORMAT:
+        return (best_exe, best_version)
+    return ("", ())
 
 
 def is_source(path: Path) -> bool:
@@ -77,59 +106,13 @@ def scan_files(paths: list[Path]) -> list[Path]:
     return files
 
 
-def check_braces(path: Path) -> list[str]:
-    """Return 'line N: <snippet>' for every single-statement braced body."""
-    lines = path.read_text(encoding="utf-8").splitlines()
-    findings: list[str] = []
-    index = 0
-    while index + 1 < len(lines):
-        header = lines[index]
-        openerIndex = index + 1
-        opener = lines[openerIndex]
-        index = openerIndex
-        if not CONTROL_HEADER.match(header) or not OPEN_ONLY.match(opener):
-            continue
-        # Walk the braced body: `depth` counts open blocks *inside* the `{` (so it starts
-        # at 1) and the body ends at the line that closes it. Everything collected is
-        # flattened code text, so a *single* entry means "exactly one statement, one line".
-        depth = 1
-        body: list[str] = []
-        cursor = openerIndex + 1
-        while cursor < len(lines):
-            text = lines[cursor]
-            depth += text.count("{") - text.count("}")
-            stripped = text.strip()
-            if depth == 0:
-                break
-            if stripped and not stripped.startswith(("//", "/*", "*")):
-                body.append(stripped)
-            if len(body) > 1:
-                break
-            cursor += 1
-        if len(body) != 1:
-            continue
-        statement = body[0]
-        if NESTED_CONTROL.match(statement) or statement.endswith("{"):
-            continue
-        if DECLARATION.match(statement):
-            continue
-        if statement in ("break;", "continue;", "return;"):
-            continue
-        findings.append(f"line {index + 1}: {opener.strip()} {statement}")
-    return findings
-
-
 # --- header inclusion-style gate ----------------------------------------------------
 #
-# Every project header includes protection; the question is only which kind. 29 of 38
-# already used `#pragma once` on line 1, and the 9 that still used an `#ifndef` guard were
-# all in `fate`, which never picked the convention up. The convention is now uniform, and
-# this check keeps it that way. It is deliberately narrow and needs no judgement call:
-# either the file opens with `#pragma once` or it does not.
-#
-# It runs whether or not clang-format exists. Inclusion style is not something
-# clang-format checks, so this is not a backstop for a tool that is missing — it is the
-# only check for this property.
+# Every project header carries inclusion protection; the question is only which kind. The
+# convention is `#pragma once` on line 1, and this check is deliberately narrow and needs
+# no judgement call: either the file opens with it or it does not. It runs whether or not
+# clang-format exists, because inclusion style is not something clang-format checks — so
+# this is not a backstop for a missing tool, it is the only check for this property.
 
 PRAGMA_ONCE = re.compile(r"^[ \t]*#[ \t]*pragma[ \t]+once\b")
 
@@ -173,18 +156,6 @@ def check_header_style(path: Path) -> list[str]:
     return ["line 1: no `#pragma once` — a header must carry inclusion protection"]
 
 
-def clang_format_version() -> tuple[int, ...]:
-    exe = shutil.which("clang-format")
-    if not exe:
-        return ()
-    try:
-        out = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=30).stdout
-    except (OSError, subprocess.SubprocessError):
-        return ()
-    match = re.search(r"version (\d+)\.(\d+)", out)
-    return (int(match.group(1)), int(match.group(0).split(".")[1])) if match else ()
-
-
 def main(argv: list[str]) -> int:
     paths = [Path(arg).resolve() for arg in argv] or [ROOT / name for name in SCAN_ROOTS]
     files = scan_files(paths)
@@ -192,18 +163,18 @@ def main(argv: list[str]) -> int:
         print("check_format: no project sources found — nothing checked")
         return 0
 
-    offenders: list[str] = []
     style_findings: list[str] = []
     for path in files:
         for finding in check_header_style(path):
             style_findings.append(f"{display(path)}: {finding}")
 
-    version = clang_format_version()
-    exe = shutil.which("clang-format")
+    exe, version = find_clang_format()
+    offenders: list[str] = []
+    unverified = ""
 
-    if exe and version >= MIN_CLANG_FORMAT:
-        print(f"check_format: clang-format {version[0]}.{version[1]} over {len(files)} file(s) "
-              f"(full .clang-format gate, incl. RemoveBracesLLVM)")
+    if exe:
+        print(f"check_format: clang-format {version[0]}.{version[1]} ({exe}) over "
+              f"{len(files)} file(s) — full .clang-format gate, incl. RemoveBracesLLVM")
         for path in files:
             result = subprocess.run(
                 [exe, "--style=file", "--dry-run", "--Werror", str(path)],
@@ -216,12 +187,8 @@ def main(argv: list[str]) -> int:
         if offenders:
             print("  run: clang-format -i " + " ".join(offenders))
     else:
-        why = "clang-format not found" if not exe else f"clang-format {version[0]}.{version[1]} < 17"
-        print(f"check_format: WARNING — {why}; full style gate NOT verified, running the "
-              f"brace backstop only over {len(files)} file(s)")
-        for path in files:
-            for finding in check_braces(path):
-                offenders.append(f"{display(path)}: {finding}")
+        unverified = ("no clang-format >= 17 on this host (looked for: "
+                      + ", ".join(CLANG_FORMAT_CANDIDATES) + ")")
 
     if offenders or style_findings:
         for finding in style_findings:
@@ -234,6 +201,17 @@ def main(argv: list[str]) -> int:
         print(f"check_format: FAIL — {total} offender(s) "
               f"({len(style_findings)} inclusion-style, {len(offenders)} formatting)")
         return 1
+
+    if unverified:
+        # Loud, and non-zero: `Skipped` in CTest terms. The style rules above were not
+        # looked at, and the output says so instead of implying they passed.
+        print(f"check_format: NOT VERIFIED — {unverified}")
+        print("check_format: the .clang-format rules (whitespace, braces) were NOT "
+              "checked; header inclusion style was, and was clean")
+        print("check_format: install clang-format >= 17 to make this gate real "
+              "(exit 77 = skipped, not passed)")
+        return SKIPPED
+
     print("check_format: OK — formatting and header inclusion style")
     return 0
 

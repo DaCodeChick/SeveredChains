@@ -8,15 +8,46 @@ M10 as proposed, but the registry/event/content-registration foundations they
 build on exist from M5 (retail content registers through them from day one —
 the LodMod pattern, engine-design.md §6).
 
-**Dependency approval gates** (dependencies.md §2):
-- G1: glslang + SPIRV-Cross + DXC (build-time shader tools) — **before M4**.
-- G2: SDL3_image (PNG decode) — **before M2** (UI PNGs).
+**Dependency approval gates** (dependencies.md §2) — statuses updated
+2026-10-29; two of the five changed:
+- G1: glslang + SPIRV-Cross + DXC (build-time shader tools) — **DEFERRED**.
+  No longer a settled "before M4" prerequisite, and none of the three is
+  fetched. M2 proceeds with a hand-written MSL test shader (see M2). G1 may be
+  raised again only when a specific later backend requirement demonstrates the
+  need; that is a new decision, not a renewal of this one.
+- G2: SDL3_image (PNG decode) — **NOT approved as a mandatory dependency**.
+  Prefer SDL3 plus the native PSX asset-decoding path in `psx`. It is installed
+  on the reference workstation but linked by no target, and it stays that way
+  until a demonstrated requirement **and** explicit approval. It is therefore
+  **not** a prerequisite of M2.
 - G3: XA cache format decision (PCM/WAV vs libopus) — **before M6**.
 - G4: libcurl (launcher auto-update) — **before M11** (launcher feature).
 - G5: ffmpeg/libav (FMVs) — **before M11** (likely deferred to post-M12).
 *(If any gate is denied, the affected scope is cut or substituted as
 documented in dependencies.md; no milestone is blocked on a denied option
 that has a documented fallback.)*
+
+---
+
+## Naming: "Milestone 3" means two different things — read this first
+
+Fixed 2026-10-29. Numbering below is historical record and is deliberately
+left alone; only the ambiguity is being closed.
+
+- **The delivered "Milestone 3 brief"** = resource management and PSX asset
+  handling: MRG/DEFF via `psx::archive`, TIM via `psx::tim`, BPE via
+  `psx::bpe`, plus `lod::res` discovery/ownership/validation. That work is
+  **done** and is recorded under **Milestone 6 — Asset Pipeline** below
+  ("Landed early"). Evidence: `docs/reports/milestone-3-resource-management.md`.
+- **The numbered "Milestone 3 — Cross-Platform Graphics"** of this file = the
+  three-backend verification matrix. That work **has not started**: it needs M2,
+  and no renderer exists yet.
+
+So "M3 complete" is ambiguous and must not be answered from the label. When a
+report, ticket, or commit says M3, say which of the two. The asymmetry is the
+reason this note exists: reading the label as the *number* makes finished asset
+work look like unfinished graphics work, and reading it as the *brief* makes
+unfinished graphics work look finished.
 
 ---
 
@@ -80,8 +111,10 @@ support query), depth (D32/D24 query), backend selection logging, GPU debug
 flag on dev builds, resource RAII wrappers + deferred-deletion scaffold,
 fence-based correctness (submit + fence wait).
 
-**Prerequisites:** M1; **G2** (PNG for the test quad); shader tools or a
-single hand-compiled test shader per backend. **Also starts the `psx`
+**Prerequisites:** M1; a single hand-compiled test shader per backend — the
+**hand-written MSL probe is authorized** (2026-10-29), so no shader toolchain
+is needed to start. **G2 is no longer a prerequisite:** the test quad does not
+require a PNG decoder (see the G2 ruling above). **Also starts the `psx`
 library** (psx-library.md): the independent, prefix-free PSX library
 target (root subproject) lands now with its
 first modules (`psx::bpe`, `psx::xa`, `psx::tag`, `psx::gte`) so the
@@ -93,9 +126,13 @@ default backend; pipeline-creation smoke test infrastructure; `psx`
 C17 target + initial modules + standalone psx suite (`sc_tests_psx`, pure-C consumer,
 ABI symbol audit), with header-only C++23 wrappers over it (psx-c-api.md).
 **Acceptance:**
-- Textured quad + triangle render correctly on at least Vulkan (Linux),
-  Metal (macOS), D3D12 (Windows) — with SPIR-V-only artifacts acceptable
-  pre-G1 only for the Vulkan path; Metal/D3D12 need their artifacts (G1).
+- Textured quad + triangle render correctly. **Ruled 2026-10-29:** for the M2
+  vertical slice on macOS, **Metal-only is an acceptable acceptance bar**,
+  because it is the only backend executable on the development machine. The
+  three-backend matrix (Vulkan on Linux, D3D12 on Windows) is **M3** scope and
+  is not thereby waived or downgraded — it is simply not an M2 gate. Do not
+  describe Vulkan or D3D12 support as existing before it is independently
+  implemented **and** tested.
 - Resize (render-target recreation) without crash/tear.
 - 60fps steady with a simple scene (frame-time histogram logged).
 - Resource-leak test: 10k create/destroy of textures/buffers, fence-verified.
@@ -113,7 +150,10 @@ swapchain depth APIs, per-backend quirks documented + handled (Metal
 selection plumbing into config (list devices, persist choice), failure
 diagnostics (no backend → clear error, exit code 4).
 
-**Prerequisites:** M2; G1 (all three artifact types).
+**Prerequisites:** M2; G1 (all three artifact types). **G1 is DEFERRED as of
+2026-10-29**, so this milestone cannot be planned as-if the tools exist: its
+shader-artifact route is an **open decision** to be made when M2 lands, not a
+prerequisite already satisfied.
 **Deliverables:** backend verification test suite (CI-gated on Linux+macOS;
 D3D12 on the Windows runner), device-selection config, docs page
 (`docs/guides/backends.md` for users: what works where).
@@ -137,7 +177,8 @@ post/standard/tmd/battle_tmd) with the **geometry-shader replacement**
 per-primitive cull/avg-depth pass); diagnostics (compile errors surfaced
 with file:line; runtime logs artifact hash+backend).
 
-**Prerequisites:** M2; G1.
+**Prerequisites:** M2; G1 — **deferred**, see the G1 ruling above; this
+milestone's shape depends on that decision being revisited.
 **Deliverables:** `gfx/shaders/` native sources (GLSL 450, explicit
 layout), build pipeline, loader, tmd pipeline without GS (functionally
 complete vs the Java GS behavior).
@@ -181,6 +222,11 @@ model, 4-level specificity), **story-script VM port**
 `ScriptFunctionRegistry` with the retail function set; fate patching is
 M6 — it runs at unpack time in the reference, verified).
 
+**Ruled 2026-10-29:** the scope above is to be **maintained, not extended**.
+Nothing may be added to M5 on the basis that it "sounds like" a PS1 engine
+feature; anything not traceable to the cited research gets listed in §5 as an
+open question needing its own specification decision.
+
 **Prerequisites:** M4 (VM + content need rendering to be observable; audio
 is independent), G3.
 **Deliverables:** timing-verified sim loop (no rendering content yet — a
@@ -206,7 +252,9 @@ VM executing a retail script (log-driven, no visual yet).
 ## Milestone 6 — Asset Pipeline
 
 > **Landed early** (the user's "Milestone 3" brief, resource management and PSX
-> data integration): resource **discovery, ownership and validation** over an
+> data integration — this is the scope that "Milestone 3" names in reports and
+> in `docs/reports/milestone-3-resource-management.md`, **not** the numbered
+> Milestone 3 above): resource **discovery, ownership and validation** over an
 > extracted tree (`lod::res`, architecture/resource-management.md) and the
 > `psx::bpe`, `psx::archive` (MRG/DEFF), `psx::tim` (parse/validate only)
 > decoders, plus a CLI inspect/validate mode. Not landed from this milestone:
@@ -541,6 +589,29 @@ docs alone — the real acceptance test of the docs + APIs).
 ---
 
 ## Cross-Milestone Notes
+
+0. **State of play, measured 2026-10-29** (so the next reader does not inherit
+    a stale claim about what blocks what):
+    - **No renderer has ever been written.** Measured, not remembered: zero
+      references to SDL GPU APIs anywhere in `src/`, `psx/`, `tools/`; no
+      `.metal`/`.hlsl`/`.spv` files; `src/engine/src/` has no render file. M2
+      has had no code at any point. Anything describing M2 or M3 as in progress
+      is wrong, and so is any test that presupposes a GPU device exists.
+    - **Nothing in `psx` or `fate` blocks M2.** The decoders and the fate
+      compiler are testable with no GPU and no SDL. Finishing them first would
+      be effort spent on non-blockers.
+    - **Only Metal is executable on the development machine** — no Vulkan
+      loader, no MoltenVK, no Windows host. Per the 2026-10-29 ruling that is
+      acceptable for the M2 slice. It is *not* acceptable as M3 evidence, which
+      is defined as a cross-backend matrix.
+    - **Open, and needing a decision rather than an assumption:** (a) the
+      M3/M4 shader-artifact route, now that G1 is deferred rather than approved;
+      (b) whether a three-backend matrix remains a hard M3 gate given
+      single-backend hardware, or becomes "Metal verified + CI-defined";
+      (c) whether the plugin SDK keeps frozen-layout `Vec3`/`Quat`/`Mat4` PODs
+      or aliases them to GLM (native-api.md §8) — this is unresolved and is not
+      settled by the GLM decision for the engine, which deliberately excludes
+      `psx` and the plugin ABI.
 
 1. **Native-API & Luau from the start (task §20):** the *designs* are
    finalized (Phase 0 docs); the *registry/event/entry data model* they

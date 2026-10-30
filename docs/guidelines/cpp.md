@@ -211,10 +211,14 @@ util::Logger::Instance().Log(util::LogLevel::Info, "window",
   scope is the point), multi-statement bodies, and function/lambda bodies.
 - **Enforcement:** `.clang-format` sets `RemoveBracesLLVM: true`, so `clang-format`
   removes the braces (§12), and `python3 tools/check_format.py` — CTest entry
-  `repo.format` — fails the suite on drift. On a host without `clang-format`, or with
-  one older than 17 (which cannot see `RemoveBracesLLVM`), that script says so on its
-  first line and runs its own structural scan for this rule instead, so an
-  under-tooled runner reports what it could not verify rather than passing silently.
+  `repo.format` — fails the suite on drift. Where no `clang-format` ≥ 17 exists (older
+  versions cannot see `RemoveBracesLLVM`), that script says so on its first line and exits
+  77, which CTest renders as *skipped*, so an under-tooled runner reports what it could
+  not verify rather than passing silently. There is deliberately **no** hand-written
+  approximation of the rule for that case: a scan that cannot tell a mandatory-brace body
+  from a removable one fails correct code, and the response to that is either to delete
+  braces that were carrying a dangling-else guarantee or to `|| true` the gate. Both
+  outcomes are worse than a visible skip.
 
 ### 6.2 Public data
 

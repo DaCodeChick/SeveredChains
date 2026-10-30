@@ -282,14 +282,24 @@ jobs:
           # if it is at least the pinned minimum, otherwise build it from source.
           # The check is a measurement (brew reports the installed version), not
           # an assumption that CI images and the development machine agree.
-          ver="$(brew list --versions sdl3 2>/dev/null | awk '{print $2}')"
+          #
+          # Every probe here is written to return 0 whatever it finds, and that is
+          # load-bearing. Actions runs this file with errexit on (`bash -e {0}`), and
+          # `brew list --versions <formula>` exits 1 for a formula that is simply not
+          # installed. Verified locally: under `bash -eo pipefail` the bare pipeline
+          # that used to sit on this step's first line aborts the whole step in about
+          # a second, so DEP_MODE was never written and the job died long before it
+          # configured, built or tested anything. A probe reporting "not present" is
+          # an answer, not an error.
+          brew_version_of() { brew list --versions "$1" 2>/dev/null | awk '{print $2}' || true; }
+          ver="$(brew_version_of sdl3)"
           if [ -z "$ver" ]; then
-            brew install sdl3
-            ver="$(brew list --versions sdl3 2>/dev/null | awk '{print $2}')"
+            brew install sdl3 || true
+            ver="$(brew_version_of sdl3)"
           fi
           dep_mode=system
           if [ -z "$ver" ]; then
-            echo "No SDL3 from Homebrew; building from source."
+            echo "No SDL3 from Homebrew (no such formula, or the install failed); building from source."
             dep_mode=source
           elif ! printf '%s\n%s\n' "3.2" "$ver" | sort -V -C; then
             echo "Homebrew SDL3 $ver is older than the pinned minimum 3.2; building from source."
@@ -459,9 +469,15 @@ jobs:
       - name: Formatting gate
         run: |
           set -x
-          # Use a current clang-format when the image has one; otherwise the
-          # script reports that it fell back to its structural brace scan.
+          # The image names its formatters clang-format-16/17/18, so the bare name is
+          # often absent; check_format.py now searches the version-suffixed names too.
+          # Listed here so the log says what the gate actually had to work with.
+          ls -1 /usr/bin/clang-format* /usr/local/bin/clang-format* 2>/dev/null || true
           clang-format --version || true
+          # A non-zero exit is intended to fail the job: 1 means real offenders, 77
+          # means no usable formatter, which on a runner that ships one is a regression
+          # in the harness rather than a pass. It is never allowed to read as green
+          # having checked nothing.
           python3 tools/check_format.py
 
   # ---------------------------------------------------------------------------

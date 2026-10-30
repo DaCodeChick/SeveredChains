@@ -195,8 +195,11 @@ Full rules in **psx-c-api.md**; the summary a contributor needs daily:
     `tools/check_naming.py` audits both grammars (CTest `repo.naming`).
 - **Formatting**: `tools/check_format.py` (CTest `repo.format`) runs `clang-format`
   over every project source — including the C core and the C-only consumer fixture — so
-  `.clang-format` is enforced rather than advisory, and falls back to a structural scan
-  for the single-statement brace rule when no suitable `clang-format` is on the host.
+  `.clang-format` is enforced rather than advisory. Without a suitable `clang-format` (≥ 17)
+  on the host it reports the style rules as **not verified** and exits 77, which CTest
+  shows as *skipped*; it no longer approximates the brace rule with a structural scan, and
+  it discovers version-suffixed tool names (`clang-format-18`) because CI images ship the
+  tool under those names only.
 - Golden-test-first: every module ships byte/sample-exact goldens vs the Java reference
   before the consuming milestone starts (testing.md §2.11, §2.14), and each new format also
   gets pure-C coverage in `psx/tests/c_consumer/main.c` plus an entry in the

@@ -159,8 +159,14 @@ All translucent: `write_mask=false` on depth.
   "absolute VRAM coordinates" stitching model (tpage regions) preserved — the
   native `VramTexture` equivalent. <!-- naming-allow: Java class name cited verbatim -->
 - Mod atlas (512×512 packer) + UI PNGs (PNG decode — SDL3 has `SDL_LoadBMP`/
-surface APIs; PNG decoding is **not** in SDL3 core → use **SDL3_image**,
-the official SDL3 companion, zlib-licensed C — see dependencies.md, G2).
+surface APIs; PNG decoding is **not** in SDL3 core). ~~use **SDL3_image*** —
+**superseded 2026-10-29:** SDL3_image is **not approved as a mandatory
+dependency**. Default to the native path first (UI art authored as PSX-native
+TIM/BPE and decoded through `psx`, which already exists and needs no new
+dependency). If a genuine PNG-only requirement later appears — mod-supplied
+PNGs, or art that cannot be re-authored — raise it as its own decision with the
+concrete asset list that needs it, per dependencies.md G2. Do not add the
+dependency on the strength of this line.
 - Render targets: RGBA8; depth as above.
 - Save-card textures & DABA extraction: port (GPU VRAM upload path identical).
 

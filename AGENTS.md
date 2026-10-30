@@ -199,11 +199,16 @@ Severed Chains' enhancements and modding capabilities.
   would change meaning: a body that is itself a braced-less `if`, a body that declares
   a variable, multi-statement bodies, function/lambda bodies.
 - The formatting gate is **`python3 tools/check_format.py`** (CTest entry `repo.format`):
-  it runs `clang-format --dry-run --Werror` over every project source, and on a host
-  without `clang-format` (or with one older than 17) it prints that it could not run the
-  full gate and falls back to a structural scan of the brace rule above. Like
-  `repo.naming`, it is a host-tool check: skipped with a visible message when the tool is
-  missing, never silently passed.
+  it runs `clang-format --dry-run --Werror` over every project source. On a host with no
+  `clang-format` at least version 17 it prints that the style rules were **not** verified
+  and exits 77, which CTest reports as *skipped* — never as passed, and never as a failure
+  on code `clang-format` itself considers clean. The script also searches the
+  version-suffixed names (`clang-format-18`, …) because that is how the Linux runner
+  images name the tool; probing only the bare name made a fully-tooled runner look
+  untooled. An earlier structural brace scan filled this slot and has been **removed**: it
+  failed 41 lines that `clang-format` 23.1 reports clean, including braced bodies where
+  braces are mandatory. Like `repo.naming`, this is a host-tool check: skipped with a
+  visible message when the tool is missing, never silently passed.
 - Doxygen comment blocks are preserved (no reflow that breaks `@param`/`@return`
   alignment); clang-format's `ReflowComments` stays off.
 - Where hand layout aids readability (e.g. aligned struct fields), prefer
