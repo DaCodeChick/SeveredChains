@@ -56,7 +56,7 @@ Numbered in source order. T = executing thread.
 9. **T=main**: `DEFAULT_FONT = FONTS.get(...)` (250) — font selected by `RETAIL_FONT_CONFIG` (retail TIM font vs modern TTF).
 10. **T=main**: `AUDIO_THREAD.init()` (252) — open OpenAL device (selected from config, else default, else first), create context; start a single-thread scheduler that polls the default device every 2 s; register the two default sources: the **core sequencer** (SSSQ music synthesis) and the **XaPlayer** (Opus). Then apply volume/interpolation/pitch/effects configs from `CONFIG`.
 11. **T=main**: `SPU.init()` (258) — registers the SPU's `GenericSource` (stereo 16-bit at `BASE_SAMPLE_RATE`) on the audio thread.
-12. **T=main**: `RENDERER.init()` (259) — create SDL window (OpenGL 3.3 core, fallback GLES 3.2; min size 320×240; swap interval 0 = no vsync), register window event handlers (resize, mouse, key, input actions), load the five shader families (simple/copy/screen/standard/tmd/battle_tmd), create uniform buffers, post quad, quad/line helpers, double render buffers; register the big `onDraw` handler (see execution model).
+12. **T=main**: `RENDERER.init()` (259) — create SDL window (OpenGL 3.3 core, fallback GLES 3.2; min size 320×240; swap interval 0 = no vsync), register window event handlers (resize, mouse, key, input actions), load the six shader families (simple/copy/standard/tmd/battle_tmd/post-screen — audit F-11), create uniform buffers, post quad, quad/line helpers, double render buffers; register the big `onDraw` handler (see execution model).
 13. **T=main**: `RENDERER.events().onClose(Async::shutdown)` (260).
 14. **T=main**: `GPU.init()` (261) — VRAM textures (1024×512, 15-bit packed + 24-bit), display mesh, display size 320×240, resize hook.
 15. **T=main**: `DISCORD.init()` (262).
@@ -90,6 +90,7 @@ While the render loop runs, the render callback is `GameEngine.loadGfx` (GameEng
 - Plays the intro video `gfx/intro.mp4` via `VideoPlayer.play` with `renderIntro` as its draw callback; on completion sets `cinematicFinished = true` and resets the render callback to `renderIntro`.
 - Registers one-shot loading-screen input handlers: any key (no mods), button, or mouse release → `skip()` (forces the update-check flag, zeroes the animation clock, starts the fades).
 - Window close during loading → `Unpacker.stop()` (raises `UnpackerStoppedRuntimeException` in the unpack thread; the window also closes the loop).
+- **Disc-wait gate** (audit F-09): `Unpacker.unpack` first loops until all **four** disc images are available — per attempt it probes `isos/`, and for any missing disc the loading screen shows a per-disk status prompt (`unpacker.disk_help` + per-disk `unpacker.disk_status`), polling every 1 s (the user may be asked to provide disc 1-4 in turn, e.g. from loose ISO files). `Unpacker.stop()` is checked in this loop, so closing the window aborts it.
 
 `renderIntro` (GameEngine.java:507) draws the loading UI every frame. The **transition gate** is:
 
@@ -100,7 +101,7 @@ cinematicFinished && !unpackerLoading && UPDATE_CHECK_FINISHED  →  transitionT
 `transitionToGame()` (GameEngine.java:389) runs under `INIT_LOCK` (serialized with the unpack thread's final flag write):
 
 1. Deletes loading-screen resources (eye/noslop textures, textured quad) and removes the loading-screen event handlers (resize, key, mouse, button, close).
-2. **`Scus94491BpeSegment.main()`** (605-608) — the ROM entry: `gameInit()` then `preload()`.
+2. **`Scus94491BpeSegment.main()`** (Scus94491BpeSegment.java:599-602) — the ROM entry: `gameInit()` then `preload()`.
 3. `TmdObjLoader.fromModel("Shadow", shadowModel)` + mark shadow model parts persistent; `loadMenuAssets()`; `initTextboxGeometry()`; `battleUiParts.init()`.
 4. **`Audio.startSound()`** — starts the **SFX thread** (60 Hz loop ticking the game sequencer facade + the SPU model; see execution model, audio).
 5. **`bindRendererEvents()`** (Scus94491BpeSegment.java:196-224) — registers: key-press debug hotkey (Ctrl+W in battle), input-action press/release → `currentEngineState.inputActionPressed/Released`, **`RENDERER.setRenderCallback(Scus94491BpeSegment::gameLoop)`** (the game loop becomes the frame callback), and window-close → `stopSound()`, `AUDIO_THREAD.stop()`, JavaFX `Platform.exit()`.
@@ -156,7 +157,7 @@ The game is a single-instance engine-state machine (registry of 7 retail states:
 
 ### Crash-recovery state provenance
 
-`lastSavableEngineState` (EngineStates.java:29) records the last state in which the game could save; the crash handler reconstructs that state type and writes the save through it. `submapScene_80052c38`/`submapCut_80052c30` are copied into the new `GameState52c` before the save, so a crash mid-submap recovers to the current cut/scene. `Verified`.
+`lastSavableEngineState` (EngineStates.java:29) records the last state in which the game could save; the crash handler reconstructs that state type and writes the save through it. The crash handler restores the submap position from the live globals `collidedPrimitiveIndex_80052c38` (→ `GameState52c.submapScene_a4`) and `submapCut_80052c30` (→ `submapCut_a8`), exactly mirroring SMap's own save path (SMap.java:465). Note (audit F-06): the R1 draft mislabeled the first global as "submapScene_80052c38" — no such symbol exists; 0x52c38 is decompiler-named `collidedPrimitiveIndex` but doubles as the live current-scene index (initialized from `submapScene_80052c34` on submap entry, SMap.java:499/509, and used for collision/transition lookups). `Verified`.
 
 ## 8. Thread inventory at steady state
 

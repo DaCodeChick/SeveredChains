@@ -36,7 +36,7 @@ construct (type.constructor_00.get())
 
 - `init()` (EngineState.java:51) resets the SSSQ music state (`sssqResetStuff`) and clears `submapId`. `Verified`.
 - `destroy()` is a no-op in the base; states clean up their own resources.
-- Scene objects created during a state's life are handled by the renderer's deletion protocol: `loadGameStateOverlay` calls `Obj.clearObjList(false)` / `Texture.clearTextureList(false)` (mark non-persistent objects/textures for deletion); actual deletion happens in the next onDraw (`Obj.deleteObjects()`/`Texture.deleteTextures()`, execution model §2 step 9). So state teardown is **deferred by one frame** and coalesced with normal per-frame GC. `Verified`.
+- Scene objects created during a state's life are handled by the renderer's deletion protocol: `loadGameStateOverlay` calls `Obj.clearObjList(false)` / `Texture.clearTextureList(false)`, which **mark** non-persistent objects/textures for deletion (and log a `Leaked: <name>` warning for each — a reference-implementation diagnostic; retail states generally leave their objects to this bulk clear rather than deleting them in `destroy()`). Physical deletion happens at the **end-of-frame fixed point of the same onDraw** — the post-frame bookkeeping step (execution model §2 step 9) runs after that frame's render pass, so marked objects may be rendered once more by the transition frame before they are freed (audit F-03: the R1 draft said "deferred by one frame", which was wrong — the fixed point is within the same frame, after rendering, not in the next onDraw). `Verified`.
 
 ## 3. Transition mechanism
 

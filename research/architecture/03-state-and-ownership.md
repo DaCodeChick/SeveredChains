@@ -54,7 +54,7 @@ Ownership: **main thread only** (same reasoning as GameState52c). The `AtomicInt
 | `RenderEngine` (batches, pools, buffers, camera, debug flags) | main (onDraw) | JavaFX debugger (pause/frame-advance/wireframe/reload flags); `addTask` from any thread | `tasks` deque monitor; flag writes are unsynchronized single booleans (benign in practice — `Inferred`); everything else main-only |
 | `Gpu` (VRAM, z-queues, display buffers) | main (frame tick) | **Async pool threads** (VRAM uploads from load callbacks) | `vramLock` for all VRAM array writes + dirty flag; GL texture upload in `startFrame` (main) |
 | `Gte` | main | — | none (main-only) |
-| `Spu` (model) | **SFX thread** (`Spu.tick`) | main (`keyOn/keyOff` words, volumes, reverb, noise mode) | `synchronized(Spu.class)` in tick; **control writes are unlocked and non-volatile** (data race; works via 64-bit word atomicity — `Verified` declaration, `Inferred` benignity); `spuOutput` buffer owned by SFX thread; `GenericSource` consumption by OPEN_AL thread under the source's own monitor (AudioThread holds source monitor while ticking sources) |
+| `Spu` (model) | **SFX thread** (`Spu.tick`) | main (all control methods) | **every** SPU method (tick and all control: keyOn/keyOff, volumes, reverb, noise, mute) is `synchronized(Spu.class)` — single shared monitor, no data race (audit F-02; R1's "unlocked control writes" was a misread); edge words OR-accumulated by control, consumed and cleared once per tick; `setPlayerVolume` (float) is the only unsynchronized write; `spuOutput` buffer owned by SFX thread; `GenericSource` consumption by OPEN_AL thread under the source's own monitor (AudioThread holds source monitor while ticking sources) |
 | `AudioThread` (device/context/sources list) | **OPEN_AL thread** (run loop) | main (every control method) | `synchronized(this)` for control + run-loop body; per-`AudioSource` monitor (nested inside); `volatile deviceChanged`; `scheduler` (single-thread executor) |
 | Core `Sequencer` (SSSQ synth) | OPEN_AL (tick) | main via `AudioThread` facade (synchronized) | AudioThread monitor + source monitor |
 | Game `Sequencer` facade (BGM state machine) | **SFX thread** (tick) | main (load/start/stop via `AudioThread` synchronized methods) | AudioThread monitor |
@@ -62,7 +62,7 @@ Ownership: **main thread only** (same reasoning as GameState52c). The `AtomicInt
 | `ScriptManager`/VM | main | — | none (main-only); param pool internal |
 | `SaveManager`/campaigns | main | — (async *load* of save files on Async pool; result applied on main) | per-call; `CompletableFuture` handoff |
 | `ConfigCollection` + `Config` | main | — (read on any thread? all observed reads are main) | `Properties` (not thread-safe; main-only in practice — `Inferred`) |
-| `ModManager`/`Registries`/`EventManager` | main | — | `EVENTS.listeners` monitor around postEvent/register/clearStaleRefs; registry mutation windows (M8); thread-local active-mod (main-thread local in practice) |
+| `ModManager`/`Registries`/`EventManager` | main | — | `EVENTS.listeners` monitor around postEvent/register/clearStaleRefs; registry mutation windows (M8); process-wide static "active mod" attribution (ModContainer statics, last-writer-wins; effectively main-thread-only — audit F-04) |
 | `Async` pool | pool | any thread submits | pool internal |
 | `Updater` | main (calls) + HTTP callback thread | — | `synchronized(this)` + `UPDATER_LOCK` for `UPDATE`/`UPDATE_CHECK_FINISHED` |
 | `DISCORD` | main (init/tick/destroy) | SDK internal threads | SDK internal |
@@ -78,7 +78,7 @@ Ownership: **main thread only** (same reasoning as GameState52c). The `AtomicInt
 | One-frame input `pressed` | frame | set in input tick; cleared after onDraw |
 | CLUT-animation uniform buffer | frame | reset at `renderFrame` start; uploaded at end |
 | `RenderEvent` (shared instance) | frame | one static instance posted each frame (no per-frame allocation) |
-| Obj/Texture marked-for-deletion | frame-deferred | marked (state transitions, `deallocateRenderables`, `clearRenderables`); deleted in the *next* onDraw's post-frame step (or immediately on pause toggle) |
+| Obj/Texture marked-for-deletion | frame-deferred | marked (state transitions, `deallocateRenderables`, `clearRenderables`); deleted in the *same* onDraw's post-frame step, after that frame's render pass (or immediately on pause toggle — audit F-03) |
 | Engine state instance | state | construct at frame-top transition; destroy at next transition (before the new one's `init`) |
 | Menu renderables | menu | pooled; group deallocation; `clearRenderables` on transition |
 | `statusText` (loading) | startup | written by unpack thread, read by renderIntro (unsynchronized String — benign: single writer, last-writer-wins display; `Inferred`) |
@@ -92,7 +92,7 @@ These are the ownership/synchronization invariants that observable behavior depe
 1. **Single-writer per service** for all frame-loop services (renderer, GPU, GTE, scripts, engine state, menus, saves, config, registries, events): exactly one thread mutates each; cross-thread contact is through (a) explicit locks on narrow surfaces (VRAM, audio control, SPU model tick), or (b) one-shot handoffs (futures, task queues, flag words).
 2. **Frame-bound deletion**: scene resources are never freed mid-frame; freeing is coalesced to a fixed point after the frame's render decisions.
 3. **Input edge state is one-frame**: "pressed" must not survive past the frame in which it was sampled; held/repeat persist independently.
-4. **State transitions are atomic and frame-top**: no phase observes a half-constructed state; the old state is destroyed before the new one inits; scene teardown is deferred exactly one frame.
+4. **State transitions are atomic and frame-top**: no phase observes a half-constructed state; the old state is destroyed before the new one inits; scene teardown is coalesced to the **end-of-frame fixed point of the same onDraw** (after the frame's render decisions — audit F-03), never mid-frame.
 5. **Audio decoupling**: SFX and music streams run on their own real-time clocks; the game thread communicates with them only via queues and control calls, never by sharing clocks or sample state.
 6. **Event delivery is isolated**: one handler's failure cannot skip other handlers (non-critical) and every delivery is attributable to a mod.
 7. **Config is read-mostly**: entries are registered at boot, written by the options UI (main thread), read everywhere; there is no runtime re-registration.
@@ -103,7 +103,6 @@ These are the ownership/synchronization invariants that observable behavior depe
 
 | Corner | Observation | Assessment |
 |---|---|---|
-| `Spu.keyOn/keyOff` writes | plain `long`, set from main, read under `Spu.class` on SFX | data race; benign on 64-bit JVM (`Inferred`); a reimplementation should keep the *edge-trigger* semantics (level words consumed per tick) whatever the mechanism |
 | `RenderEngine` debug flags (pause/frameAdvance/wireframe/reload) | written from input tick (main) and debugger (JavaFX thread for some paths), read in onDraw | unsynchronized booleans; single-consumer in practice (`Inferred` benign) |
 | `statusText` | String written by unpack thread, read by render thread | single-writer, display-only (`Inferred` benign) |
 | `Config.properties` | unsynchronized `Properties`, main-only in observed use | `Inferred` safe; would need a lock if I/O callbacks ever read it |

@@ -99,7 +99,7 @@ Cross-thread initialization handshakes: `INIT_LOCK` (unpack thread ↔ transitio
 | Unpack failure | startup | loading screen stuck with status (no recovery path in-app) |
 | `UnpackerStoppedRuntimeException` | startup | clean abort (user closed the window) |
 | Audio init failure | runtime | park + retry loop (device reinit), game continues without sound |
-| `NotImplementedException` | scripts | native calls that retail never implemented (e.g., `FUN_8001c5fc`); surfaced as a script error (M3) |
+| `NotImplementedException` | scripts | native calls that retail never implemented (e.g., the `ScriptReadable` default read, `scriptReadRegistryEntryVar`); note: `FUN_8001c5fc` throws a plain `RuntimeException("Not implemented")`, not `NotImplementedException` (audit F-08); surfaced as a script error (M3) |
 | GL context failure | startup | OpenGL → GLES fallback → crash |
 | `RuntimeException` with message checks | game code | decompiled assertion style (e.g., `loadMcq` throws on invalid MCQ header; `scriptSetGlobalFlag1` throws "Are there more flags?") — these are *original* error paths preserved from the ROM |
 

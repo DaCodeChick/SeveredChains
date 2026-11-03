@@ -38,7 +38,7 @@ The layer assignment is evidence-based: where the reference's code carries origi
 |---|---|---|
 | GTE register file and per-operation semantics (MV transforms: rotations, scaling, transfers, normalizing, projections, OTZ) | 1 / **2** | `legend.core.gte.Gte` + `MV` — a float re-implementation of the PSX GTE. Float-vs-fixedpoint divergence is the central M4 question (register Q-20). |
 | `rsin`/`rcos` (signed sine/cosine scaled by 0x1000, PSX degree input) | 1 / **2** | `Scus94491BpeSegment.rsin/rcos` (`@Method` — ROM code) with `MathHelper.psxDegToRad`; the 0x1000 scale and "always positive" quirk are PSX-fixed conventions LoD uses. |
-| `simpleRand` (vsync-seeded LCG ×9 + 0x3711, >>1 & 0xffff) and `rand`/`srand` (×0x41c64e6d + 0x3039, >>>16 & 0x7fff) | 3 | ROM math helpers (`@Method`); behavior-significant for animation/determinism (M3/M9). |
+| `simpleRand` (vsync-seeded LCG ×9 + 0x3711, `/ 2` & 0xffff) and `rand`/`srand` (×0x41c64e6d + 0x3039, >>>16 & 0x7fff) | 3 | ROM math helpers (`@Method`); behavior-significant for animation/determinism (M3/M9). Operator note: `simpleRand` uses integer division `/ 2` (truncation), not `>> 1` (audit F-10). |
 | Projection plane distance (default 640) and per-state camera (`GsRVIEW2`) | 3 | LoD usage of the GTE projection model. |
 
 ### 2.3 Audio (SPU / XA)
@@ -50,7 +50,7 @@ The layer assignment is evidence-based: where the reference's code carries origi
 | Reverb (shaded-diffusion-style network, 0x4000 work area, per-channel input/output mix, mode selects) | 1 / **2** | `Spu.processReverb`, `Reverb`, `ReverbConfig`. PSX SPU reverb is a documented hardware block; the network constants need M4 cross-check (Q-22). |
 | Noise generation (17-bit LFSR-style per noise-mode, per-tick) | 1 / **2** | `Spu.tickNoiseGenerator`. |
 | XA ADPCM decoding (24-byte header, coefficient/step/zigzag tables, 4-bit samples) | 1 / **2** | `XaAdpcm` (tables visible in source; cross-check pending, Q-23). |
-| 60 ticks/s SPU clock; `SAMPLES_PER_TICK = BASE_SAMPLE_RATE / 60` | 1 (PSX SPU DMA rhythm convention) / **2** (model) | `Spu.SOUND_TPS = 60`; the 60 Hz cadence is a reference modeling choice matching PSX SPU update rates. |
+| 60 ticks/s SPU clock; `SAMPLES_PER_TICK = BASE_SAMPLE_RATE / 60` | 1? / **2** (model) | `Spu.SOUND_TPS = 60`; the 60 Hz cadence is a reference modeling choice matching PSX SPU update rates. Layer-1 attribution is **not established by repo evidence** and needs external PSX documentation (audit F-16; M4). |
 | SSSQ soundfont format, soundbanks, instruments/layers/breathes, BGM command set | 3 | LoD's proprietary sequenced-music format (SSSQ); the *sequencer concept* is PSX-era software, not hardware. M6. |
 | XA→Opus transcoding, Opus playback | 4 | Reference enhancement (PSX XA playback is expensive on modern hosts). |
 | OpenAL device management, 120 Hz source loop, interpolation/pitch/effects quality options | 4 | Reference audio hosting. |
@@ -69,7 +69,7 @@ The layer assignment is evidence-based: where the reference's code carries origi
 
 | Behavior | Layer | Notes |
 |---|---|---|
-| 60 Hz game-time unit (`timestamp_a0`), `vsyncMode`-driven per-state frame rates (30 Hz default, 20 Hz battle, 60 Hz transitions) | 3 | ROM code; LoD's timing structure. |
+| 60 Hz game-time unit (`timestamp_a0`), per-context frame rates (60 Hz submap/wmap/credits/battle-transition, 20 Hz battle, 30 Hz title/game-over/wmap-screens — execution model §5 write-site census) | 3 | ROM code; LoD's timing structure (audit F-01 corrected the R1 "30 Hz default" reading). |
 | Per-state `tickMultiplier` (original per-state frame-rate records) | 3 | Text cadence normalization. |
 | Frame-locked (not fixed-timestep) simulation, software pacing (no vsync), tick skip on slowness | 4 | Reference host pacing. |
 | 60 Hz SPU tick / 120 Hz audio loop (real-time, decoupled) | 4 (cadences) / 1 (the 60 Hz SPU convention) | See §2.3. |
@@ -110,7 +110,7 @@ This list is a *candidate inventory*, not a scope decision: the Rust project may
 ## 4. Boundaries to watch (frequently confused)
 
 1. **"The GPU model" is not "the renderer".** `Gpu` (PSX command-stream model, VRAM, z-queues) coexists with `RenderEngine` (modern GL pipeline, pools, post). LoD objects are drawn by one or the other depending on `legacyMode` and per-object code paths. A compatibility analysis must not conflate them (Q-37).
-2. **The 30 Hz default is LoD, not PSX.** The PSX runs at 60 Hz (NTSC); LoD's `vsyncMode = 2` halves it. Any timing claim must cite `vsyncMode`, never "PSX frame rate".
+2. **The exploration rates are LoD, not PSX.** The PSX runs at 60 Hz (NTSC); LoD's ROM code sets the per-context rates itself — 60 Hz for submap/world map/credits (vsyncMode 1), 30 Hz for title/game over/wmap screens (vsyncMode 2), 20 Hz for battle (vsyncMode 3). Any timing claim must cite the specific `vsyncMode` write site, never "PSX frame rate" or a blanket "30 Hz" (audit F-01).
 3. **The SPU model is tick-driven (60 Hz), not DMA-driven.** The original SPU is DMA/burst-based; the reference models it as a 60 Hz sample-slot loop. Behaviorally close, architecturally different (M4).
 4. **Music is not SPU audio.** The SPU plays SFX; music comes from the SSSQ sequencer (reference hosting) — the original's music path was hardware-sequenced XA/soundfont-style data. (M6.)
 5. **Fate is not "PSX scripting".** It is LoD's in-game software VM; only its *natives* touch hardware-ish state. (M3.)

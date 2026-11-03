@@ -40,7 +40,7 @@ Consequences:
 
 ## M1 — Platform, Lifecycle, and Execution Model
 
-**Status: COMPLETE (delivered as Phase R1, 2026-11-02).** Delivered documents: `research/platform/01-application-lifecycle.md`, `research/platform/02-execution-model.md` (absorbed the plan's "game loop and phases" + "timing and threads" + "input and platform" topics), `research/platform/04-engine-states.md`, `research/platform/05-input-and-platform.md`. Register updates closed Q-01, Q-02, Q-04, Q-05, Q-39; Q-03/Q-06 remain open as noted.
+**Status: COMPLETE (delivered as Phase R1, 2026-11-02).** Delivered documents: `research/platform/01-application-lifecycle.md`, `research/platform/02-execution-model.md` (absorbed the plan's "game loop and phases" + "timing and threads" + "input and platform" topics), `research/platform/04-engine-states.md`, `research/platform/05-input-and-platform.md`. Register updates closed Q-01, Q-02, Q-04, Q-05, Q-39; Q-03/Q-06 remain open as noted. **Amended by the independent xhigh audit (2026-11-02, `research/audits/r0-r1-xhigh-audit.md`):** F-01 added the full per-context `vsyncMode` write-site census to platform/02 §5 (exploration runs 60 Hz, not 30 Hz); F-02 corrected Q-41's closure (no SPU data race exists); F-03/F-04 corrected teardown timing and active-mod attribution in the architecture documents.
 
 **Scope.** Application lifecycle from process start to shutdown; boot ordering; the per-frame game loop and its phases; thread model and ownership; timing model (base rate, frame skip, game-speed multiplier, timestamp semantics); input architecture (actions, bindings, devices, activation modes); window/display management and resize behavior.
 
@@ -286,7 +286,7 @@ Consequences:
 4. How do core mods register retail content, and what does that imply about the boundary between "engine" and "content" for the Rust project (analysis only — no design decisions)?
 5. What are the modding extension points for scripts (Fate libs, replacements, diffs, registry-read/write from scripts, script event hooks)?
 6. What is the i18n override model (locale specificity, file formats, precedence)?
-7. What are the Java-specific mechanisms (URLClassLoader, reflections, thread-local active mod) and what is their *observable* contract vs implementation detail (to inform — not dictate — future design)?
+7. What are the Java-specific mechanisms (URLClassLoader, reflections, process-wide static active mod — audit F-04) and what is their *observable* contract vs implementation detail (to inform — not dictate — future design)?
 
 **Expected documentation.**
 - `research/modding/01-mod-loading.md`

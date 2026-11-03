@@ -6,7 +6,7 @@ This document describes *how a frame happens*: the platform loop, the frame-driv
 
 ## 1. The platform loop (frame driver)
 
-`RenderEngine.run()` (RenderEngine.java:1229) does `window.show()` and then `PLATFORM.run()`. The actual loop is `PlatformManager.run()` (PlatformManager.java:74-99):
+`RenderEngine.run()` (RenderEngine.java:1229) does `window.show()` and then `PLATFORM.run()`; the loop call is wrapped in try/catch — if the loop throws, the window is closed and the exception propagates to the top-level crash handler (audit F-14). The actual loop is `PlatformManager.run()` (PlatformManager.java:74-99):
 
 ```
 running = true
@@ -16,14 +16,14 @@ while (running):
     for each action (registration order):
         action.tick()                      // runs the action if its timer is due
         track the action with the earliest next-run time
-    sleep(max(0, nextAction.nanosUntilNextRun()))   // µs-granularity (DebugHelper.sleep)
+    sleep(max(0, nextAction.nanosUntilNextRun() / 1e6))   // ms-granularity (DebugHelper.sleep = Thread.sleep; audit F-05)
 ```
 
 **Actions** (Action.java) are fixed-period timers: `nanosPerTick = 1e9 / expectedFps`; `tick()` runs the runnable when `nextRunTime <= now`; if the action is more than two periods late it *skips ahead* (`nextRunTime = now + nanosPerTick`, logged as "running behind, skipping ticks to catch up") rather than running a burst. `Verified`.
 
 Two actions matter:
 
-1. **Input action** — registered in `PlatformManager`'s constructor (`new Action(this::tickInput, 60)`), so it ticks **before** any window render action on every loop iteration (list order). Its rate is updated every frame by the game (see §5).
+1. **Input action** — registered as a `PlatformManager` field initializer (`private final Action input = this.addAction(new Action(this::tickInput, 60))`), so it enters the action list at construction, **before** any window render action (created later in `SdlWindow`'s constructor), and ticks **before** the render action on every loop iteration (list order). Its rate is updated every frame by the game (see §5).
 2. **Render action per window** — created in `SdlWindow`'s constructor (`new Action(this::tick, 60)`); `SdlWindow.setFpsLimit(hz)` reschedules it.
 
 `SdlWindow.tick()` (SdlWindow.java:451-455) is the frame presentation + game frame:
@@ -57,7 +57,7 @@ Executed on the main thread, inside `SdlWindow.tick()`, once per due render acti
      - if `needsSorting`: sort the perspective pool (by model-view depth `m32 + screenspaceOffset.z`, descending, then insertion sequence) and the ortho pool (same depth key, then sequence);
      - `api.initBatch(batch)`; clear depth;
      - **3D opaque pool** (backface culling on) → **2D opaque pool** → **3D translucent pool** → **2D translucent pool**;
-     - per model: transforms are uploaded in 128-entry uniform-block chunks (`transforms2Buffer`/`lightBuffer`); per-model depth comparator, scissor, then per-layer render plus the PSX-style translucency passes (first pass renders the opaque pixels of translucent primitives; second pass renders `HALF_B_PLUS_HALF_F`, `B_PLUS_F`, `B_MINUS_F`, `B_PLUS_QUARTER_F` with backface culling off).
+     - per model: transforms are uploaded in 128-entry uniform-block chunks (`transforms2Buffer`/`lightBuffer`); per-model depth comparator, scissor, then per-layer render plus the PSX-style translucency passes (first pass renders the opaque pixels of translucent primitives; second pass renders `HALF_B_PLUS_HALF_F`, `B_PLUS_F`, `B_MINUS_F`, `B_PLUS_QUARTER_F` with backface culling off). Note: the fourth pass sets the GL blend state to `B_PLUS_F` before rendering `B_PLUS_QUARTER_F` (reference alias or bug — audit F-13, register Q-37). Also: before the main pass, if the current state is Battle, the `battle_tmd` shader is bound with a battle-colour uniform (source comment: "Gross hack bro" — audit F-18).
    - **Post pass**: depth test off, unbind FBO, clear the window, bind the screen (post) shader, configure CRT/scanlines/grille/pixelate/roll/noise/static/aberration/brightness/discolour/warp/vignette/bloom from config, the turn-order UI bounds (from the TurnOrderMod, when present), then draw the post quad (full-window) sampling `renderTextures[renderBufferIndex]`, unbind.
 9. **Post-frame bookkeeping** (if not paused): when `frameSkipIndex == 0` — reset batches, delete marked objects/textures, reset scissor; then advance `frameSkipIndex` (mod speed multiplier) and advance `renderBufferIndex` once every `speedMultiplier` frames when the frame-skip option is on, else every frame; update `vsyncCount += 60.0 * speedMultiplier / fpsLimit` (virtual 60 Hz frame counter, §5); rolling FPS over a window of `fpsLimit` frames (window title in dev builds).
 10. **Shader reload** (debugger) and **`handleMovement()`** (freecam camera; writes into `worldToScreenMatrix` — a game-visible global).
@@ -92,7 +92,7 @@ The decompiled per-frame body, invoked as the render callback. Phase order (sour
 | 19 | `GPU.endFrame()` (192) | GPU model tick: render the ordering-table z-queues (highest z down), present the PSX display (legacy/VRAM modes), flip the display buffer. |
 | 20 | `DISCORD.tick()` (194) | Rich presence frame update. |
 
-Phase order is `Verified` (decompiled source order). The relative ordering of phases 0-19 is original ROM structure (it is the ROM's frame body); phase 20 and the wrapping (render-callback invocation, task flush, post pass, bookkeeping) are reference architecture.
+Phase order is `Verified` (decompiled source order) — all 21 calls (phases 0-20) are statements inside the decompiled `gameLoop` body. The *services* of phases 0-19 are ROM code; phase 20 (`DISCORD.tick`) is a call to a *reference* service placed inside the preserved ROM frame body (the original ROM had no rich presence); the wrapping (render-callback invocation, task flush, post pass, bookkeeping) is reference architecture (audit F-12).
 
 ### Input ordering note (cross-cutting)
 
@@ -112,9 +112,25 @@ Then, after the render action of the same iteration has run (present + onDraw + 
 
 ## 5. Timing model
 
-**Base rate.** `vsyncMode_8007a3b8` (Graphics.java:71, default 1; set to 2 by `gameInit`/`preload`) selects the frame rate: `hz = 60 / vsyncMode * speedMultiplier`. With `vsyncMode = 2` the game runs at **30 Hz**. The ROM changes the rate per state (`Verified` from decompiled assignments): battle sets `vsyncMode = 3` (20 Hz) at battle start (Battle.java:2040, 2361) and back to 2 on battle end (Battle.java:2578); the battle transition uses 1 (60 Hz, SBtld.java:359); title/game-over use 2. Scripts can also write it (game variable 25, `GameVarParam.java:245`). So the fixed base rate is *not* universal — it is per-state, and 30 Hz is the common case (submap/title/world map), not a global constant.
+**Base rate.** `vsyncMode_8007a3b8` (Graphics.java:71, field default 1) selects the frame rate: `hz = 60 / max(1, vsyncMode) * speedMultiplier` (vsyncMode 1 → 60 Hz, 2 → 30 Hz, 3 → 20 Hz). **The rate is per-context, set by decompiled ROM code at many sites** — full census of all 19 non-debug write sites (`Verified`):
 
-**Timestamp.** `GameState52c.timestamp_a0` advances by `vsyncMode` per frame when the state `advancesTime()` (all states do, by default). One timestamp unit = 1/60 s of game time, so at 30 Hz it advances 2 per frame, at 20 Hz 3, at 60 Hz 1. Game logic and scripts use this for time. `Verified`.
+| Rate | Context | Write site(s) |
+|---|---|---|
+| 60 Hz (1) | **Submap exploration** — first tick of the submap's INIT stage | SMap.java:4088 (with `SCRIPTS.setFramesPerTick(2)`, `resizeDisplay(384, 240)`) |
+| 60 Hz (1) | **World map exploration** — at map init; restored after the map screens close | WMap.java:707 (`initWmap`), WMap.java:681 (`restoreMapOnExitMenu_`) |
+| 60 Hz (1) | **Credits** — at credits init | Credits.java:239 |
+| 60 Hz (1) | **Battle transition** (SBtld) | SBtld.java:359 |
+| 20 Hz (3) | **Battle** — at battle start / first frame | Battle.java:2040, 2361 |
+| 30 Hz (2) | **Title, game over** | Ttle.java:285, 609, 652; GameOver.java:145 |
+| 30 Hz (2) | **World map screens / wmap exit** (screens open, transition to another state, quit to title) | WMap.java:1021 (`deallocate`), 797, 830 |
+| 30 Hz (2) | **Every engine-state transition** (forced at the frame-top transition; the entering state's first tick may immediately reassign) | EngineStates.java:56 |
+| 30 Hz (2) | ROM init | Scus94491BpeSegment.java:624 (`gameInit`), 640 (`preload`) |
+| any | **Script-writable** (game variable 25) | GameVarParam.java:245 |
+| any | Debug tool (debugger UI) | DebuggerController.java:293 |
+
+The actual structure: **exploration contexts (submap, world map) and credits run at 60 Hz; battle at 20 Hz; title, game over, and world-map menu screens at 30 Hz**, with the transition-forced 30 Hz as the in-between value. The R1 claim that "30 Hz is the common case (submap/title/world map)" was built from the transition/default sites alone and is wrong (audit F-01). Pacing note: `setFpsLimit` runs at phase 3, *before* the transition (phase 4) and the state's tick (phase 6), so any rate change takes effect from the next frame; the transition's forced 30 Hz value is overwritten in the same frame by the entering state's first tick for SMap/WMap/Credits/SBtld (→ 60 Hz) and battle (→ 20 Hz), and persists for title/game over (→ 30 Hz). Consistency cross-check: `tickMultiplier()` records the original per-state rates — default 2 (`EngineState.java:89`, javadoc: "world map was 20FPS, we multiplied it by 3 to bring it to 60FPS"), WMap → 3 (WMap.java:465), Battle → 1 (Battle.java:704) — and reference rate = original rate × multiplier holds for every state (submap 30×2=60, wmap 20×3=60, battle 20×1=20, credits 30×2=60). The implied *original* rates are `Inferred`; the reference rates above are `Verified` (all write sites are decompiled ROM code).
+
+**Timestamp.** `GameState52c.timestamp_a0` advances by `vsyncMode` per frame when the state `advancesTime()` (all states do, by default) — mechanism `Verified`. One timestamp unit is interpreted as 1/60 s of game time, so at 30 Hz it advances 2 per frame, at 20 Hz 3, at 60 Hz 1, keeping game time real-time at every rate — `Inferred` from the 60 Hz base consistency (no repo evidence conclusively pins the unit). Game logic and scripts use this for time.
 
 **Frame pacing.** Software timers (Action, §1): the input and render actions are rescheduled to `hz` *every frame* from inside `gameLoop` (phase 3). If the machine is slow, actions skip ticks (catch-up) instead of bursting — **game logic runs at most once per presented frame; under sustained slowness the game runs slower than its nominal rate, while the audio threads keep real-time rate** (decoupling → potential long-term desync under load; `Inferred` consequence of the verified mechanisms). There is no vsync and no accumulator: this is "fixed-step-per-frame, variable frame time" — a **frame-locked (not fixed-timestep) simulation**.
 
@@ -131,7 +147,7 @@ Then, after the render action of the same iteration has run (present + onDraw + 
 | SFX (Audio.soundLoop, Audio.java:1543-1575) | 60 Hz (catch-up skip after 3× period) | `SEQUENCER.tick()` (game-level BGM state machine: command stream, fades, volume-over-time) + `SPU.tick()` (24-voice model: per sample slot — edge keyOn/keyOff, noise gen, ADSR, per-voice volume, reverb sum, master volume, clamp → `SAMPLES_PER_TICK` stereo pairs) → `source.bufferOutput` when the OpenAL source can buffer |
 | OPEN_AL (AudioThread.run, AudioThread.java:292-361) | 120 Hz, except a tight loop while the core sequencer can buffer | For each audio source (core sequencer = SSSQ music synthesis; XaPlayer = Opus decode; SPU's GenericSource): `canBuffer`/`tick`/`handleProcessedBuffers` under per-source locks (all inside the AudioThread monitor); device-disconnect check; sleeps to the 120 Hz period only when the sequencer cannot buffer |
 
-Cross-thread synchronization: `synchronized(Spu.class)` in `Spu.tick` (the SFX thread owns the model; the main thread sets `keyOn`/`keyOff` long words **without a lock or volatile** — an observable data race that works in practice on 64-bit JVMs; `Verified` the declaration, `Inferred` the benignity); `synchronized(this)` on AudioThread for all control calls from the main thread; per-`AudioSource` monitors. `Verified`.
+Cross-thread synchronization: **every** SPU control method (`keyOn`, `keyOff`, `clearKeyOn`, main/reverb volumes, reverb mode/config, noise mode/frequency, mute) is `synchronized(Spu.class)` — the same monitor `Spu.tick()` holds on the SFX thread — so there is **no data race** on the control words (audit F-02; the R1 claim of an unlocked write was a misread of the declaration). Edge semantics: control calls OR-accumulate the `keyOn`/`keyOff` level words; `tick()` consumes and clears them once per tick. `setPlayerVolume` (a float) is the only unsynchronized SPU write. `synchronized(this)` on AudioThread for all control calls from the main thread; per-`AudioSource` monitors. `Verified`.
 
 Consequences: SFX (SPU) and music (sequencer) are independent real-time streams; the 60 Hz SPU tick and the 30/20/60 Hz frame rate are **not phase-locked** to the render loop (independent timers). Any coupling between game logic and sound is via queued state (queued sounds started at frame phase 14), not shared clocks. `Verified` for the mechanism; the "no phase lock" statement is a direct consequence (`Verified`).
 
@@ -150,14 +166,14 @@ Which objects are drawn by the PSX command stream versus the modern model pools 
 - **Scheduling constructs**: fixed-period Actions (input, render); `Async` fixed thread pool (file I/O, ad-hoc); audio 120 Hz loop + SFX 60 Hz loop; 2 s device poll; `RenderEngine.addTask` (frame-start queue); Unpacker (startup only, virtual-thread-based — M2).
 - **Event systems** (two, deliberately separate):
   - **WindowEvents** (per window, callback lists under one lock): fired synchronously on the main thread during `tickInput`/`tick` — raw input, resize, focus, draw, close.
-  - **Mod-Loader EventManager**: typed events, listeners discovered by reflection from loaded mods, priority-ordered (descending), per-listener error isolation (non-critical: log + `GameOverlay` notification; critical: `EventHandlerException` crash), thread-local "active mod" attribution during delivery, cancellable events (`shouldPropagate`), stale-binding purge per frame (`clearStaleRefs`, onDraw step 4). `Verified`.
+  - **Mod-Loader EventManager**: typed events, listeners discovered by reflection from loaded mods, priority-ordered (descending), per-listener error isolation (non-critical: log + `GameOverlay` notification; critical: `EventHandlerException` crash), process-wide static "active mod" attribution during delivery (`ModContainer` statics, last-writer-wins; effectively main-thread-only because all delivery happens on the main thread — audit F-04), cancellable events (`shouldPropagate`), stale-binding purge per frame (`clearStaleRefs`, onDraw step 4). `Verified`.
 - **One-frame vs held state**: input `pressed` (one frame, cleared after onDraw) vs `held`/`repeat` (persists until release/focus loss) vs axis values (continuous).
 
 ## 9. Essential vs reference execution-order requirements
 
 **Original (decompiled; must be preserved for behavioral fidelity):**
 - The `gameLoop` phase order (0-19, §3), including: display swap at frame start; timestamp advance before pacing recompute; state transition processing before any other phase; `state.tick()` before `SCRIPTS.tick()` before `postScriptTick`; SPU queued sounds and textboxes after scripts; overlay tick last; `GPU.endFrame` after overlay tick; `tickCount` increment.
-- Per-state `vsyncMode` (20 Hz battle / 30 Hz default / 60 Hz transition) and the 60 Hz timestamp unit.
+- Per-context `vsyncMode` rates (60 Hz submap/wmap/credits/battle-transition / 20 Hz battle / 30 Hz title, game over, wmap screens — §5 write-site census) and the 60 Hz timestamp unit.
 - The PSX double-buffered display model (draw into the buffer not currently displayed).
 - Engine-state transition semantics (queued, applied at frame top, with menu reset and `vsyncMode` re-fix to 2).
 
@@ -169,4 +185,4 @@ Which objects are drawn by the PSX command stream versus the modern model pools 
 
 ## 10. Open items
 
-- Q-36 (turbo/frame-skip intent), Q-37 (render-path faithfulness), Q-38 (which states use LEGACY vs PERSPECTIVE `RenderMode`), Q-06 (per-phase invariants beyond ordering), Q-03/FUN_80020ed8 full semantics (now mostly resolved: values and consumers identified — kept open for the consumer-side effects of `_800bd7b0` in SMap).
+- Q-36 (turbo/frame-skip intent), Q-37 (render-path faithfulness; extended by audit F-13 — the `B_PLUS_QUARTER_F` translucency pass sets the `B_PLUS_F` blend state — and F-18, the battle-colour shader hack), Q-38 (which states use LEGACY vs PERSPECTIVE `RenderMode` — resolved in `04-engine-states.md` §8: only SUBMAP and TITLE), Q-06 (per-phase invariants beyond ordering), Q-03/FUN_80020ed8 full semantics (now mostly resolved: values and consumers identified — kept open for the consumer-side effects of `_800bd7b0` in SMap).
