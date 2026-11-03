@@ -14,7 +14,33 @@ Milestones are research activities, **not** implementation work. No Rust code, c
 
 ---
 
+## Phase Alignment (R1)
+
+The user-defined phase **R1** ("Foundational Architecture and Execution Model") does not map 1:1 to a single plan milestone. Reconciliation, applied before starting R1:
+
+| R1 deliverable | Plan milestone(s) | R1 document |
+|---|---|---|
+| Application lifecycle and initialization | M1 | `research/platform/01-application-lifecycle.md` |
+| Execution model and update ordering (loop, phases, timing, threads, events, input order, audio timing) | M1 | `research/platform/02-execution-model.md` |
+| (supporting) Engine state machine — part of R1 "state transitions" | M1 | `research/platform/04-engine-states.md` |
+| (supporting) Input and platform model — part of R1 "input processing order" | M1 | `research/platform/05-input-and-platform.md` |
+| Runtime subsystem responsibilities | M10 (foundational pass; M10 refines) | `research/architecture/01-runtime-subsystems.md` |
+| Subsystem interactions and dependencies | M10 (foundational pass; M10 refines) | `research/architecture/02-subsystem-interactions.md` |
+| State and resource ownership | M10 (foundational pass; M10 refines) | `research/architecture/03-state-and-ownership.md` |
+| PlayStation compatibility boundaries | M4 (foundational pass; M4's per-subsystem deep dives refine) | `research/psx/01-compatibility-boundaries.md` |
+| Architectural uncertainties and unresolved questions | register | `research/04-unresolved-questions.md` (updated) |
+
+Consequences:
+- R1 absorbs **M1 in full**; M1 is considered complete once the four `research/platform/` documents above exist and meet M1's verification criteria. **M1 is now complete** (R1, 2026-11-02); the consolidated document layout is recorded in the M1 section of this plan.
+- R1 delivers **foundational passes** over two M10 topics (subsystem responsibility/dependency/ownership) and one M4 topic (compatibility boundaries). These R1 documents are boundary-level: they establish *which* behaviors belong to which layer and the ownership map. The M4 milestone (per-subsystem GTE/SPU/XA/GPU deep dives with byte/constant-level classification) and M10 (full synthesis, including what R1's passes do not cover) remain subsequent, separate work — R1 does **not** consume them.
+- M2–M9 are unaffected and unchanged.
+- The M1 exit gate (index update, verification criteria, stop-for-approval) applies to R1's platform documents; the architecture and psx foundational documents follow the same evidence discipline and are tracked in the index as partial completions of their topics.
+
+---
+
 ## M1 — Platform, Lifecycle, and Execution Model
+
+**Status: COMPLETE (delivered as Phase R1, 2026-11-02).** Delivered documents: `research/platform/01-application-lifecycle.md`, `research/platform/02-execution-model.md` (absorbed the plan's "game loop and phases" + "timing and threads" + "input and platform" topics), `research/platform/04-engine-states.md`, `research/platform/05-input-and-platform.md`. Register updates closed Q-01, Q-02, Q-04, Q-05, Q-39; Q-03/Q-06 remain open as noted.
 
 **Scope.** Application lifecycle from process start to shutdown; boot ordering; the per-frame game loop and its phases; thread model and ownership; timing model (base rate, frame skip, game-speed multiplier, timestamp semantics); input architecture (actions, bindings, devices, activation modes); window/display management and resize behavior.
 
@@ -32,11 +58,10 @@ Milestones are research activities, **not** implementation work. No Rust code, c
 7. What happens on window close/resize/shutdown, and how does crash recovery interact with the lifecycle?
 
 **Expected documentation.**
-- `research/platform/01-application-lifecycle.md`
-- `research/platform/02-game-loop-and-phases.md`
-- `research/platform/03-timing-and-threads.md`
-- `research/platform/04-engine-states.md`
-- `research/platform/05-input-and-platform.md`
+- `research/platform/01-application-lifecycle.md` (as planned)
+- `research/platform/02-execution-model.md` (consolidated: the plan's separate "game loop and phases" and "timing and threads" documents were merged into one execution-model document during R1 — the loop, phases, threads, timing, input order, and audio timing are tightly interlocked and a single document avoids duplication)
+- `research/platform/04-engine-states.md` (as planned)
+- `research/platform/05-input-and-platform.md` (as planned)
 
 **Verification criteria.**
 - A single annotated lifecycle diagram (process start → title → gameplay → shutdown) where every arrow is backed by a cited call site.

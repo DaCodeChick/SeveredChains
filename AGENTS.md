@@ -4,13 +4,25 @@ Project: Rust-based reimplementation of the Severed Chains ecosystem for *The Le
 
 ## Current Phase
 
-Phase R0 (research foundation) is in progress. **Research only.** Do not implement engine code, create Rust crates or a Cargo workspace, add dependencies, or make architectural decisions until the research is explicitly approved.
+Phase R1 (foundational architecture and execution model) is in progress. **Research only.** Do not implement engine code, create Rust crates or a Cargo workspace, add dependencies, or make architectural decisions until the research is explicitly approved.
 
 ## Language Rules
 
 - All authored content (documentation, plans, comments, code, reports) must be written in **English**.
 - Never generate Chinese (or any other non-English) text in `AGENTS.md`, plans, documentation, comments, or reports.
-- All generated text files must end with a newline.
+- All generated text files must end with exactly one newline (see "File endings and auditing").
+
+## File endings and auditing
+
+- Every non-empty text file created or modified in this project MUST end with exactly one newline character.
+- Use LF (`\n`) line endings unless an explicitly documented format requirement dictates otherwise.
+- Do not introduce CRLF line endings.
+- Do not add unnecessary blank lines at the end of files.
+- Preserve binary files exactly; never append newlines to binary data.
+- This policy applies to all applicable text files: Rust, Markdown, TOML, JSON, YAML, scripts, configuration files, and generated text.
+- Audit all applicable project text files at the completion of every research or implementation milestone, using the repeatable audit procedure in `scripts/audit_file_endings.py` (detects missing final newlines, excessive trailing blank lines, and CRLF endings; distinguishes text from binary; reports violations without modifying files unless `--fix` is passed).
+- Report any violations found and correct them. When correcting line endings, do not silently rewrite unrelated file content.
+- Reference repositories are excluded from modification: they may be inspected but must remain read-only, and the audit never writes to them.
 
 ## Research Principles
 
