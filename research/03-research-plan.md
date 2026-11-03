@@ -76,6 +76,8 @@ Consequences:
 
 ## M2 — Asset Pipeline and Binary Formats
 
+**Status: COMPLETE (2026-11-02).** Delivered documents: `research/assets/01-iso-and-file-tree.md`, `02-mrg-archive-format.md`, `03-unpacker-pipeline.md`, `04-original-executable-overlay.md`, `05-tmd-model-format.md`, `06-tim-texture-format.md`, `07-animation-format.md`, `08-text-and-i18n-formats.md`, `09-fmv-mdec.md`, plus supplementary `10-music-formats.md` (SSSQ/SSHD/XA/music pipeline). Register updates: Q-08, Q-09, Q-10, Q-12, Q-14 closed; Q-07, Q-11, Q-13 partially closed; Q-23, Q-24, Q-43 closed or advanced; 15 new open items Q-44–Q-58 (all byte-level open items are asset-validated-only or M4 external-cross-check items — see register). All M2 research questions answered except those requiring real disc/asset bytes (explicitly deferred per the plan's constraint and P-02: no disc images were available during M2, so no claim is marked `asset-validated`).
+
 **Scope.** PSX CD/ISO access; the DRGN/MRG file tree (all four discs, root on disc 4, `SECT/DRGN*.BIN` layout, virtual files, sector alignment); the unpacker pipeline (queue, virtual-thread execution, cache versioning); every leaf transformation (decompressor, MRG, DEFF, XA→Opus, MIDI→SSSQ, engine overlay, SMAP assets, LOD engine, and the hardcoded bug-fix patches); the original executable overlay `SCUS_944.91` and embedded assets (shadow, font); runtime file access (`Loader`, `FileData`); and the binary formats themselves: MRG, DEFF, decompression scheme, TIM, TMD/CTMD, ANIM, MCQ, SSSQ, FMV/MDEC, DABAS.BIN.
 
 **Primary reference sources.**
@@ -102,6 +104,7 @@ Consequences:
 - `research/assets/07-animation-format.md`
 - `research/assets/08-text-and-i18n-formats.md`
 - `research/assets/09-fmv-mdec.md`
+- `research/assets/10-music-formats.md` (supplementary: SSSQ/SSHD/XA music pipeline — added during M2 execution; the plan's nine core documents cover SSSQ within T-SSSQ's M6 scope, but the format documentation was completed here where its decoders live)
 
 **Verification criteria.**
 - Each documented format has a byte-level layout table (offset, size, type, endianness, meaning) with source citations for every field.

@@ -4,7 +4,9 @@ Project: Rust-based reimplementation of the Severed Chains ecosystem for *The Le
 
 ## Current Phase
 
-Phase R1 (foundational architecture and execution model) is in progress. **Research only.** Do not implement engine code, create Rust crates or a Cargo workspace, add dependencies, or make architectural decisions until the research is explicitly approved.
+**M2 (Asset Pipeline and Binary Formats) is active.** Completed: **R0** (research foundation — repository inventory, cross-repo map, milestone plan, unresolved-questions register), **R1** (foundational architecture and execution model), and the independent **xhigh audit** (`research/audits/r0-r1-xhigh-audit.md`; all corrections applied in place). M2 deliverables are the nine documents under `research/assets/` as defined in `research/03-research-plan.md`.
+
+**Research only.** Do not implement engine code, create Rust crates or a Cargo workspace, add dependencies, or make architectural decisions until the research is explicitly approved. No game disc images or extracted proprietary assets are available, downloaded, or committed: byte-level format claims rest on the reference decoders' source and must carry a validation category — **source-verified** (behavior established from reference code), **format-corroborated** (independent spec/implementation/test), or **asset-validated** (confirmed against real game bytes; none yet — record in the register instead of claiming it).
 
 ## Language Rules
 
