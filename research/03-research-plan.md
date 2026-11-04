@@ -157,6 +157,8 @@ Consequences:
 
 ## M4 — PSX Hardware Layer: GPU, GTE, SPU, XA, and Compatibility Classification
 
+**Status: IN PROGRESS (started 2026-11-04; approved starting point `ce26ddb`).** Execution discipline: the five deliverables are completed sequentially, each with a durable checkpoint (document written, principal claims verified, affected register items updated, file-ending audit run, committed) before the next begins. `research/psx/01-compatibility-boundaries.md` (R1) is the existing foundational pass that M4 refines per subsystem.
+
 **Scope.** The reference's PSX-facing models and what each preserves of the original hardware: GPU (VRAM dimensions, bpp modes and their width/index parameters, draw area and screen offsets, clear color, ordering table and Z-sort semantics, double-buffered draw targets, data upload paths), GTE (register file, per-operation semantics, float-vs-fixed differences, where rounding occurs), SPU (voice model, ADSR, reverb, key on/off, channel modes, 60 tps tick, volume semantics), XA ADPCM (header, coefficient/step/zigzag tables, resampling), and the cross-cutting **compatibility classification**: for each behavior — hardware-accurate, behaviorally-equivalent, or format-only is required for a faithful reimplementation.
 
 **Primary reference sources.**
