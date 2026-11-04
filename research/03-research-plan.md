@@ -118,6 +118,8 @@ Consequences:
 
 ## M3 — Fate Scripting: Language, Format, Toolchain, Runtime
 
+**Status: COMPLETE (2026-11-03).** Delivered documents: `research/scripting/01-fate-language.md`, `02-fate-binary-format.md`, `03-toolchain.md`, `04-meta-system.md`, `05-runtime-interpreter.md`, `06-native-script-functions.md`. All eight research questions answered; C-01 resolved with the discrepancies preserved (scripting/02 §6: toolchain-only `NOOP(100)`, runtime-unimplemented 5/6/7/11/13/14/15, div/mod-by-0 divergence, error-mode split); five-plus byte-level encoding examples delivered (scripting/02 §9: one observed reference constant + seven derived); round-trip conditions formalized (scripting/02 §8, 03 §10); the patch state machine documented (scripting/03 §8); meta authority resolved — local `patches/meta` is the in-game truth (Q-19); native catalog verified 592/592 against metadata (scripting/06). Register updates: C-01, Q-15, Q-16, Q-18, Q-19, Q-42 closed; Q-17 advanced; new open items Q-59–Q-64 (all asset-validated-pending or external-PSX evidence; remote scmeta content uncheckable offline — Q-62).
+
 **Scope.** The Fate *language* (text syntax, preprocessor/includes, semantics), the *binary format* (encoding, entries, opcodes with parameter layouts, strings, entrypoints, tables), the *toolchain* (decompiler disambiguation and canonical output, compiler/codegen, round-trip stability, patcher diff semantics, meta system), and the *runtime interpreter* (ScriptState lifecycle, storage/registers/flags, call stack, fork/consume, native function calls, frame pacing, script object binding).
 
 **Primary reference sources.**
