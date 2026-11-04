@@ -47,6 +47,33 @@ pinned sources, then reviewed):
   719–735, 792–799, 808–831, 842, 855–863, 867–889, 893–895, 898–899,
   917–939, 941–959, 961–999, 1006–1009, 1014–1019, 1022–1023.
 
+**M3-audit corrections and scope notes (2026-11-04):**
+
+- The 592 slots resolve to **578 unique implementations** — four alias
+  groups register one method under several indices: `Scus94491BpeSegment::
+  scriptRewindAndPause2` @ 135, 137, 162, 163, 321, 324; `Battle::
+  scriptCheckPhysicalHit` @ 480, 484, 485, 486; `Battle::
+  scriptAttachShadowToBottomOfBentModel` @ 515, 520; `Battle::FUN_800d3090`
+  @ 736, 740, 741, 742, 743, 748 (census reproduced by the M3 audit).
+- **44 implemented methods have no `params.csv` row** (empty params column
+  in the tables below); `params.csv` holds 1538 rows naming 534 unique
+  methods (audit census).
+- Four Battle assignments are **commented out in the source** (`//
+  functions[445] = Temp::FUN_800ca734;` @ `Battle.java:880`, 603 @ :988, 617
+  @ :1002, 842 @ :1099) — correctly excluded from the 362-slot Battle census
+  (a naive regex count gives 366; audit finding I-4).
+- **Behavioral-verification scope**: this catalog is *mechanically
+  verified* for all 592 slots at the index/name/ROM/params level. Individual
+  slot behavior was inspected only for a limited sample (M3 spot rows: 0,
+  7, 192, 236, 705, 865, 891, 901, 960, 32; the M3 audit re-verified 10 slots
+  with anchors and read 5 bodies: 7, 192, 236, 865, 891). **Exhaustive
+  per-slot behavioral contracts (full parameter semantics, side effects,
+  flow control) for the 578 unique implementations are deferred to the
+  relevant subsystem research — M9 (gameplay systems) and M4 (timing)
+  where applicable.** That deferral is intentional and does not block M3
+  acceptance (the catalog's metadata-join and dispatch claims are complete
+  as documented).
+
 Dispatch order and stall behavior: doc 05 §6; the union-view semantics of the
 metadata: doc 04 §3.
 
@@ -730,6 +757,7 @@ All 144 slots are base-null.
 | ROM addresses | `@Method` annotations across `legend/**` (8-line window scan); 559/592 covered |
 | Enums | `patches/meta/enums.csv` + per-enum CSVs (doc 04 §4) |
 | Dispatch/stall | doc 05 §6; doc 04 §3 |
+| M3-audit re-verification | `research/audits/m3-xhigh-audit.md` §4.1 (census reproduced: 592 slots / 578 unique implementations / 4 alias groups / 44 methods without params rows / 559 anchored / 10-slot anchor+behavior sample) |
 
 Pins: `Severed-Chains` @ `0c08c679b6b54e167b00851f1f1458d4dea3eade`.
 
@@ -744,3 +772,6 @@ Pins: `Severed-Chains` @ `0c08c679b6b54e167b00851f1f1458d4dea3eade`.
   param metadata exists, so the toolchain fully supports them.
 - Q-63/Q-64 from doc 05 (fork depth, DEALLOCATE82 original semantics) stand
   unchanged.
+- **Per-slot behavioral contracts for all 578 unique implementations** are
+  deferred to M9/M4 subsystem research (see §1, M3-audit scope notes) —
+  tracked there, not in this catalog.

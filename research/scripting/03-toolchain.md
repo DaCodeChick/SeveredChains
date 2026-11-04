@@ -196,10 +196,15 @@ source-verified).
      terminator is found within 300 words at its destination;
    - tables that overrun other labelled data are truncated with a warning and
      the orphaned labels are cleaned up.
-5. **String recovery**: `0xa0ff`-terminated runs of char words become
-   `LodString` entries; a string whose word range crosses a label is split
-   into multiple `str[...<noterm>]` segments (so reassembly reproduces the
-   same bytes).
+5. **String recovery**: `0xa0ff`-terminated runs of char words *identified as
+   strings* become `LodString` entries; identification is
+   metadata/pointer-driven (CALL params typed `string`, pointer-table
+   destinations, inline string destinations — the `StringInfo`/`buildStrings`
+   mechanism), so unreferenced character data stays `data 0x…` words
+   (byte-stable, but with no string rendering). A string whose word range
+   crosses a label is split into multiple `str[...<noterm>]` segments (so
+   reassembly reproduces the same bytes) (source-verified; experimentally
+   confirmed by the M3 audit).
 6. **Out-of-range inline rewrite**: an inline pointer whose destination lies
    past the end of the script is rewritten to `0` with a warning
    ("Pointer at 0x%x destination is past the end of the script, replacing
@@ -255,11 +260,14 @@ full read):
     `OpType` table; unknown → `UnknownOpException`).
 - **Parameters** (the full pattern set, source-verified — every pattern in
   `Tokenizer` lines 35–75):
-  - numbers: `0x…`/decimal; plain immediates only when bits 16–23 are 0,
-    otherwise auto-expanded to `NEXT_IMMEDIATE` (binary-format doc §4.2);
+  - numbers: `0x…`/decimal; plain immediates only when the **high byte
+    (bits 24–31) is 0**, otherwise auto-expanded to `NEXT_IMMEDIATE`
+    (binary-format doc §4.2);
   - operators for compare headers: `<= < == != > >= & !& && ||`
-    (all ten; the translator emits `&&`/`||` for the CMP-only header values
-    8/9 — binary-format doc §6.2);
+    (all ten are **accepted by the tokenizer**; the translator does **not**
+    emit `&&`/`||` — it renders header 8/9 as `Unknown CMP operator N` on
+    all compare ops, making decompiled `cmp &&`/`cmp ||` one-way; see the
+    binary-format doc §6.2 and §8 item 10);
   - `stor[N]`, `stor[stor[stor[A], B], C]`, `stor[stor[A], B + stor[C]]`,
     `var[N]`, `var[N + stor[M]]`, `var[N][stor[M]]`, `var[N + stor[M]][stor[K]]`,
     `var[N + M]`, `var[N][M]`, `var[N + stor[M]][K]`,
@@ -432,11 +440,13 @@ Consequences (source-verified):
   (deterministic, §4), table-length pins (config), branch hints (config),
   and the disassembler's heuristics otherwise. That is why the shipped
   configs exist for the hard scripts.
-- Assembly of the patched text can fail for the one-way param-type reasons in
-  the binary-format doc §8 (e.g. a patch touching a script containing 0x0c/
-  0x0d/0x11/0x17 params, or 0x12/0x15/0x16 anywhere in it) — an observed
-  constraint on what can be patched today (Inferred: no shipped patch touches
-  such scripts, since they would have hit the same wall).
+- Assembly of the patched text can fail for the one-way param-type/header
+  reasons in the binary-format doc §8 (e.g. a patch touching a script
+  containing 0x0c/0x0d/0x11/0x17 or **0x24–0x27** params, 0x12/0x15/0x16
+  anywhere in it, or a compare op with **header 8/9**) — an observed
+  constraint on what can be patched today (verified by the M3 audit: none of
+  the 328 shipped `.diff` files contains any of these spellings — they would
+  have hit the same wall).
 
 ## 9. The standalone CLI (`Shell`)
 
@@ -460,8 +470,13 @@ local cache in `./cache` (doc 04); commands:
   `stripNames`/`stripComments` (the CLI's `d` uses the raw flag values, unlike
   the runtime patcher which forces strip-names + strip-comments).
 - Exit codes: 0 on success, 1 on parse/usage error or missing input.
-- The CLI's own usage footer is cosmetically stale (lists `a`/`s`/`g`/`p`/`u`
-  but not `v`/`s` in the `default` case — a cosmetic inconsistency, source-verified).
+- The CLI's two usage footers are cosmetically stale (source-verified,
+  `Shell.java`): the **no-args** footer (`Shell.java:50`) lists
+  `[v]ersions, [d]ecompile, [c]ompile, [g]enpatch, [a]pplypatch, [u]ndopatch,
+  [s]trip` — where "applypatch" is not a real command (the real alias is
+  `p`/`patch`); the **switch-default** footer (`Shell.java:267`) lists
+  `[v]ersions, [d]ecompile, [c]ompile, [a]ssemble, [g]enpatch, [p]atch,
+  [u]ndopatch` — missing `s`/`strip`.
 
 ## 10. Round-trip and patching guarantees (summary)
 
@@ -469,12 +484,20 @@ Byte-stable round trip (binary → text → binary) holds when:
 
 1. the entrypoint count inference matches the original (or is pinned);
 2. no inline pointer is out of range (the disassembler rewrites those to 0);
-3. no param uses a one-way/throwing type (0x0c, 0x0d, 0x11, 0x17 → reparse
-   failure; 0x12/0x15/0x16 → decompile failure; 0x13 → silently re-emitted as
-   0x09, changing the type byte but not the value);
-4. jump-table lengths are stable (heuristics are deterministic for a fixed
+3. no param uses a one-way/throwing type: 0x0c, 0x0d, 0x11, 0x17 → reparse
+   failure; **0x24–0x27 → reparse failure** (the translator emits the
+   absolute inline forms `stor/var/reg/inl[inl[0xADDR]]` for which the
+   tokenizer has no pattern — label forms only; experimentally confirmed by
+   the M3 audit); 0x12/0x15/0x16 → decompile failure; 0x13 → silently
+   re-emitted as 0x09, changing the type byte but not the value; 0x21 → the
+   registry-ID must contain a colon to reparse;
+4. no compare op (CMP/WAIT_CMP/JMP_CMP and the `_0` families) carries header
+   8/9 (`&&`/`||`) — the translator renders it as `Unknown CMP operator N`
+   even on CMP itself, so the reassembly fails (experimentally confirmed by
+   the M3 audit);
+5. jump-table lengths are stable (heuristics are deterministic for a fixed
    input, but ambiguous scripts need `table_length` pins — shipped configs);
-5. labels are only referenced by name (the tokenizer rebinds all inl offsets
+6. labels are only referenced by name (the tokenizer rebinds all inl offsets
    from the final layout).
 
 Patch guarantees:

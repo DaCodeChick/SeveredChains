@@ -199,8 +199,14 @@ source-verified):
   (source-verified, from the emission order in each case).
 - **`&&` and `||` are not short-circuit.** They lower to a single `CMP` op with
   header operators 8 (`&&`) / 9 (`||`); both operands are evaluated
-  (`visitExpression`, `ANDA/ORA/ANDC/ORC` cases; the `CMP` op's 10 operators are
-  defined in `research/scripting/02-fate-binary-format.md` §6, source-verified).
+  (`visitExpression`, the `ANDC` and `ORC` grammar tokens — `ANDA`/`XORA` are
+  the bitwise `&`/`^` cases that lower to `and`/`xor` ops; the `CMP` op's 10
+  operators are defined in `research/scripting/02-fate-binary-format.md` §6,
+  source-verified). **Round-trip caveat**: the decompiler's translator renders
+  header 8/9 as `Unknown CMP operator N` on *all* compare ops (incl. `CMP`
+  itself), so a decompiled script containing `cmp &&`/`cmp ||` cannot be
+  reassembled — a one-way hazard (experimentally confirmed; see the binary
+  format doc §8 item 10).
 - `!expr` lowers to `cmp ==, <expr>, 0, _expr_n` (not a bitwise NOT), while `~expr`
   lowers to `not _expr_n` after `mov` (source-verified).
 - Multi-value results: a function call used in an expression returns a
@@ -355,7 +361,7 @@ matches no form is an error: `Invalid line "<line>"` (source-verified).
 | Syntax | ParameterType | Encoded as (word(s)) |
 |---|---|---|
 | `0xNNNNNNNN` (value with top byte 0) | `IMMEDIATE` (0x0) | one word = the value |
-| number with bits 16–23 nonzero | `NEXT_IMMEDIATE` (0x1) | descriptor word `0x01000000` + value word |
+| number with the **high byte (bits 24–31)** nonzero | `NEXT_IMMEDIATE` (0x1) | descriptor word `0x01000000` + value word |
 | `stor[N]` | `STORAGE` (0x2) | `0x02_00_00_NN` |
 | `stor[stor[A], B]` (OTHER_STORAGE) | not tokenizable in shipped form | see §4 of the binary-format doc (type 0xd; translator emits the odd `stor[stor[A], B + ...]` form) |
 | `stor[stor[stor[A], B], C]` | `OTHER_OTHER_STORAGE` (0x3) | `0x03_CC_BB_AA` |
@@ -376,11 +382,11 @@ matches no form is an error: `Invalid line "<line>"` (source-verified).
 | `reg[N]` | `REG` (0x20) | `0x20_00_00_NN` |
 | `reg[stor[N]]` | `REG_VAR` (0x23) | `0x23_00_00_NN` |
 | `null` | `REG_NULL` (0x22) | `0x22000000` |
-| `id[package.Class]` | `ID` (0x21) | 1 + (len+3)/4 words: header `0x21_LL_00_00` (L = string length) + packed 4 chars/word, low byte first |
-| `stor[inl[0xA]]`, `stor[inl[0xB], inl[0xA]]` | `STOR_INL` (0x24) | 2 words; word1 low 16 = word offset of stor index, high 16 = word offset of script index (if 2-arg) |
-| `var[inl[0xA]]`, `var[inl[0xB]][inl[0xA]]` | `GAMEVAR_INL` (0x25) | 2 words, same packing |
-| `reg[inl[0xA]]`, `reg[inl[0xB], inl[0xA]]` | `REG_INL` (0x26) | 2 words, same packing |
-| `inl[inl[0xB], inl[0xA]]` | `INLINE_INL` (0x27) | 2 words, same packing |
+| `id[a.b.c]` (ID must contain a **colon** to reparse) | `ID` (0x21) | 1 + (len+3)/4 words: header `0x21_LL_00_00` (L = string length) + packed 4 chars/word, low byte first |
+| `stor[inl[:A]]`, `stor[inl[:S], inl[:A]]` (**label forms only** — the translator emits the absolute forms `stor[inl[0xADDR]]`/`stor[inl[0xA], inl[0xB]]`, which are **not tokenizable**: one-way, binary doc §8) | `STOR_INL` (0x24) | 2 words; word1 low 16 = word offset of stor index, high 16 = word offset of script index (if 2-arg) |
+| `var[inl[:A]]`, `var[inl[:A]][inl[:B]]` (label forms only; same one-way caveat) | `GAMEVAR_INL` (0x25) | 2 words, same packing |
+| `reg[inl[:A]]`, `reg[inl[:S], inl[:A]]` (label forms only; same one-way caveat) | `REG_INL` (0x26) | 2 words, same packing |
+| `inl[:A][inl[:B]]` (label forms only; same one-way caveat) | `INLINE_INL` (0x27) | 2 words, same packing |
 | `pkg::name` (CALL parameter) | `IMMEDIATE` | metadata method index |
 | enum value (CALL parameter whose meta type is an enum class) | `IMMEDIATE` | enum index; unknown value → error (source-verified) |
 
@@ -408,8 +414,14 @@ Notes (source-verified):
   parameter word), and stores the rest (source-verified, `tokenizeLine`/
   `parseParams`).
 - Comparison header tokens: `<=` `<` `==` `!=` `>` `>=` `&` `!&` map to 0–7;
-  `&&` `||` map to 8–9. The last two are only legal for `CMP` (the translator
-  renders header 8/9 on the other ops as `Unknown CMP operator`, source-verified).
+  `&&` `||` map to 8–9. The runtime executes headers 8/9 on **all** compare ops
+  (`scriptCompare` cases 8/9 — integer/float truth tests, both operands
+  evaluated), and the tokenizer accepts them in hand-written text. But the
+  translator's `buildHeaderParam` has no cases 8/9 for *any* compare op — its
+  `default` renders `Unknown CMP operator N` **even for `CMP`** — so a
+  decompiled script containing `cmp &&`/`cmp ||` **cannot be reassembled**
+  (one-way decompile hazard; source-verified and experimentally confirmed by
+  the M3 audit; see `research/scripting/02-fate-binary-format.md` §8 item 10).
 - The `_0` opcodes (4 `wait_cmp`, 12 `mov`, 66 `jmp_cmp`) are **short forms** in
   which the first operand is the constant 0 and is not stored:
   - The translator emits them in full form — `wait_cmp ==, 0x0, ...`,
@@ -535,9 +547,10 @@ These are observations, not facts about the original:
   control flow; scripts that rely on side-effect-free operands are unaffected,
   but a Rust port of the *high-level* language must preserve this to keep
   compiled output compatible (source-verified).
-- The immediate-encoding rule (values with bits 16–23 set must use the
-  two-word `NEXT_IMMEDIATE` form) is a binary-level constraint that leaks into
-  the textual language via the tokenizer (source-verified; binary doc §4.2).
+- The immediate-encoding rule (values with the **high byte (bits 24–31)**
+  set must use the two-word `NEXT_IMMEDIATE` form) is a binary-level
+  constraint that leaks into the textual language via the tokenizer
+  (source-verified; binary doc §4.2).
 
 ## 7. Evidence index (this document)
 

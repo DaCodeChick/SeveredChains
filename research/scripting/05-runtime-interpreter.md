@@ -31,15 +31,18 @@ once with the patch include dirs and patch dir.
 `ScriptManager` holds `scriptStatePtrArr_800bc1c0 = new ScriptState[108]`.
 
 - **Auto allocation** (`allocateScriptState(name, type)` →
-  `findFreeScriptState()`): the scan starts at `upperBound`, which is
-  **reset to 9 at the end of every `tick()`**; it scans `upperBound..107`,
-  then `9..upperBound−1`, and never touches 0–8. So:
+  `findFreeScriptState()`): the method **pre-increments** `upperBound` (wrap
+  ≥108 → 9) then scans `upperBound..107`, then `9..upperBound−1`, and never
+  touches 0–8; `upperBound` is **reset to 9 at the end of every `tick()`**. So:
   - **slots 0–8 are hard-reserved** — `findFreeScriptState` can only return
     9–107;
-  - the per-frame reset makes every allocation take the **lowest free
-    index ≥ 9** — deterministic, low-index-first (this resolves **Q-42**:
-    the `upperBound = 9` line is the reserved-slot/lowest-first mechanism,
-    not a stray constant).
+  - allocation is **round-robin over 9–107 from the last allocation point**;
+    because of the per-tick reset, the **first allocation of a frame starts
+    scanning at slot 10**, and **slot 9 is returned only when slots 10–107
+    are all occupied** (corrected by the M3 audit — the M3 text's
+    "lowest-free-first from slot 9" was inaccurate). This resolves **Q-42**:
+    slots 0–8 are hard-reserved (the scan space is 9–107) and `upperBound` is
+    a round-robin allocation pointer, not a lowest-first mechanism.
 - **Explicit allocation** (`allocateScriptState(index, name, type)`) can place
   a state in any slot, including the reserved ones. Observed explicit users
   (source-verified):
@@ -47,8 +50,10 @@ once with the patch include dirs and patch dir.
     script;
   - index **1** = "Lighting controller" (`Battle.java:6524`);
   - index **5** = "DRGN1.401" (`Battle.java:9308`) — the battle script;
-  - player BENT script slots: `Battle.java:2167` / `4490` use
-    `scriptSlot`/`scriptIndex` values from entity data.
+  - player BENT script slot: `Battle.java:2167` uses entity-data
+    `scriptSlot`/`scriptIndex`; `Battle.java:4490` (the **non-player** BENT
+    branch) instead calls `SCRIPTS.findFreeScriptState()` — auto-allocated
+    (corrected by the M3 audit).
 - Exhaustion → `RuntimeException("Ran out of script states")`.
 - `getState(index)`: `index == -1` → null; otherwise the slot (possibly null).
 - `allocateScriptState` initialization (source-verified):
@@ -234,9 +239,11 @@ ticked = false
 if currentTicks == 0:           # once per framesPerTick render frames
   executeScriptFrame()          # one VM frame for ALL states (0..107 in order)
   ticked = true
-executeScriptTickers(ticked)    # ALWAYS: per-state tick() then tempTick()
+executeScriptTickers(ticked)    # gated: return if paused || stopped;
+                                # then per-state tick() and tempTick() in two
+                                # passes, each for states with hasExecuted() || ticked
 upperBound = 9                  # allocation pointer reset (reserved slots, §2)
-executeScriptRenderers(ticked)  # ALWAYS (only !stopped; paused still renders)
+executeScriptRenderers(ticked)  # gated: return if stopped (paused still renders)
 currentTicks = (currentTicks + 1) % framesPerTick
 ```
 
@@ -374,10 +381,15 @@ corroboration (recorded, not asserted as original):
   Inferred);
 - the null-function stall as an explicit `PAUSE_AND_REWIND` (the original
   presumably just executed the (unimplemented) routine — Unresolved);
-- per-op `@Method(0x…)` ROM addresses (Ghidra labels; consistent with a
-  1:1 port of the decompiled routines, but the port's faithfulness — e.g.
-  exact float handling, the `shr` logical-vs-arithmetic choice in helpers vs
-  ops — is where a Rust port must decide, M4/M9 territory).
+- per-op `@Method(0x…)` ROM addresses on the op bodies (Ghidra labels;
+  consistent with a 1:1 port of the decompiled routines). Precisely **three**
+  dispatched op bodies carry **no** anchor: `scriptPush` (op 101,
+  `ScriptState.java:1430`), `scriptPop` (op 102, :1435) and `scriptCmp`
+  (op 103, :1440) — the CMP-body `scriptCompare` @ 0x8001670c is distinct
+  from the unanchored `scriptCmp`; all other op bodies are anchored
+  (re-verified by the M3 audit). The port's faithfulness — e.g. exact float
+  handling, the `shr` logical-vs-arithmetic choice in helpers vs ops — is
+  where a Rust port must decide (M4/M9 territory).
 
 The VM's observable contract (opcode/param/header layout, storage model,
 fork/consume semantics, flow control) is fully pinned by the source above and
@@ -394,7 +406,7 @@ VM source is not in the reference repositories).
 | Param classes | `Param.java`, `ScriptInlineParam.java` (full), `ScriptTempParam.java`, `ScriptStorageParam.java`, `GameVarParam.java`, `GameVarArrayParam.java`, `ScriptState*RegistryIdParam.java`, `ScriptInlineRegistryIdParam.java` (full reads) |
 | Native dispatch | `ScriptState.scriptExecuteSubFunc` (1218–1232), `Scus94491BpeSegment_8004.getScriptFunction` (190–198), `loadEngineStateFunctions` (200–209) |
 | Cadence | `EngineStates.java:71`, `SMap.java:4089`, `Menus.java:67/101`, `SMap.java:4019/4168..4379`, R1 frame-rate table |
-| Explicit slots | `SMap.java:3263`, `Battle.java:6524/9308/2167/4490`, `ScriptState.java:363` (fork) |
+| Explicit slots | `SMap.java:3263`, `Battle.java:6524/9308/2167`, `Battle.java:4490` (non-player BENT — auto-allocated, corrected by the M3 audit), `ScriptState.java:363` (fork) |
 | Lifecycle events | `ScriptLifecycleEvent.java`, `postLifecycleEvent` call sites |
 
 Pins: `Severed-Chains` @ `0c08c679b6b54e167b00851f1f1458d4dea3eade`.
@@ -402,8 +414,11 @@ Pins: `Severed-Chains` @ `0c08c679b6b54e167b00851f1f1458d4dea3eade`.
 ## 14. Open items
 
 - **Q-42 — closed** (§2): slots 0–8 are reserved (auto-allocation never
-  returns them; explicit allocation owns them); the per-frame
-  `upperBound = 9` reset enforces lowest-free-first allocation from slot 9.
+  returns them; explicit allocation owns them); allocation is round-robin
+  over 9–107 from the last allocation point, and the per-tick
+  `upperBound = 9` reset makes the first allocation of a frame start at
+  slot 10, with slot 9 as the fallback when 10–107 are full (wording
+  corrected by the M3 audit — it is not lowest-free-first).
 - **Q-17 — advanced** (§12): the reference VM's contract is fully pinned;
   original-VM parity remains unverifiable without the PSX binary (the
   `@Method` addresses are the only anchor).

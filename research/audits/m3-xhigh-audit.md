@@ -1,12 +1,15 @@
-# M3 Independent xhigh Audit — CHECKPOINT (remediation pending)
+# M3 Independent xhigh Audit
 
-**Status: CHECKPOINT.** This document preserves the audit findings established
-so far. **Remediation of the M3 documents has NOT yet been applied**; the
-corrections in §3 are the worklist for the final audit pass. The final audit
-commit will follow remediation, register/index/plan/AGENTS sync, and the
-file-ending audit. Per the audit mandate, the exhaustive 592-function
-behavioral analysis is **deferred to the M9 subsystem milestones** (a
-representative sample was behaviorally verified, §4.1).
+**Status: COMPLETE (2026-11-04).** This document was first committed as a
+checkpoint (`a0b3733`) with findings established but unremediated; the
+remediation pass then applied every §3 worklist item in place across
+`research/scripting/01–06`, synchronized the governance files (register,
+index, plan, `AGENTS.md`), and finalized this report (§7). Per the audit
+mandate, the exhaustive 592-function behavioral analysis remains **deferred
+to the M9 subsystem milestones** (a representative sample was behaviorally
+verified, §4.1) — an intentional scope note, not a gap.
+
+**Final gate: PASS** (see §7.5).
 
 - Date: 2026-11-04
 - Audited baseline: `DaCodeChick/SeveredChains` @
@@ -112,7 +115,9 @@ Status: all findings **pending remediation** in the M3 documents (worklist in
   runtime's 57 plus NOOP(100))", gap list "23, 31, 37–39, 45–47, 53–55,
   57–63, 69–71, 75–79, 81, 84–85, 90–95, 100 (runtime only), >103".
   Evidence (mechanical parse of both `OpType.java` enums): runtime = **67**
-  entries, toolchain = **68**; shared opcodes (66) have identical mnemonics;
+  entries, toolchain = **68**; all 67 shared opcodes have identical
+  mnemonics (re-confirmed during remediation — the checkpoint's "(66)" was a
+  transcription slip);
   toolchain-only = {100}; **both tables are also missing opcode 89** (the
   gap list omits it in §6.0 and in the §6.1 closing note). `byOpcode`
   behavior re-verified: runtime throws
@@ -182,9 +187,14 @@ Status: all findings **pending remediation** in the M3 documents (worklist in
 - **L-3 — Doc 02 §9.8 string char codes off by one.** Doc: "H = 0x27, I =
   0x28". Actual (`LodString` charset, verified both directions):
   **H = 0x26, I = 0x27** (0x28 = J). Corrected bytes (experimentally
-  verified): `data str[HI]` → `26 00 27 00` (`0x00270026`) +
-  `ff a0 00 00` (`0x0000a0ff`); `data str[<line>HI]` → `26 00 ff a1`
-  (`0xa1ff0026`) + `27 00 ff a0` (`0xa0ff0027`). Doc 01 §5 charset table
+  verified): `data str[HI]` → `26 00 27 00` (word `0x00270026`) +
+  `ff a0 00 00` (word `0x0000a0ff`); `data str[<line>HI]` → `ff a1 26 00`
+  (word `0x0026a1ff` — code 0xa1ff in the low 16, H in the high 16) +
+  `27 00 ff a0` (word `0xa0ff0027`). (The checkpoint's parenthetical for the
+  `<line>` word was a byte-order transcription slip — the raw assembled bytes
+  and `LodString.fromString` confirm `ff a1 26 00` / `0x0026a1ff`; the code
+  list is the source order [0xa1ff, H, I, 0xa0ff], packed two codes per
+  word.) Doc 01 §5 charset table
   (0x26=H, 0x27=I, 0x28=J) is correct; its control table re-verified in full
   (line 0xa1ff, button 0xa200, multibox 0xa3ff, speed 0xa500|n, pause
   0xa600|n, colour 0xa700|n, var 0xa800|n, xoffset 0xad00|n, yoffset
@@ -295,7 +305,11 @@ Status: all findings **pending remediation** in the M3 documents (worklist in
 - **I-6 — Disassembler out-of-range branch targets are probed gracefully**
   (observed in experiments: "Probing branch 0x48" past EOF, no crash).
 
-## 3. Remediation worklist (for the final pass, not yet applied)
+## 3. Remediation worklist — ALL ITEMS APPLIED (2026-11-04)
+
+Each row below was applied in place during the remediation pass; the M3
+documents now carry the corrected text (most with an inline "corrected by
+the M3 audit" annotation). Dispositions: §7.1.
 
 | doc | change | finding |
 |---|---|---|
@@ -547,7 +561,7 @@ Additional experimental results:
 - `MathHelper` (toolchain): `safeDiv` (I-3), `flEq` (1e-5), PSX-degree
   helpers.
 
-## 5. Updated round-trip hazard master set (for remediation)
+## 5. Updated round-trip hazard master set (as remediated)
 
 Byte-stable round trip (binary → text → binary) holds only when:
 
@@ -563,20 +577,131 @@ Byte-stable round trip (binary → text → binary) holds only when:
 5. jump-table lengths stable (config pins for ambiguous scripts);
 6. labels referenced by name only (tokenizer rebinds from final layout).
 
-## 6. Remaining work (explicit)
+## 6. Remaining work (final state, 2026-11-04)
 
-1. **Remediation** of the M3 documents per the §3 worklist (not started).
-2. **Governance sync**: register (Q-18/Q-60/Q-42/Q-61 wording), README M3
-   findings summary, plan, AGENTS (audit-doc reference).
-3. **Final audit sections** in this document: mark each finding
-   "corrected" with the applied edit; final gate status.
-4. **File-ending audit** (`scripts/audit_file_endings.py`) and **final
-   audit commit** (after remediation; this checkpoint commit precedes it).
-5. **592-slot behavioral contracts**: deferred to M9 subsystem milestones
-   per the checkpoint mandate — catalog remains name/anchor/param-verified
-   (592/592) with the §4.1 spot sample.
+1. **Remediation** of the M3 documents per the §3 worklist — **DONE** (all
+   items applied; dispositions in §7.1).
+2. **Governance sync** — **DONE** (register C-01/Q-18/Q-42/Q-60/Q-61
+   wording, README index + M3 findings summary, plan M3 status, AGENTS
+   current phase).
+3. **Final audit sections** — **DONE** (this §7).
+4. **File-ending audit and final commit** — **DONE** (see §7.4; the final
+   commit records the remediation; this checkpoint commit `a0b3733`
+   precedes it).
+5. **592-slot behavioral contracts** — **deferred to M9 subsystem
+   milestones** (M4 where timing-adjacent) per the mandate — the catalog
+   remains name/anchor/param-verified (592/592) with the §4.1 spot sample;
+   documented as such in `scripting/06` §1 and §7.
 
-**Gate status at checkpoint: CONDITIONAL** — findings established and
-evidenced; corrections not yet applied; the original PSX behavior
-qualification (no asset-validated claims; `@Method` labels as anchors only;
-original-VM parity Unresolved) holds throughout.
+The original PSX behavior qualification (no asset-validated claims; `@Method`
+labels as anchors only; original-VM parity Unresolved) holds throughout.
+
+## 7. Remediation record and final verification
+
+### 7.1 Disposition of every finding (26 total: 2 High, 4 Medium, 14 Low,
+6 Informational)
+
+| finding | disposition | applied in |
+|---|---|---|
+| H-1 (0x24–0x27 one-way) | **Corrected** | 02 §4 rows 0x24–0x27; 02 §8 item 6 table + shortlist; 01 §4 param table (rows 0x21/0x24–0x27); 03 §5 (immediate/operator lines); 03 §8.2 (patch constraint); 03 §10 item 3 |
+| H-2 (CMP header 8/9 one-way) | **Corrected** | 02 §6.1 row 103; 02 §6.2 (intro + rows 6/7/8/9); 02 §8 new item 10 + shortlist; 01 §2.4 (hazard note); 01 §3.3; 03 §5 (operator line); 03 §8.2; 03 §10 new item 4 |
+| M-1 (entry counts / op 89) | **Corrected** | 02 §6.0 (67/68, 89 in gap lists); 02 §6.1 closing note; register C-01; README item 1 |
+| M-2 (allocation round-robin) | **Corrected** | 05 §2; 05 §14; register Q-42; README item 6 |
+| M-3 (SMap ranges) | **Corrected** | 04 §3 (exact 144-slot range set) |
+| M-4 (ticker gating) | **Corrected** | 05 §7.1 (pseudocode gates for tickers and renderers) |
+| L-1 (NEXT_IMMEDIATE bytes) | **Corrected** | 02 §9.6 (`00 00 00 01`) |
+| L-2 (JMP_CMP_0 param order) | **Corrected** | 02 §9.7 (STORAGE then INLINE) |
+| L-3 (H/I char codes) | **Corrected** | 02 §9.8 (0x26/0x27 + corrected byte layout); 01 §5 was already correct |
+| L-4 (bits 16–23 wording) | **Corrected** | 02 §9.6; 01 §4 table + §6 note; 03 §5 (high byte / bits 24–31) |
+| L-5 ("raw bits" → int mirror) | **Corrected** | 02 §6.2 rows 6/7; 02 §6.1 row 48 (sqrt) |
+| L-6 (missing-meta failure path) | **Corrected** | 04 §6 (split: missing dir → uncaught NPE; missing CSV → IOException) |
+| L-7 (CLI footers) | **Corrected** | 03 §9 (exact two-footer wording) |
+| L-8 (Battle.java:4490) | **Corrected** | 05 §2 explicit-slot list; 05 §13 evidence index |
+| L-9 (unanchored op bodies) | **Corrected** | 05 §12 (3 unanchored bodies named: 101/102/103) |
+| L-10 (ANDA/ORA → ANDC/ORC) | **Corrected** | 01 §2.4 |
+| L-11 (catalog: 578 unique / aliases / 44 no-params) | **Corrected** | 06 §1 (M3-audit block), 06 §6 evidence index, 06 §7 open items, README item 7 |
+| L-12 (string-recovery precondition) | **Corrected** | 03 §3.2 item 5 |
+| L-13 (0x15/0x16 width) | **Clarified** | 02 §4 (runtime width 2 annotated; toolchain declares 1) |
+| L-14 (0x21 colon caveat) | **Corrected** | 02 §8 (0x21 row); 01 §4 ID row; 03 §10 item 3 |
+| I-1 – I-6 | **Recorded** (no doc error; retained here as the historical record; I-4 referenced from 06 §1) | — |
+
+Totals: **19 corrected, 1 clarified, 6 informational-recorded** — no finding
+deferred and none left unresolved by remediation.
+
+### 7.2 Final verification coverage (by priority area)
+
+- **C-01 (Priority B)**: independently re-verified — 67/68 entry counts,
+  all 67 shared opcodes with identical mnemonics, toolchain-only {100},
+  op-89 gap in both tables, `byOpcode` throw-vs-null split. The C-01
+  resolution (drift, discrepancies preserved) stands; the reconciliation is
+  now count-correct (register C-01, README item 1).
+- **Encoding examples (Priority C)**: all eight classified — 9.1
+  source-verified (reference constant); 9.2–9.5 **experimentally
+  byte-verified**; 9.6/9.7/9.8 **corrected and experimentally verified**
+  (incl. byte-identical reassembly round trips for exp1 and exp2). The
+  source-derived / tested / asset-validated distinction is preserved in
+  `scripting/02` §9's intro; no retail-asset validation exists (none
+  available).
+- **Interpreter/timing (Priority D)**: `executeFrame`, `tick`,
+  `executeScriptFrame`/`Tickers`/`Renderers`, allocation, fork/consume/
+  deallocate, dump, cadence — all verified; mechanism corrections M-2 and
+  M-4 applied in 05 §2/§7.1/§14.
+- **Native catalog (Priority A)**: census reproduced exactly (592 =
+  86+362+144; 592/592 names; 559 anchored; 432 unimplemented; 0
+  unimplemented with params rows); new facts documented (578 unique
+  implementations, 4 alias groups, 44 methods without params rows, 4
+  commented-out Battle assignments); 10-slot anchor spot check plus 5
+  behavioral body reads this audit. Exhaustive behavioral contracts:
+  **deferred to M9/M4** (§7.3).
+- **Toolchain/meta (Priority E)**: Patcher, Shell, Meta/MetaManager,
+  ScriptPatcher, FateCompilerVisitor, LodString verified in full; doc 03/04
+  corrections applied (L-6, L-7, L-12 plus the H-1/H-2 extensions).
+
+### 7.3 Native-function coverage limitation (explicit)
+
+- **Mechanically verified for all 592 slots**: index, name (joined to
+  `descriptions.csv`), ROM anchor, params (joined to `params.csv`),
+  alias/implementation identity (578 unique).
+- **Behaviorally inspected**: a limited sample (M3 spot rows 0/7/192/236/
+  705/865/891/901/960/32; the audit re-verified 10 slots with anchors and
+  read 5 bodies: 7, 192, 236, 865, 891).
+- **Deferred**: full per-slot behavioral contracts for the 578 unique
+  implementations → M9 subsystem research (M4 where timing-adjacent).
+  Recorded in `scripting/06` §1 and §7. Not a blocker for M3 acceptance —
+  the catalog's dispatch/metadata claims are complete as documented.
+
+### 7.4 Remaining research risks and final checks
+
+1. **Retail-asset validation**: no M3 or audit claim is `asset-validated`;
+   Q-59 (string/control usage), Q-60 (one-way types and high-byte
+   immediates — now incl. 0x24–0x27 and header 8/9), Q-61 (original-VM
+   behavior of unimplemented/absent opcodes — now incl. 89, 100) remain open
+   on asset/external-PSX evidence.
+2. **Original-VM parity** (Q-17 advanced; Q-63, Q-64 open): reference
+   behavior documented; PSX-original parity Unresolved where the reference
+   diverges (div-by-0, DEALLOCATE82, fork depth).
+3. **Remote scmeta content** (Q-62): uncheckable offline; local
+   `patches/meta` is the in-game authority regardless.
+4. **Behavioral depth of the 578 native implementations**: deferred to
+   M9/M4 (§7.3) — M9 must re-verify each function it ports.
+5. **Final checks (2026-11-04)**: all four reference repositories verified
+   clean at pinned revisions (the audit's offline build left only
+   gitignored `build/` artifacts in Script-Recompiler); no engine code,
+   Rust code, or unrelated files touched; `scripts/audit_file_endings.py`
+   run at finalization with zero violations (fixed on first pass only where
+   this audit's own files lacked the final newline).
+
+### 7.5 Final M3 audit gate
+
+**PASS.**
+
+Basis: every actionable finding (2 High, 4 Medium, 14 Low) is remediated in
+place with inline audit annotations; the corrected claims are consistent
+across all six M3 documents, the register, the index, the plan, and
+`AGENTS.md`; the two High findings rest on reproduced experimental failures,
+not just source reading; the binary examples carry explicit
+source-derived / tested / asset-validated classification; the catalog's
+verification depth is explicitly scoped; remaining limitations are
+registered (Q-59–Q-64) and assigned to later milestones (M4/M9 + assets).
+No correction is incomplete, and no M3 claim now contradicts the pinned
+reference sources or the offline toolchain experiments.

@@ -80,7 +80,11 @@ The runtime dispatch (source-verified, `Scus94491BpeSegment_8004.java`):
 - engine states supply override tables: `Battle.getScriptFunctions()` and
   `SMap.getScriptFunctions()` each build a **fresh 1024 array** containing
   only their own slots (Battle: camera/BENT/menu/stage slots including 32–50
-  and 128–178; SMap: exploration slots including 8–20, 32–48, 208–286, …);
+  and 128–178 — full range set re-verified by the M3 audit; SMap: 144
+  exploration slots at exactly **12–15, 18–19, 96–127, 198, 256–271,
+  288–319, 672–703, 768–791, 940** — corrected by the M3 audit; the earlier
+  draft's "8–20, 32–48, 208–286" was wrong, and 32–48 are actually Battle
+  camera slots);
   `EngineState.getScriptFunctions()` defaults to **null** for the other
   states;
 - `loadEngineStateFunctions(state)` installs the state's list (or null) into
@@ -229,7 +233,8 @@ version cannot be established offline (Q-62).
 
 | situation | behavior (source-verified) |
 |---|---|
-| missing local `patches/meta` | `loadMeta("meta")` throws `NoSuchFileException`-style IOException → `ScriptManager` construction fails → game init fails (the directory is shipped, so this is a repo-integrity issue) |
+| missing local `patches/meta` **directory** | `loadMeta("meta")` proceeds down the remote path with a **null base URI** (`ScriptManager` passes `null`) → `getVersions()` throws **`NullPointerException`**, which `meta()`'s catch (`IOException \| CsvException \| NoSuchVersionException`) does **not** catch → `ScriptManager` construction fails (corrected by the M3 audit — the M3 text mischaracterized this as an IOException) |
+| local `meta` dir present but a **CSV file missing** | `loadMeta("meta")` throws `NoSuchFileException` (IOException) → `ScriptManager` construction fails → game init fails (the directory is shipped, so this is a repo-integrity issue) |
 | `params.csv` row for a missing method | simply contributes no params (join by name; absent = zero params) — silent |
 | `descriptions.csv` row with no `params.csv` rows | method with zero params — a `CALL` with params still executes (runtime doesn't check arity; the disassembler warns "Call passed more params than expected" and a commented-out throw remains in the source) |
 | call name not in meta (tokenizer) | `UnknownCallException` (compile-time failure of the assemble) |

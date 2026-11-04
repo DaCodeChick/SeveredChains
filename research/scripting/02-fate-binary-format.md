@@ -114,17 +114,17 @@ both files, full read (source-verified).
 | 0x12 | _12 | 1 | runtime: `throw new RuntimeException("Not implemented")` | none — translator **throws** ("Param type 0x12 not yet supported") |
 | 0x13 | INLINE_3 | 1 | word at `opOffset + (short)word + cmd2` | translator emits plain `inl[0xABS]`, which the tokenizer re-parses as **INLINE_1 (0x09)** — value-stable, **byte-changing** (§8) |
 | 0x14 | INLINE_TABLE_3 | 1 | word at `opOffset + (short)word + W[opOffset + (short)word + cmd2]` | `inl[A][inl[A + N]]` (also `inl[A + inl[A + N]]`) — stable |
-| 0x15 | _15 | 2 | runtime: `W[next][W[next][stor[cmd0]] + cmd1]` (second word = relative base) | none — translator **throws** ("Param type 0x15 not yet supported") |
-| 0x16 | _16 | 2 | runtime: `W[next][cmd0 + stor[cmd1]]` (second word = relative base) | none — translator **throws** ("Param type 0x16 not yet supported") |
+| 0x15 | _15 | 2 (runtime) | runtime: `W[next][W[next][stor[cmd0]] + cmd1]` (second word = relative base) | none — translator **throws** ("Param type 0x15 not yet supported"). Note: toolchain `ParameterType` declares width **1** (it would orphan the base word) — unobservable in practice since the translator throws first |
+| 0x16 | _16 | 2 (runtime) | runtime: `W[next][cmd0 + stor[cmd1]]` (second word = relative base) | none — translator **throws** ("Param type 0x16 not yet supported"). Note: toolchain `ParameterType` declares width **1** — unobservable in practice since the translator throws first |
 | 0x17 | INLINE_TABLE_4 | 2 | runtime: `W[next][W[next][cmd0] + cmd1]` (second word = relative base) | translator emits `inl[A[A[B] + C]]` — **no tokenizer pattern: one-way** (§8) |
 | 0x20 | REG | 1 | registry-ID slot `reg[cmd0]` of this state | `reg[N]` |
 | 0x21 | ID | 1 + (len+3)/4 | registry **string ID**: word 0 = `0x21_00_LL_00` where **LL = char count in byte 2** (`id.length() << 16`); subsequent words hold 4 ASCII chars each, char *i* in byte *i* mod 4 (low byte first); the string is read lazily at `getRegistryId()` time | `id[any.string.with.colon]` (pattern `.*?:.*?`) |
 | 0x22 | REG_NULL | 1 | null registry-ID parameter | `null` |
 | 0x23 | REG_VAR | 1 | registry-ID slot `reg[stor[cmd0]]` | `reg[stor[N]]` |
-| 0x24 | STOR_INL | 2 | descriptor + packed word: `storIndex = W[packed & 0xffff]` (a **word offset** whose *contents* are the stor index); if `cmd0 == 2`: `scriptIndex = W[packed >>> 16]` (contents = script-state index) → other state's storage | `stor[inl[:storLabel]]` / `stor[inl[:scriptLabel], inl[:storLabel]]` |
-| 0x25 | GAMEVAR_INL | 2 | `varIndex = W[packed & 0xffff]`; if `cmd0 == 2`: `arrIndex = W[packed >>> 16]` → `var[varIndex][arrIndex]`, else `var[varIndex]` | `var[inl[:varLabel]]` / `var[inl[:varLabel]][inl[:arrLabel]]` |
-| 0x26 | REG_INL | 2 | `regIndex = W[packed & 0xffff]`; if `cmd0 == 2`: `scriptIndex = W[packed >>> 16]` → other state's registry slot | `reg[inl[:regLabel]]` / `reg[inl[:scriptLabel], inl[:regLabel]]` |
-| 0x27 | INLINE_INL | 2 | `offset = packed & 0xffff` (used directly, word offset); `index = W[packed >>> 16]`; result = word at `offset + index` | `inl[:baseLabel][inl[:indexLabel]]` |
+| 0x24 | STOR_INL | 2 | descriptor + packed word: `storIndex = W[packed & 0xffff]` (a **word offset** whose *contents* are the stor index); if `cmd0 == 2`: `scriptIndex = W[packed >>> 16]` (contents = script-state index) → other state's storage | tokenizer accepts **label forms only** — `stor[inl[:storLabel]]` / `stor[inl[:scriptLabel], inl[:storLabel]]`; the **translator** emits the absolute form `stor[inl[0xADDR]]` (and 2-word `stor[inl[0xA], inl[0xB]]`), for which **no tokenizer pattern exists → one-way** (§8) |
+| 0x25 | GAMEVAR_INL | 2 | `varIndex = W[packed & 0xffff]`; if `cmd0 == 2`: `arrIndex = W[packed >>> 16]` → `var[varIndex][arrIndex]`, else `var[varIndex]` | tokenizer: `var[inl[:varLabel]]` / `var[inl[:varLabel]][inl[:arrLabel]]`; translator emits `var[inl[0xADDR]]` / `var[inl[0xA]][inl[0xB]]` — **one-way** (§8) |
+| 0x26 | REG_INL | 2 | `regIndex = W[packed & 0xffff]`; if `cmd0 == 2`: `scriptIndex = W[packed >>> 16]` → other state's registry slot | tokenizer: `reg[inl[:regLabel]]` / `reg[inl[:scriptLabel], inl[:regLabel]]`; translator emits `reg[inl[0xADDR]]` / `reg[inl[0xA], inl[0xB]]` — **one-way** (§8) |
+| 0x27 | INLINE_INL | 2 | `offset = packed & 0xffff` (used directly, word offset); `index = W[packed >>> 16]`; result = word at `offset + index` | tokenizer: `inl[:baseLabel][inl[:indexLabel]]`; translator emits `inl[0xADDR][inl[0xADDR]]` — **one-way** (§8) |
 | other | (fallthrough) | 1 | runtime: "Treated as an immediate if not a valid op" — the consumed word is the value | — |
 
 Notes (source-verified):
@@ -204,17 +204,20 @@ Consequences:
 ### 6.0 The two tables, side by side
 
 Runtime table: `Severed-Chains/src/main/java/legend/game/scripting/OpType.java`
-(57 entries, opcodes 0–103 except the gaps below). Unknown opcode →
+(67 entries, opcodes 0–103 except the gaps below). Unknown opcode →
 `byOpcode` **throws** `RuntimeException("Invalid opcode %#x")`
-(source-verified).
+(source-verified; count re-verified by the M3 audit).
 
 Toolchain table: `Script-Recompiler/src/main/java/org/legendofdragoon/scripting/OpType.java`
-(58 entries = runtime's 57 plus `NOOP(100, "noop")`, which the runtime does not
-have). Unknown opcode → `byOpcode` **returns null** (source-verified).
+(68 entries = runtime's 67 plus `NOOP(100, "noop")`, which the runtime does
+not have). Unknown opcode → `byOpcode` **returns null** (source-verified).
 
-Gaps present in **both** tables (no entry at all): 23, 31, 37–39, 45–47, 53–55,
-57–63, 69–71, 75–79, 81, 84–85, 90–95, 100 (runtime only), >103. A word with one
-of these opcodes is "data" to the toolchain disassembler and a hard
+Gaps present in **both** tables (no entry at all): 23, 31, 37–39, 45–47,
+53–55, 57–63, 69–71, 75–79, 81, 84–85, **89**, 90–95, >103; plus 100
+(runtime only — present in the toolchain as `NOOP`). All 67 opcodes present
+in the runtime are present in the toolchain with identical mnemonics
+(re-verified by mechanical parse of both enums, M3 audit). A word with one of
+these opcodes is "data" to the toolchain disassembler and a hard
 `RuntimeException` if the runtime ever executes it (source-verified).
 
 ### 6.1 Per-opcode table
@@ -267,7 +270,7 @@ that matter for a Rust port or for disassembly fidelity.
 | 42 | `div_12_rev` | `div_12_rev` | – | `amount` (in), `operand` (both) | if p1 = 0 → p1 = 0; else p1 = ((p0 << 4) / p1) << 8 | same | none |
 | 43 | `mod` (`MOD43`) | `mod` (`MOD43`) | – | `amount` (in), `operand` (both) | identical to 35 (same method `scriptMod`) | identical | none — duplicate encoding of 35 |
 | 44 | `mod_rev` (`MOD_REV44`) | `mod_rev` (`MOD_REV44`) | – | `amount` (in), `operand` (both) | identical to 36 | identical | none — duplicate encoding of 36 |
-| 48 | `sqrt` | `sqrt` | – | `val` (in), `dest` (out) | p1 = sqrt(p0) (float-aware; `Math.sqrt` on the raw bits) | merge | none. (PSX `sqrt` semantics: Inferred that the original called a float sqrt on the same storage) |
+| 48 | `sqrt` | `sqrt` | – | `val` (in), `dest` (out) | p1 = sqrt(p0) (float-aware; `Math.sqrt` on the **int mirror** of the float storage — corrected by the M3 audit, the earlier "raw bits" wording was wrong) | merge | none. (PSX `sqrt` semantics: Inferred that the original called a float sqrt on the same storage) |
 | 49 | `rand` | `rand` | – | `bound` (in), `dest` (out) | p1 = (p0 * simpleRand()) >>> 16 — **unsigned** 16-bit fold | p1 ∈ [0, bound) range register | none. `simpleRand` seed/sequence is engine state (`simpleRandSeed_8004dd44`, initial 3 — R1 audit noted `/ 2` not `>> 1`; see `research/platform/02-execution-model.md`) |
 | 50 | `sin_12` | `sin_12` | – | `angle` (in), `dest` (out) | p1 = rsin(p0) — ROM rsin (PSX-degree table, 12.8 output) | (short)(sin(rad(p0)) * 0x1000) | the toolchain uses a float approximation of the table; values match the table's documented intent (format-corroborated by the PSX rsin spec: 4096 = 2π, output scaled by 0x1000) |
 | 51 | `cos_12` | `cos_12` | – | `angle` (in), `dest` (out) | p1 = rcos(p0) | as 50 | as 50 |
@@ -294,16 +297,19 @@ that matter for a Rust port or for disassembly fidelity.
 | 100 | — (absent) | `noop` | – | none | **not in the runtime table** → `byOpcode` throws if executed | recognized, no probe | **C-01 discrepancy**: toolchain-only opcode. The runtime would crash on a retail script containing 100; the toolchain can disassemble/assemble it. Whether retail scripts use 100 is Unresolved (register Q-61); if they do, the reference runtime has a latent bug |
 | 101 | `push` | `push` | – | `val` (in) | push p0 onto the state value stack | no probe | none |
 | 102 | `pop` | `pop` | – | `val` (out) | p0 = stack.pop() | no probe | none |
-| 103 | `cmp` | `cmp` | comparator | `left` (in), `right` (in), `out` (out) | out = compare(a,b,op) ? 1 : 0 | no probe | only op that may use header 8/9 (§6.2) |
+| 103 | `cmp` | `cmp` | comparator | `left` (in), `right` (in), `out` (out) | out = compare(a,b,op) ? 1 : 0 | no probe | headers 8/9 (`&&`/`||`): the runtime's `scriptCompare` executes them for **all** compare ops, but the translator renders 8/9 as `Unknown CMP operator` on **all** compare ops incl. CMP itself — one-way decompile hazard (§6.2, §8-10) |
 
 Gaps (no entry in either table): 23, 31, 37–39, 45–47, 53–55, 57–63, 69–71,
-75–79, 81, 84–85, 90–95, >103. (Runtime-only gap: 100. Toolchain-only entry:
-100.) Source-verified from both `OpType.java` files (full read).
+75–79, 81, 84–85, **89**, 90–95, >103. (Runtime-only gap: 100. Toolchain-only
+entry: 100.) Source-verified from both `OpType.java` files (full read);
+counts and the 89 gap re-verified by the M3 audit.
 
 ### 6.2 The ten comparison operators (header param)
 
 `ScriptState.scriptCompare` (source-verified; the toolchain's `buildHeaderParam`
-and the tokenizer's operator map agree on 0–7):
+and the tokenizer's operator map agree on 0–7; the translator's `default`
+branch renders 8/9 as `Unknown CMP operator N` on **all** compare ops —
+source-verified):
 
 | op | integer semantics | float semantics (both operands float) | registry-ID semantics |
 |---|---|---|---|
@@ -313,10 +319,10 @@ and the tokenizer's operator map agree on 0–7):
 | 3 `!=` | a != b | ¬flEq | a is not null / !equals |
 | 4 `>` | a > b | a > b ∧ ¬flEq | — (illegal) |
 | 5 `>=` | a ≥ b | a > b \|\| flEq | — (illegal) |
-| 6 `&` | (a & b) ≠ 0 | falls back to integer bitwise on raw bits | — (illegal) |
-| 7 `!&` | (a & b) == 0 | as 6 | — (illegal) |
-| 8 `&&` | a ≠ 0 ∧ b ≠ 0 | as 8 | — (illegal; **CMP only**) |
-| 9 `\|\|` | a ≠ 0 ∨ b ≠ 0 | as 9 | — (illegal; **CMP only**) |
+| 6 `&` | (a & b) ≠ 0 | falls back to integer bitwise on the **int mirror** of the float storage (`Param.get()` = `Math.round` of the float) — not raw float bits | — (illegal) |
+| 7 `!&` | (a & b) == 0 | as 6 (int mirror) | — (illegal) |
+| 8 `&&` | a ≠ 0 ∧ b ≠ 0 | as 8 | — (illegal; runtime executes 8/9 for all compare ops, but the **translator** renders 8/9 on all compare ops incl. CMP itself → one-way decompile hazard, §8-10) |
+| 9 `\|\|` | a ≠ 0 ∨ b ≠ 0 | as 9 | — (illegal; as 8) |
 
 Rules (source-verified):
 - If exactly one operand is a registry-ID param and the other is a plain param
@@ -474,16 +480,18 @@ Conditions under which the toolchain reproduces the input bytes exactly
    | 0x17 INLINE_TABLE_4 | `inl[A[A[B] + C]]` | no matching pattern | **one-way** |
    | 0x13 INLINE_3 | plain `inl[0xABS]` | re-parsed as **0x09 INLINE_1** | value-stable, **byte-changing** (type byte 0x13 → 0x09) |
    | 0x12, 0x15, 0x16 | translator **throws** (`Param type 0x1x not yet supported`) | no pattern | **cannot decompile** at all |
+   | 0x24 STOR_INL / 0x25 GAMEVAR_INL / 0x26 REG_INL / 0x27 INLINE_INL | absolute forms `stor[inl[0xADDR]]`, `var[inl[0xADDR]]`, `reg[inl[0xADDR]]`, `inl[0xADDR][inl[0xADDR]]` (and 2-word variants) | tokenizer `INL_SUBPATTERN` is `inl\[\s*:(\w+)\s*?]` — **label form only**; absolute forms have no pattern → `RuntimeException("Unknown param")` | **one-way** (recompile fails; experimentally confirmed by the M3 audit) |
+   | 0x21 STRINGS (registry-ID params) | `stor["id"]` | re-parses only if the ID contains a **colon** (tokenizer ID pattern `.*?:.*?`) | one-way for colon-less IDs |
 
-   Everything else (0x00–0x0b, 0x0e–0x10, 0x14, 0x20–0x27) has a matching
+   Everything else (0x00–0x0b, 0x0e–0x10, 0x14, 0x20–0x23) has a matching
    tokenizer pattern and is byte-stable. The tokenizer's label-rebinding pass
    additionally **throws** `Need to implement label bindings` for
    INLINE_TABLE_2/INLINE_3/INLINE_TABLE_4 if label-based spellings were ever
    constructed programmatically (source-verified).
    Scripts containing any of these types can still be *loaded and executed*
    (the runtime reads raw bytes); they only break the decompile→recompile
-   patching flow. Whether retail scripts contain any is asset-validated-pending
-   (register Q-60).
+   patching flow. Whether retail scripts contain any (incl. 0x24–0x27) is
+   asset-validated-pending (register Q-60).
 7. **Strings**: strings split across labels are emitted as multiple
    `data str[...<noterm>]` segments; reassembly reconstructs the same words
    (source-verified, `Translator` LodString branch + `LodString.fromString`).
@@ -492,20 +500,38 @@ Conditions under which the toolchain reproduces the input bytes exactly
    differs. `--entrypoint-count` pins it (source-verified).
 9. **Data words**: anything not classified as op/param/table/string is emitted
     as `data 0x…` verbatim (source-verified) — byte-stable by construction.
+10. **Compare-op header 8/9 (`&&`/`||`)**: the translator's `buildHeaderParam`
+    has cases 0–7 for the five compare ops and a `default` that renders
+    `Unknown CMP operator N` — **including on `CMP` itself** — so a script
+    containing `cmp &&`/`cmp ||` (emitted by the high-level compiler for
+    `&&`/`||`/`&&=`/`||=`, executed by the runtime via `scriptCompare` cases
+    8/9) disassembles to `cmp Unknown CMP operator 8, …`, which **fails to
+    reassemble** (`RuntimeException: Unknown param Unknown CMP operator 8`)
+    (source-verified; experimentally confirmed by the M3 audit). Hand-written
+    assembly of `cmp &&, a, b, out` works — the gap is purely in the
+    translator's emission. Whether retail scripts use `&&`/`||` is
+    asset-validated-pending (register Q-60).
 
 Known non-round-trippable inputs, in short: out-of-range inlines (rewritten to
 0), 0x12/0x15/0x16 params (hard failure), 0x0c/0x0d/0x11/0x17 params (one-way —
-recompile fails), 0x13 params (recompiled as 0x09, bytes change), and any
-script whose table-length heuristic is unstable without a config pin.
+recompile fails), 0x24–0x27 params (translator emits absolute inline forms the
+tokenizer cannot reparse — experimentally confirmed), 0x21 IDs without a colon,
+compare-op header 8/9 (`cmp &&`/`cmp ||` — one-way; experimentally confirmed),
+0x13 params (recompiled as 0x09, bytes change), and any script whose
+table-length heuristic is unstable without a config pin.
 
 ## 9. Encoding examples
 
-Per the milestone requirement, concrete instruction encodings. Examples 9.1 is
+Per the milestone requirement, concrete instruction encodings. Example 9.1 is
 reference source data (an 8-byte constant in the reference, **not** a retail
-disc byte stream — labelled source-verified, not asset-validated). Examples 9.2–9.8
-are **derived byte-for-byte from the source-verified encode/decode rules** of §3–§6
-(the tokenizer/assembler/disassembler implementations); they are not claims about
-any specific retail script's bytes.
+disc byte stream — labelled source-verified, not asset-validated). Examples
+9.2–9.8 are **derived byte-for-byte from the source-verified encode/decode
+rules** of §3–§6 (the tokenizer/assembler/disassembler implementations); they
+are not claims about any specific retail script's bytes. The M3 audit
+**experimentally verified** examples 9.2–9.5 and the corrected byte layouts of
+9.6–9.8 by assembling synthetic scripts with the reference toolchain (offline
+build; no retail bytes involved) — see `research/audits/m3-xhigh-audit.md`
+§4.3 for the per-example classification.
 
 ### 9.1 `doNothingScript_8004f650` (observed 8-byte constant)
 
@@ -589,16 +615,19 @@ bytes (§6.3).
 
 ### 9.6 Two-word immediate (`NEXT_IMMEDIATE`)
 
-`mov 0x01000005, stor[3]` — the value 0x01000005 has bits 16–23 set (0x01), so
-the tokenizer must use the two-word form (a bare word would be misread as
-`NEXT_IMMEDIATE` descriptor/type space):
+`mov 0x01000005, stor[3]` — the value 0x01000005 has its **high byte
+(bits 24–31) set** (0x01), so it cannot be a plain immediate (the
+`(value & 0xff00_0000) == 0` rule, §4.2); the tokenizer must use the
+two-word form (a bare word would be misread as `NEXT_IMMEDIATE`
+descriptor/type space):
 
 ```
 08 02 00 00    op 0x08 MOV | 2 params | header 0
-01 00 00 00    param 0: NEXT_IMMEDIATE descriptor (type 0x01)
+00 00 00 01    param 0: NEXT_IMMEDIATE descriptor word 0x01000000 (type 0x01 in the high byte)
 05 00 00 01    param 0 continued: value 0x01000005
 03 00 00 02    param 1: STORAGE cmd0=3
 ```
+(Byte layout experimentally verified by the M3 audit.)
 
 Disassembly: `mov 0x1000005, stor[3]` (the disassembler's `NEXT_IMMEDIATE` case
 reads `wordAt(currentOffset + 4)`, source-verified) — stable round trip.
@@ -609,33 +638,40 @@ Assume `:END` is at file byte offset `opAddr + 0x40`:
 
 ```
 42 02 02 00    op 0x42 JMP_CMP_0 | 2 params | header 0x0002 (==)
-10 00 00 09    param 0 (addr): INLINE_1 — word 0x09000010, rel = (0x40)/4 = 0x10 words
-05 00 00 02    param 1 (right): STORAGE cmd0=5
+05 00 00 02    param 0 (right): STORAGE cmd0=5
+10 00 00 09    param 1 (addr): INLINE_1 — word 0x09000010, rel = (0x40)/4 = 0x10 words
 ```
 `jmp_cmp ==, 0x0, stor[5], inl[:LABEL_n] ; operand, left, right, addr`.
 Behavior: if `0 == stor[5]` jump to END, else fall through; always CONTINUE.
+(Parameter order — right operand first, then inline address — experimentally
+verified by the M3 audit; the runtime body `scriptConditionalJump0` compares
+`params_20[0]` and jumps on `params_20[1]`.)
 
 ### 9.8 `data str[HI]` and `data str[<line>HI]` (string encoding)
 
-Char codes: `H` = 0x27, `I` = 0x28, terminator 0xa0ff (language doc §5). Each
-word packs char0 in the low 16 bits and char1 in the high 16 bits.
+Char codes: `H` = 0x26, `I` = 0x27, terminator 0xa0ff (language doc §5;
+codes corrected by the M3 audit — the earlier draft was off by one). The
+code list is packed two codes per word: code 2k in the low 16 bits, code
+2k+1 in the high 16 bits (`LodString.fromString` appends the terminator
+code 0xa0ff as the final code unless `<noterm>` is used).
 
 `data str[HI]` (codes: H, I, term):
 
 ```
-27 00 28 00    word 0: 0x00280027 — char0 = 'H' (0x27), char1 = 'I' (0x28)
+26 00 27 00    word 0: 0x00270026 — code0 = 'H' (0x26), code1 = 'I' (0x27)
 ff a0 00 00    word 1: 0x0000a0ff — terminator
 ```
 
 `data str[<line>HI]` (codes in source order: 0xa1ff, H, I, plus terminator):
 
 ```
-ff a1 27 00    word 0: 0x0027a1ff — char0 = 0xa1ff (<line>), char1 = 'H' (0x27)
-28 00 ff a0    word 1: 0xa0ff0028 — char0 = 'I' (0x28), char1 = 0xa0ff (terminator)
+ff a1 26 00    word 0: 0x0026a1ff — code0 = 0xa1ff (<line>), code1 = 'H' (0x26)
+27 00 ff a0    word 1: 0xa0ff0027 — code2 = 'I' (0x27), code3 = 0xa0ff (terminator)
 ```
 
 Disassembly renders `str[<line>HI]` (the `LodString.CONTROLS` reverse path,
-source-verified).
+source-verified). (Both encodings experimentally verified by the M3 audit,
+including a byte-identical reassembly round trip.)
 
 ## 10. Cross-references and open items
 
