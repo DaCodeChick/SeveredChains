@@ -139,6 +139,10 @@ Format: **Q-##** — question — status — owner (milestone) — notes/evidenc
 
 - **Q-69** — XA decoder duplication and state semantics: (a) `XaAdpcm`'s **static never-reset predictor state** — persists across FMV files (a new FMV's first 28-sample block decodes from the previous FMV's final old/older values; ≤ 28 samples ≈ 0.74 ms at 37.8 kHz); reference bug or intentional continuity; (b) the **uncalled 6→7 zigzag FIR resampler** (×7/6, 37800→44100 arithmetic) and its `//todo handle 18900hz` — the 44.1 kHz FMV path was never wired; (c) **2-bit vs 3-bit filter field** divergence (XA decoders 0–3 vs SPU voice decoder 0–4 with overflow clamp); (d) mono dual-stream FMV XA vs M2's 16-track interleaved music XA — the track-index mapping for FMV files. — `Open` — M4/M6 + external/asset evidence — needs: external PSX XA documentation; retail FMV/music XA byte inspection (asset-validated-pending).
 
+### Added in M4 (M4-05)
+
+- **Q-70** — Original gameplay-RNG seed sources: (a) `srand`'s only game call site is `SMap.java:4091` (`srand((int)System.nanoTime())`) inside a **LAB-labeled (decompiled) submap-load path** — the srand call is decompiled original structure, but its argument is a reference-authored host-clock placeholder; whether the original seeded the RNG at submap load (and with what value) is not preserved by the decompilation; (b) `simpleRand`'s low-12-bit re-seed guard (practically unreachable; reachability from initial seed 3 not established) sources from `RENDERER.getVsyncCount()` — a layer-4 stand-in for the PSX VBLANK counter; (c) consequence: the reference's per-submap `rand()` stream (50 call sites incl. battle accuracy/drops/loot) is non-reproducible across runs, and the reimplementation must choose and document a seed source if determinism is required (Proposed, M9). — `Open` — M9 + external/asset evidence — needs: original-behavior evidence for the submap seed argument; a documented design decision in M9.
+
 ## Research Risks
 
 | ID | Risk | Impact | Likelihood | Mitigation |

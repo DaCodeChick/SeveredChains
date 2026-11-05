@@ -172,6 +172,12 @@ executeFrame():
 - A single frame therefore runs a script until its first pausing/terminal op
   — `while` loops without a pausing op complete within one frame
   (language doc §2.5).
+- Cross-reference (M4): the op bodies of the four built-in numeric ops —
+  `RAND` → `scriptRandom` (0x80016c00), `SIN_12` → `scriptSin`, `COS_12` →
+  `scriptCos` (0x80016c80), `ATAN2_12` → `scriptRatan2` (0x80016cb4) — are
+  opcode-dispatched built-ins outside this milestone's 592-slot catalog; their
+  formulas (notably Fate `rand(X) = X × simpleRand() >>> 16`) are documented
+  in M4-05 §2.5 (`research/psx/05-compatibility-classification.md`).
 - The per-instruction `parseParam` is **eager**: script hops
   (`stor[stor[…]]`, 0x24–0x27 forms) are dereferenced at decode time, not at
   op execution (binary-format doc §4).
