@@ -191,6 +191,8 @@ Consequences:
 
 ## M5 — Rendering and Presentation
 
+**Status: IN PROGRESS (started 2026-11-05; approved starting point `244ac07`).** Execution discipline: the four deliverables are completed sequentially, each with a durable checkpoint (document written, principal claims verified, affected register items updated, file-ending audit run, committed) before the next begins; a bounded cross-document reconciliation pass follows the four checkpoints. Builds on M4 (`research/psx/01-gpu-vram-ordering.md` G1–G15 compatibility rows, `02-gte.md` Q-67, `04-xa-adpcm.md` FMV findings) and M2 (TMD/animation/TIM/FMV formats).
+
 **Scope.** RenderEngine architecture (render APIs: OpenGL/OpenGL-ES/Noop; queued-model pools and sorting; batches; shader types: simple/copy/standard/TMD/battle-TMD/screen; cameras; framebuffers; scissor stack); the TMD model pipeline (dedicated vertex processing vs Assimp-converted meshes, model parts, animations, lighting); UI and text (SItem toolkit, message boxes, menu stack, retail TIM font vs modern TTF fonts, text geometry); widescreen/resolution modes and post-processing (CRT/scanlines/grille/pixelate/roll shaders); FMV presentation (MDEC playback + modern mp4 path, rumble).
 
 **Primary reference sources.**
