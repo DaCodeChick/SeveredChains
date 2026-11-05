@@ -193,6 +193,9 @@ Consequences:
 
 **Status: IN PROGRESS (started 2026-11-05; approved starting point `244ac07`).** Execution discipline: the four deliverables are completed sequentially, each with a durable checkpoint (document written, principal claims verified, affected register items updated, file-ending audit run, committed) before the next begins; a bounded cross-document reconciliation pass follows the four checkpoints. Builds on M4 (`research/psx/01-gpu-vram-ordering.md` G1–G15 compatibility rows, `02-gte.md` Q-67, `04-xa-adpcm.md` FMV findings) and M2 (TMD/animation/TIM/FMV formats).
 
+**Checkpoint log.**
+- **M5-01 — `research/rendering/01-render-engine.md` — delivered and committed (2026-11-05).** Plan research question 1 answered (frame render structure: pools/batches/order/sort rules, cited render-order diagram §13; baseline resolution §3/§12); question 6 partially (G1–G15 carry-over table §10 — G6 same-z LIFO carried, Q-66 not re-adjudicated). Register: Q-36 advanced, Q-37 advanced (F-13 resolved, F-18 documented, scope narrowed to the per-object census), Q-71 opened (2D-pool LIFO vs 3D-pool FIFO equal-depth tie-break asymmetry).
+
 **Scope.** RenderEngine architecture (render APIs: OpenGL/OpenGL-ES/Noop; queued-model pools and sorting; batches; shader types: simple/copy/standard/TMD/battle-TMD/screen; cameras; framebuffers; scissor stack); the TMD model pipeline (dedicated vertex processing vs Assimp-converted meshes, model parts, animations, lighting); UI and text (SItem toolkit, message boxes, menu stack, retail TIM font vs modern TTF fonts, text geometry); widescreen/resolution modes and post-processing (CRT/scanlines/grille/pixelate/roll shaders); FMV presentation (MDEC playback + modern mp4 path, rumble).
 
 **Primary reference sources.**
