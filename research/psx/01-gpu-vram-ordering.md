@@ -150,9 +150,9 @@ drawBufferIndex ^= 1;
 
 The TMD legacy path (`tmd/Renderer.java:166-172`) computes per-primitive depth:
 
-```
+```java
 screenZ = quad ? GTE.averageZ4() : GTE.averageZ3();
-z       = (float)Math.min((screenZ + zOffset_1f8003e8) >> zShift_1f8003c4, zMax_1f8003cc);
+z       = Math.min((screenZ + zOffset_1f8003e8) / (1 << zShift_1f8003c4), zMax_1f8003cc);
 if (z < zMin) skip;
 ```
 
