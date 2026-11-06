@@ -1,0 +1,145 @@
+# M5-04 — Post-Processing, Widescreen, and FMV Presentation
+
+Status: Complete (M5, 2026-11-05). Reference: Severed-Chains @ `0c08c679b`, read-only. This document covers the final stage of the modern pipeline (the window-resolution post quad and the `screen.fsh` CRT shader family), the widescreen machinery (coordinate spaces, `widescreenOrthoOffsetX`, the 368/384 width story, the FORCED_4_3/EXPANDED/STRETCHED modes), and the FMV/VideoPlayer presentation (MDEC decode-to-quad at 15 fps, the 2× CD sector cadence, the XA audio hand-off to M4-04, rumble, skip flow, and the mode-state save/restore). It disposes the M4 G4/G13 carry-over rows for the modern path. Format-level facts (IKI/MDEC sector structure, XA geometry) are M2/M4 territory (`research/assets/09`, `research/psx/04`) and are cited, not re-derived. Companion documents: M5-01 (frame structure, pools, presentation latency §2.4), M5-02 (TMD), M5-03 (UI/text, the ×4 depth domain).
+
+Evidence vocabulary: **source-verified** (established from pinned reference source), **experimentally verified**, **format-corroborated**, **asset-validated** (*none exists — no such claim is made*), **Inferred**, **Unresolved**. Layers per `research/psx/01-compatibility-boundaries.md`: (1) PSX platform, (3) LoD-specific, (4) reference-specific. No public documentation was consulted (network-restricted); layer-1 attributions remain `Inferred`/`Unresolved` and travel to the M10 evidence-admission worklist.
+
+## 1. The three coordinate spaces (source-verified)
+
+The modern path has three nested spaces; confusion between them is the root of most widescreen bugs:
+
+1. **Native model space** — the game's authored space: `nativeWidth × nativeHeight` (320×240 default; 384×240 for menus — M5-03 §3.3; 368×240 as the *expanded* submap expectation, §2). All game code (GTE matrices, UI metrics, text layout, FMV letterbox math) works here.
+2. **Render-buffer space** — the FBO drawn into by the batch passes: `renderWidth × renderHeight`, computed in `RenderEngine.onResize` (RenderEngine.java:1254-1280, source-verified):
+   - `Resolution.NATIVE` (default): `renderWidth = windowWidth × (nativeWidth/320)`, `renderHeight = windowHeight` (the window height is the vertical resolution; width scales with the native width — so 384-wide menus render 1.2× the window width at the same height).
+   - Fixed resolutions (`Resolution` enum: ORIGINAL 240, 480, 720, 1080, 1440, 4K 2160, 8K 4320): `renderWidth = res.verticalResolution/height × windowWidth × (nativeWidth/320)`, `renderHeight = res.verticalResolution`.
+   - `renderAspectRatio = renderWidth/renderHeight`, then **`renderHeight = nextMultiple(renderHeight, 240)`** and `renderWidth = round(renderHeight × renderAspectRatio)` — the multiple-of-240 rule (M5-01 §3, load-bearing for 1-px UI scissor windows, M5-03 §7.3). FBO rebuild is deferred (`resizeRenderBuffers = true`, applied at the next frame start — M5-01 §2.2 phase 2).
+3. **Window space** — the window pixel resolution; the post quad and (in legacy modes) the GPU display mesh draw here.
+
+`RENDERER.getRenderAspectRatio()` (RenderEngine.java:391-393) is the render-buffer aspect, used by FMV/VideoPlayer letterbox math and the PERSPECTIVE projection (§2). A script-facing hook exposes `renderAspect/nativeAspect × 0x1000` as a 12.4 value (RenderEngine.java:1477).
+
+## 2. Widescreen: projections and the ortho offset (source-verified)
+
+`RenderBatch.updateProjections` (RenderBatch.java:114-156) builds the two projection matrices per batch and, crucially, the **`widescreenOrthoOffsetX`**:
+
+| Render mode | Config | Ortho projection | `widescreenOrthoOffsetX` |
+|---|---|---|---|
+| `PERSPECTIVE` (true 3D: battle, title, FMV) | `ALLOW_WIDESCREEN_CONFIG` (default **true**, GLOBAL/GRAPHICS, CoreMod.java:115) | `setOrthoLH(0, w × nativeWidth/320, nativeHeight, 0, 0, 1e6)` where `w = nativeHeight × renderAspect` (the window aspect) | `(w − 320)/2` — the 320-wide authored column is centred in the wider field |
+| `PERSPECTIVE` | widescreen off | `setOrthoLH(0, nativeWidth, nativeHeight, 0, 0, 1e6)` with the 320-pinned `aspectRatio` (M5-01 §8) | 0 |
+| `LEGACY` (submap/title pseudo-perspective — H-division in the vertex shader) | `LEGACY_WIDESCREEN_MODE_CONFIG == EXPANDED` | `w = round(nativeHeight × renderAspect) + 1 & ~1` (forced even); perspective-proxy `setOrthoLH(−w/2, w/2, h/2, −h/2, 0, 1e6)`, ortho `0..w × 0..h` | `(w − nativeWidth)/2` |
+| `LEGACY` | `FORCED_4_3` or `STRETCHED` | `setOrthoLH(−nativeWidth/2, nativeWidth/2, nativeHeight/2, −nativeHeight/2, 0, 1e6)`, ortho `0..nativeWidth × 0..nativeHeight` | 0 |
+
+The three `SubmapWidescreenMode` values (SubmapWidescreenMode.java) therefore mean: **EXPANDED** — render the submap into a wider model space (window-aspect-wide, even-rounded; the 368 expectation, see below); **FORCED_4_3** — keep 320×240 model space and letterbox it to a centred 4:3 viewport: `pre()` (RenderEngine.java:1210-1219) computes `expectedWidth = round(renderHeight × nativeWidth/nativeHeight)`, `offset = (renderWidth − expectedWidth)/2`, and sets `viewport(offset, 0, expectedWidth, renderHeight)`; **STRETCHED** — keep 320×240 and let the render buffer (window aspect) stretch it (aspect distortion). The `PERSPECTIVE`-mode ortho expansion (first row) is what lets battle HUD/turn-order content span the full window width, and it is what FMV playback forces on (§4.4).
+
+**Offset application** (source-verified, `RenderBatch.java:237-260`): the `MV` overload of `queueOrthoModel` **adds `widescreenOrthoOffsetX` to the model-view translation automatically** (`setSnappedTranslation(temp.set(mv), mv.transfer.x + offset, …)`); the `Matrix4f` overload carries the in-source note "you have to add widescreenOrthoOffsetX yourself" (callers like `Fmv`/`VideoPlayer` and `queueLine` — RenderEngine.java:1094 — centre themselves in window space instead). `setSnappedTranslation` rounds x/y to integers **only when `SHADER_ENABLE_CRT_CONFIG` is on and `SHADER_PIXELATE_CONFIG != NONE`** (`shouldSnap()`, RenderBatch.java:220-223) — pixel-snapping 2D content so the CRT pixelate grid doesn't shimmer. Consequences: UI/text (M5-03) is auto-centred in wide contexts by the offset; FMV quads are manually centred in the full render space; both compose with the post shader's turn-order bounds (§3.3).
+
+**The 368/384 width story (G4 disposition, M4 row):** the modern path and the GPU model clamp differently (source-verified):
+
+- GPU model: `Gpu.displayMode` clamps **384 → 368** at entry (Gpu.java:368-385) and so does `Gpu.drawingArea` (Gpu.java:402-409). The menu display is set to 384×240 (M5-03 §3.3), so the GPU-model presentation of menus is **368×240** (mode 1) — the `displayTexture`/buffer rebuild (`displaySize`, Gpu.java:387-400) happens at 368.
+- Modern path: no clamp — the render buffer is 384-scaled (§1), the batch renders it, and the post quad shows it (letterboxed/stretched per window aspect). So **mode 0 menus are 384-wide; mode 1 menus are 368-wide** — the two modes are not pixel-identical for menu content (M5-03 §7.3 already notes the `centreX` difference: 384/2+8 = 200 vs 368/2+8 = 192 in the respective model spaces; the visual delta is an M10/asset-validated cross-check item — Q-37).
+- The EXPANDED submap mode's `expectedWidth = 368` (RenderBatch.java:143) is the *independent* modern-path expression of the same 368 constant — the original game's wide submap presentation was 368×240 `Inferred` (the constant appears in both the decompiled GPU clamp and the reference's expanded mode; the layer-1 "why 368" — PSX line-pair/even-width constraint — remains Unresolved, Q-65 item a).
+
+**Mode-1 display presentation** (Gpu.java:141-172): the display mesh is a **4:3 letterboxed** triangle strip in window space (`w = width; h = w/(4/3); if h > height → h = height, w = h×4/3; centred l/t/r/b`) — mode 1 always letterboxes the 4:3 display buffer (320/368×240) inside any window; mode 2 (`drawVram`) shows the whole 1024×512 VRAM (M5-01 §2.2/§3).
+
+## 3. The post pass and the CRT shader family (layer 4)
+
+### 3.1 The pass (source-verified, RenderEngine.java:696-788)
+
+After the batch render into `renderBuffers[renderBufferIndex]` (M5-01 §2.2 phase 8): wireframe/depth-test/translucency off, **FBO unbound**, window depth cleared, then the **screen/post shader** (`gfx/shaders/post.vsh` — a 12-line pass-through; `gfx/shaders/screen.fsh`, 292 lines) with all CRT uniforms from config, viewport set to the **window**, `renderTextures[renderBufferIndex].use()` (the buffer just drawn into), `postQuad.draw()` (a full-window quad), texture unbound (in-source comment: leaving it bound crashes window resizing, which must resize the framebuffer). Presentation is therefore: scene → FBO (render resolution) → post quad → window backbuffer → swap at the *start* of the next tick (one-frame presentation latency, M5-01 §2.4, G13 — §4.1).
+
+### 3.2 Uniform → config map (source-verified; defaults from CoreMod.java:138-158)
+
+All entries are GLOBAL/POSTPROCESSING category user config (layer 4). The gate is `shader_enable_crt` (default **false** — the post quad is a plain image copy when disabled; `screen.fsh` main returns the raw screen pixel immediately).
+
+| Shader uniform | Config | Default | Notes |
+|---|---|---|---|
+| `enableCrt` | `shader_enable_crt` | false | master gate |
+| `time` | — | — | `vsyncCount / 1000.0f` (RenderEngine.java:703) — seconds at 1000 vsyncs base; CRT animation speed therefore tracks the *presented* frame rate (turbo/fast-forward changes it, M5-01 §2.3) |
+| `scanlines_opacity` / `scanlines_width` | `shader_scanlines_opacity` | 0.4 | sine-based scanline mask, `smoothstep(width, width+0.5, abs(sin(uv.y × resolution.y × π)))` |
+| `grille_opacity` | `shader_grille_opacity` | 0.0 | RGB aperture-grille mask (three phase-shifted sin masks at `resolution.x × π`), applied in linear space (pow 2.2 out and back) |
+| `pixelate` / `resolution` | `shader_pixelate` | (PixelateMode: NONE, P240, P480, P720, NATIVE_1_4, NATIVE_1_3, NATIVE_1_2) | fixed-height modes scale width by the *window* aspect; NATIVE_1_n = window/n; the `resolution` vec2 is the pixel grid the shader floor-samples to (manual bilinear `textureBilinear` for the roll/aberration channels) |
+| `roll` / `roll_speed` / `roll_size` / `roll_variation` / `distort_intensity` | `shader_roll*` | off / 8.0 / 15.0 / 1.8 / 0.1 | two-interfering-sine rolling distortion bands, UV x-shift weighted by `(1 − UV.x)`; `distort_intensity` = config/10 (slider desensitization, in-source comment in both shader and setup) |
+| `noise_opacity` / `noise_speed` | `shader_noise*` | 0.0 / 20.0 | Perlin banded noise (`uv × (2, 200)`, animated by `time × noise_speed`), gated by the roll-line × scanline × per-pixel random |
+| `static_noise_intensity` | `shader_static_intensity` | 0.0 | per-texel white noise, config/10 |
+| `aberration` | `shader_aberration` | 0.02 | per-channel UV offset (r +, g −), config/10 — applied even without roll |
+| `brightness` | `shader_brightness` | 1.1 | compensates grille/scanline darkening |
+| `discolour` | `shader_discolour` | false | VHS look: desaturate (mix to grey at 0.5) + contrast 1.2 around the 2.2-gamma midpoint |
+| `warp_amount` | `shader_edge_warp` | 0.0 | spherized edge warp (`uv + delta × |delta|⁴ × amount`) + `border()` black mask to hide the warp fringes |
+| `vignette_intensity` / `vignette_opacity` | `shader_vignette*` | 0.4 / 0.0 | `pow(uv × (1−uv) × 15, intensity × opacity)` |
+| `bloom_intensity` / `bloom_threshold` / `bloom_radius` | `shader_bloom*` | 0.4 / 0.5 / 4.0 | 9-tap high-pass (centre weight 4, /16), `text + bloom − text × bloom` screen-composite |
+| `turn_order_bounds` | (turn-order MOD) | 0 | §3.3 |
+
+Shader-local detail: `clip_warp` is a **shader-local `bool` initialized false** (not a uniform) — the "make the warp border transparent" path is permanently disabled in the shipped shader (source-verified; a comment describes the use case — compositing over a TV image). A second source-verified oddity: `screenShaderOptions.enableCrt(...)` is set twice in the setup block (once with the config value, once literally `true` inside the gate — RenderEngine.java:699-702; functionally inert). The roll path samples r/g through manual bilinear and b through the hardware `texture()` filter — a per-channel filtering inconsistency in the shipped shader (source-verified; visually negligible, no claim made about intent).
+
+### 3.3 The turn-order legibility cheat (source-verified, RenderEngine.java:759-780)
+
+When a `TurnOrderMod` (MOD-provided) is loaded, visible, and the current state is an active battle, the setup block computes the turn-order HUD's bounds in **normalized post-quad UV space** from the MOD's current width/height in native 320×240 coordinates, with the widescreen offset folded in (RenderEngine.java:759-780): `minX = 3.5/(320 + offset)`, `maxX = (3.5 + w)/(320 + offset)`, `minY = (240 − 4 − h)/240`, `maxY = (240 − 4)/240`. In the shader, `getActiveResolution` (screen.fsh:66-77) then *cheats the pixelate grid* inside that rectangle — below 480P the turn-order region samples at `480 × aspect × 1.5` instead of the configured pixelate resolution, "so the Turn Order UI is legible below 480P" (in-source comment). This is the one place the post pass is content-aware (layer 4, MOD-gated).
+
+**Layer classification:** the entire CRT suite is a reference feature (user config, default off) with no PSX counterpart — the original presented the VDP frame directly (M4-01). It is documented here as the modern path's final transform, and as the coupling point for the multiple-of-240 render height (the pixelate grid interacts with the 1-px UI geometry, M5-03 §7.3) and the ortho offset (turn-order bounds, §3.3).
+
+## 4. FMV presentation (MDEC `.IKI`)
+
+### 4.1 The format (M2-09 cross-reference; source-verified consumers)
+
+`.IKI` FMVs are CD-mode2-style sector streams: 2352-byte sectors with a 24-byte header (`SectorHeader.HEADER_SIZE`; mode @15, channel @17, submode @18 — EOF 0x80 / realtime 0x40 / form bit 5 / trigger 0x10 / type), DATA sectors carry **2016 bytes of video at offset 56** (`VideoSector.readSector`), AUDIO sectors carry XA ADPCM (M4-04 §5). The demuxed video stream begins with a 10-byte `FrameHeader` (runLengthCodesCount s16 @0, width s16 @4, height s16 @6, compressedCodesSize s16 @8), followed by the RLE-compressed "initial block codes" (8 flag bits per byte: 0 = literal byte, 1 = copy run of `byte+3` from offset `byte` (1 byte) or `((byte & 0x7f) << 8 | next) + 1` (2 bytes when bit 7 is set) — Fmv.java:447-478), then the AC VLC bitstream (MPEG-1-style `ZeroRunLengthAc` code tables, `reverseZigzag`, `quantizationMatrix`, `PSX_DEFAULT_COSINE_MATRIX` — Fmv.java:73-221). Per 16×16 macroblock, 6 blocks (Cr, Cb, Y1–Y4): a 16-bit "initial code" = 10-bit signed DC (`<< 22 >> 22`) + 6-bit per-block quantizer (`>>> 10`), stored with the DC half in the first half of the RLE table and the quantizer half at `uncompressedSize/2` (Fmv.java:515-517); AC coefficients `= vlc.coefficient × quant[zz] × blockQuant + 4 >> 3` (round-half, in-source comment "Math.round(i/8.0)"), in-place IDCT (`Fmv.idct`, :719), then `readDecodedRgb` (YCbCr→RGB, :750). Frame dimensions come from the header per frame — the display texture is recreated when they change (Fmv.java:582-590), i.e. an IKI may contain frames of different sizes. The 18 retail FMVs are named by the ROM table `diskFmvs_80052d7c` (Fmv.java:63-69): `STR/DEMOH.IKI`, `DEMO2`, `OPENH`, `WAR1H`, `TVRH`, `GOAST`, `ROZEH`, `TREEH`, `WAR2H`, `BLACKH`, `DRAGON1`, `DENIN`, `DENIN2`, `DRAGON2`, `DEIASH`, `MOONH`, `ENDING1H`, `ENDING2H`. (M2-09 documents the same structure from the format side; no retail IKI bytes were inspected — no `asset-validated` claim.)
+
+### 4.2 Playback loop and the 15 fps / 2× CD cadence (source-verified, `Fmv.play` :312-643)
+
+`Fmv` **replaces the render callback** for the duration of playback (`oldRenderer = RENDERER.setRenderCallback(…)`; the whole game frame is suspended — `gameLoop` does not run). Per tick:
+
+- `RENDERER.window().setFpsLimit(15 × Config.getGameSpeedMultiplier())` + `PLATFORM.setInputTickRate(15 × …)` (Fmv.java:397-398) — **15 fps presentation** (M2-09: MDEC's authored rate; the speed multiplier = user fast-forward, layer 4).
+- **Sector demux**: read `sectorCount` raw 2352-byte sectors — `sectorCount = doubleSpeed ? 10 : 5`, in-source comment "(150|75) sectors per second / 15 frames per second" (Fmv.java:321-326). `playCurrentFmv` always passes `doubleSpeed = true` (Fmv.java:268) — i.e. the game plays FMVs at **150 sectors/s = 2× CD speed** (5 DATA sectors' worth of video per 15 fps frame plus interleaved audio sectors); the 1× path exists in the player but has no caller (`Inferred` that 2× matches retail MDEC FMV cadence — standard PSX MDEC playback; asset-validated follow-up, Q-73). DATA sectors → `video.readSector` into the 2016-byte-aligned demux buffer; EOF submode → `stop()`.
+- **Audio** (M4-04 §5 hand-off): AUDIO sectors (Fmv.java:420-433) → `XaAdpcm.decode(data, data[19])` (the M4-04 24-byte-header / coding-info@19 decode, native 37.8 kHz, no resampling — the 6→7 FIR remains dead code), then **`>>= 1` (halve) and `× volume`** (`volume = FMV_VOLUME_CONFIG × MASTER_VOLUME_CONFIG`), buffered into a `GenericSource(AL_FORMAT_STEREO16, 37800)` with drop-on-full backpressure (`canBuffer()` guard — M4-04 §5).
+- **Video**: FrameHeader at demux offset 10 → macroblock decode (§4.1; macroblock/IDCT loop Fmv.java:510-584, in-place IDCT `Fmv.idct` :719) → `int[] framePixels` (w×h, RGB) → `Texture.filteredEmpty("FMV", w, h)` (bilinear-filtered; recreated on size change, :586) → unit 24bpp quad (`QuadBuilder("FMV").bpp(BITS_24).size(1,1)`).
+- **Presentation** (Fmv.java:600-620): `windowWidth = nativeHeight × getRenderAspectRatio()` (full render space in model units); `scaleW = windowWidth/320` (:602), `scaleH = windowHeight/frameHeight`, `scale = min(scaleW, scaleH)` — **letterbox: width pinned to 320 model units, height to the frame's own height** (the MDEC frame is not necessarily 240 tall); centred at `(l, t)`, **`z = 100.0`** (the ×4 domain's depth level 25, M5-03 §7.1 — larger depth = farther, so the FMV sits in front of world content and of the in-game UI layers at 120–144, while low-depth text such as the skip prompt at the default text depth 52 draws on top of it), queued at :617 via the **`Matrix4f` overload** of `queueOrthoModel` (no auto widescreen offset — the quad is already centred in the full render space; §2).
+- **Rumble**: `RumbleData.load("SECT/DRGN0.BIN/5721/<fmvIndex>")` (0xc-byte records: frame i32 (−1 terminator), initialIntensity u16, endingIntensity u16, duration i32 — RumbleData.java); per frame (Fmv.java:621-631), matching entries drive `startRumbleIntensity(0, …)` + `adjustRumbleOverTime(0, …, 1)` and a `rumbleFrames` countdown (M9 platform/input scope; the FMV rumble data file is M2-09).
+- `handleSkipText(); displaySkipText(); frame++; DISCORD.tick();` close each tick.
+
+### 4.3 Skip flow (source-verified, Fmv.java:259-311, :339-390)
+
+`INPUT_ACTION_FMV_SKIP` is bound to a user-mappable action; the first press on *any* input class records which class pressed (`isKeyboardInput`/`isControllerInput`) and shows a prompt (`setSkipText`, 60 frames = **4 s at 15 fps**, rendered at (10, 10) via `Text.renderText` with `UI_WHITE` — M5-03 §5.1; the i18n strings name the actual key/button). A subsequent `FMV_SKIP` press is honored **only from the same input class** that was prompted (`isValidSkipInput`) — i.e. press-to-confirm semantics so the button held down before the cutscene can't skip it. Mouse release skips if prompted for the mouse, otherwise prompts.
+
+### 4.4 Mode-state save/restore (source-verified, Fmv.java:329-340, `stop()` :644-696)
+
+On play, `Fmv` saves and overrides (Fmv.java:329-340): fps limit, `ALLOW_WIDESCREEN_CONFIG` (forced **true**), render mode (forced `PERSPECTIVE` — the true-perspective branch of §2, with the `w = nativeHeight × renderAspect` ortho expansion and `offset = (w−320)/2`), projection size (`setProjectionSize(320, 240)` — the GPU-model display is 320×240 for the duration), clear colour (forced black). `stop()` — invoked from the render callback (i.e. on the render thread, before the next frame) — deletes the quad/texture, removes the four input listeners, **restores all five saved values**, removes the OpenAL source, and stops rumble. The same save/restore pattern is replicated in `VideoPlayer.stop()`. Because `stop()` defers the restore into a new render callback, the *final* FMV frame and the restored game frame never interleave within one onDraw (source-verified sequencing; the one-frame alignment consequence is `Inferred` — G13, §4.5).
+
+### 4.5 Presentation-latency disposition (G13, M4 row)
+
+G13 (M4-05: "frame N composed at end of frame N, displayed N+1") is **addressed for the modern path** by M5-01 §2.4 (swap-before-onDraw adds one frame on top of the GPU model's own display-buffer model) and by this document's FMV cadence: an FMV frame is decoded and queued during onDraw of tick *t*, post-processed into the backbuffer the same tick, and shown at the swap of tick *t+1* — the 15 fps sector cadence (§4.2) is unaffected because it is driven by render ticks, not by presented frames. For legacy modes the GPU model's display-buffer flip (`Gpu.tick` → `drawDisplay`, M4-01 §4.4) adds the mode-1 blit on top. Frame-alignment for visual comparison against the original therefore requires accounting for (a) the modern +1, (b) the mode-1 buffer flip, and (c) the 15 fps FMV tick — recorded here for the M10 evidence worklist.
+
+### 4.6 `VideoPlayer` (layer-4 replacement player; FFmpeg/JavaCV)
+
+`VideoPlayer.play(Path, onRender, onFinish)` (VideoPlayer.java, 307 lines) plays *any* video file: FFmpeg frame grabber (RGB24), full audio pre-buffered into a 48 kHz stereo16 `GenericSource` (whole clip — `pcmBuffer` sized `duration × rate × channels × 2 + 4096`). Per tick at **60 fps** limit: **video is pinned to audio** (in-source comment, VideoPlayer.java:165) — `currentFrame.timestamp` vs `source.getPosition()` with a 15 ms tolerance; behind → skip frames, ahead → hold the current frame, in sync → upload the frame. Presentation is the same pattern as MDEC (VideoPlayer.java:218-232): `ALLOW_WIDESCREEN = true`, `PERSPECTIVE` mode, `setProjectionSize(320, 240)`, black clear, letterboxed 24bpp quad centred in `nativeHeight × renderAspect` space (scaleW = windowW/320, scaleH = windowH/videoH, min, centred, **z = 100** — identical to Fmv), any key/button/click stops it. `stop()` (VideoPlayer.java:239-307) restores the saved fps/widescreen state and removes the input listener. Sole call site: **`GameEngine.java:467` — the boot intro** (`gfx/intro.mp4`, a repo-shipped MP4, `onRender = GameEngine::renderIntro`, `onFinish` continues to the title). Layer 4 in its entirety (the reference's stand-in for the retail demo FMV — which is instead available as `playCurrentFmv(0)` from the title, GameEngine.java:445).
+
+### 4.7 FMV call sites (source-verified)
+
+| Site | FMV | After |
+|---|---|---|
+| `GameEngine.java:445` | index 0 (`DEMOH.IKI`) | `TITLE` |
+| `RetailCampaignType.java:117` | index 2 (`OPENH.IKI`, opening cutscene) | `SUBMAP` |
+| `SMap.java:4377` | `fmvIndex_800bf0dc` (script/state-driven submap FMVs) | `afterFmvLoadingStage_800bf0ec` |
+| `PlayFmvPostBattleAction.java:35` | `inst.fmv` (post-battle action) | `FINAL_FMV` |
+| `FinalFmv.java:45` | index 17 (`ENDING2H.IKI`) | `CREDITS` |
+
+`playCurrentFmv` also resets SSSQ audio state (`sssqResetStuff()`) and sets `submapId = −1` (Fmv.java:259-271). The `FINAL_FMV` engine state (final-credits cutscene wrapper) is M9 scope.
+
+## 5. Register impact
+
+- **Q-37** (render-path faithfulness): **advanced** — FMV/VideoPlayer presentation fully documented (mode-state override, 15 fps / 2× CD cadence, letterbox math, z = 100, Matrix4f no-offset presentation, skip flow, deferred restore); the widescreen machinery (three coordinate spaces, per-mode ortho projections, `widescreenOrthoOffsetX` auto-vs-manual application, 368/384 modern-vs-GPU divergence) is now the M5 closure for the G4 row's modern half. Remaining scope unchanged: original-path attribution + visual cross-check against modes 1/2 (now including the 384-vs-368 menu width delta and the FMV letterbox).
+- **Q-65** (external GPU cross-checks): **advanced** (minor) — G4's modern-side disposition recorded (§2: mode 0 renders 384, mode 1 clamps to 368; EXPANDED submap `expectedWidth = 368` is the modern expression of the same constant); the layer-1 "why 368" remains external.
+- **G4 (M4-05 table)**: **advanced** — see §2 (both clamp sites source-verified: `Gpu.displayMode` :368-385 and `Gpu.drawingArea` :402-409; modern path unclamped).
+- **G13 (M4-05 table)**: **addressed** — see §4.5 (modern +1 swap latency, mode-1 buffer flip, 15 fps FMV cadence).
+- **Q-73** (new): **Original FMV presentation.** The reference letterboxes MDEC frames in 320-pinned width model space at z = 100 with a black clear (MDEC frames may be shorter than 240 — the texture is sized from the per-frame header), plays at 2× CD speed (150 sectors/s; the 1× path is uncalled), and forces PERSPECTIVE render mode + widescreen on + 320×240 GPU projection for the duration. What the original did — full-screen VDP overlay vs a 320×H frame with VDP letterboxing (H comes from the per-frame header; typical PSX MDEC frames are short of 240), 1× vs 2× CD sector cadence, whether the audio was halved by the original mixer (the `>>= 1` is in the reference's play path, `Inferred` to mirror the original SPU gain staging), and the exact frame sizes of each retail IKI — is `Unresolved`. — `Open` — M5/M10 + asset evidence — needs: retail IKI inspection (frame headers, sector cadence) + emulator comparison (asset-validated-pending); see §4.
+
+## 6. Source index (pinned @ `0c08c679b`)
+
+- `gfx/shaders/post.vsh` (whole, 12 lines); `gfx/shaders/screen.fsh` (whole, 292 lines; `getActiveResolution` :66-77, roll/aberration :158-186, grille :194-206, scanlines :221-227, bloom :229-247, noise :249-258, static :264-267, border/vignette :270-276, discolor :279-290).
+- `legend/core/renderer/RenderEngine.java` — post setup block :696-788 (turn-order bounds :759-780, post quad + unbind :782-788); `pre()` (FORCED_4_3 viewport) :1210-1222; `onResize` (multiple-of-240) :1254-1280; `getRenderAspectRatio` :391-393; `queueLine` offset :1094; script aspect hook :1477; `widescreenOrthoOffsetX` accessor :367.
+- `legend/core/renderer/RenderBatch.java` — `updateProjections` (per-mode branches, offset computation) :114-156; `shouldSnap`/`setSnappedTranslation` :220-231; `queueOrthoModel` overloads (MV auto-offset :250, Matrix4f caller-side :257-260).
+- `legend/core/renderer/SubmapWidescreenMode.java` (EXPANDED/FORCED_4_3/STRETCHED); `legend/core/renderer/PixelateMode.java` (NONE/P240/P480/P720/NATIVE_1_4/1_3/1_2); `legend/core/renderer/Resolution.java` (ORIGINAL…8K/NATIVE).
+- `legend/game/modding/coremod/CoreMod.java` — `ALLOW_WIDESCREEN_CONFIG` :115; `LEGACY_WIDESCREEN_MODE_CONFIG` :116; `RESOLUTION_CONFIG` :118; `SHADER_*` config entries :138-158 (defaults).
+- `legend/core/gpu/Gpu.java` — `displayMode` (384→368) :368-385; `displaySize` :387-400; `drawingArea` (384→368) :402-409; `updateDisplayTexture` (4:3 letterbox mesh) :141-172.
+- `legend/game/fmv/Fmv.java` — `diskFmvs_80052d7c` :63-69; MDEC tables :70-221; `playCurrentFmv` :259-271; `displaySkipText`/`setSkipText`/`handleSkipText`/`isValidSkipInput` :273-311; `play` (demux + decode + present loop) :312-643 (fps limit :397-398, sector cadence :321-326, audio :420-433, initial-block RLE :447-478, macroblock/IDCT loop :510-584, texture + present :582-620, rumble :621-631, skip/display :636-638); `stop` (deferred restore) :644-696; `getNextVlc` :697-717; `idct` :719-748; `readDecodedRgb` :750-836.
+- `legend/game/fmv/VideoPlayer.java` (whole, 307 lines; audio-pinned playback :163-190, present :218-232, stop/restore :239-307); `FrameHeader.java` (whole, 27 lines); `SectorHeader.java` (HEADER_SIZE 24, submode bits, :1-40); `VideoSector.java` (2016-byte payload @56, :1-44); `RumbleData.java` (0xc records, :1-34).
+- `legend/core/GameEngine.java` — boot intro `VideoPlayer.play("gfx/intro.mp4")` :467; demo FMV `Fmv.playCurrentFmv(0, TITLE)` :445.
+- FMV call sites: `legend/lodmod/RetailCampaignType.java:117`; `legend/game/combat/postbattleactions/PlayFmvPostBattleAction.java:35`; `legend/game/submap/SMap.java:4377`; `legend/game/credits/FinalFmv.java:45`.
+- Cross-refs: M5-01 §2.2/§2.4/§3/§8 (frame structure, latency, FBOs, projections); M5-03 §5.1/§7.1 (renderText, ×4 depth domain); M2-09 (`research/assets/09-fmv-mdec.md` §2-§5); M4-04 §5 (`research/psx/04-xa-adpcm.md` — FMV XA path, 37800 Hz, `>>=1`, volume, drop-on-full); M4-05 G4/G13 rows (`research/psx/05-compatibility-classification.md`).
