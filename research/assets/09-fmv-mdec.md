@@ -4,7 +4,7 @@ Phase M2 deliverable 9 of 9. Reference: Severed-Chains @ `0c08c679b` — `legend
 
 ## 1. Disc files (source-verified)
 
-- 18 FMVs on disc under `STR/` as raw sector streams (`.IKI`): `diskFmvs_80052d7c` (ROM global, `Fmv.java:87-90`):
+- 18 FMVs on disc under `STR/` as raw sector streams (`.IKI`): `diskFmvs_80052d7c` (ROM global, `Fmv.java:63-69` — anchor corrected in M5-04 reconciliation):
   ```
   DEMOH.IKI, DEMO2.IKI, OPENH.IKI, WAR1H.IKI, TVRH.IKI, GOAST.IKI, ROZEH.IKI,
   TREEH.IKI, WAR2H.IKI, BLACKH.IKI, DRAGON1.IKI, DENIN.IKI, DENIN2.IKI, DRAGON2.IKI, DEIASH.IKI,
