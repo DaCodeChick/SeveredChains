@@ -232,6 +232,8 @@ Consequences:
 
 ## M6 — Audio and Music
 
+**Status: IN PROGRESS (started 2026-11-06; approved starting point `a46c36a7f`).** Execution discipline: the three deliverables are completed sequentially, each with a durable checkpoint (document written, principal claims verified, affected register items updated, file-ending audit run, committed) before the next begins; a bounded cross-system reconciliation follows the three checkpoints. Builds on M1 (frame/thread timing), M2 (music formats, XA transcode), M4 (SPU/XA contracts, Q-68/Q-69), and M5 (FMV presentation).
+
 **Scope.** Audio architecture (AudioThread loop, sources and buffering, device handling/reinit, volume routing); the SSSQ sequencer (soundfonts, soundbanks, instruments/layers, breathes, channels; BGM sequence command set; loading from unpacked assets); the MIDI→SSSQ unpack conversion; XA music handling and the Opus transcode/playback path; SPU SFX playback (queue, key on/off, reverb config); FMV audio; and the timing alignment of all audio paths to the frame model (from M1/M4).
 
 **Primary reference sources.**
