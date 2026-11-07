@@ -97,7 +97,7 @@ Continuing the `04-unresolved-questions.md` numbering (Q-44+):
 | Q-44 | No-CLUT TIM layout: `Tim.java` (flat, data @0x14) vs `Unpacker.getTimSize` (image segment @0x14) disagree. Do retail no-CLUT TIMs exist? Which layout is correct? | M2 finding; asset-validated only |
 | Q-45 | ISO Form-2 detection: reference tests bit `0x20` of header byte 6 (sector byte 18); Yellow Book control-byte Form-2 bit is `0x04`. PSX-toolchain convention? | M2 finding; external PSX docs |
 | Q-46 | DEFF part u32@0x10 ("nextOffset"): exact semantic (end-of-region vs next-part; file-relative vs DEFF-relative) and why u16@0x14 is skipped for type 3 pointer adjustment | M2 finding; asset-validated only |
-| Q-47 | XA mono decode discrepancy: `XaTranscoder` (low nibble only) vs `XaAdpcm` (both halves → one channel). Which matches retail XA music vs SFX? | M2 finding; asset-validated only |
+| Q-47 | XA mono decode discrepancy: `XaTranscoder` (low nibble only) vs `XaAdpcm` (both halves → one channel). Which matches retail XA music vs SFX? | **Superseded — closed by M6-03**: the discrepancy did not exist (both decoders decode both nibble planes; M2-10 §4 corrected in place); register entry is authoritative |
 | Q-48 | FMV audio rate: resampled 44100 Hz data buffered into a 37800 Hz OpenAL source — latent bug or masked by AudioThread? | M2 finding; runtime test |
 | Q-49 | LmbType1/2 animations: parsed but not applied in the reference ("Not implemented"). Do retail models use them? What is original behavior? | M2 finding; M9 + assets |
 | Q-50 | `encounters` (S_BTLD, 0x7000 B) and `SUBMAP/savepoint` (0x904 B): no decompiled consumers found — original runtime purpose? | M2 finding; M3/M9 |
@@ -107,7 +107,7 @@ Continuing the `04-unresolved-questions.md` numbering (Q-44+):
 | Q-54 | CTMD id low byte 0x41 and `TmdWithId` id upper-16 translucency — full id field semantics across asset types | M2 finding; M4 + assets |
 | Q-55 | MCQ vramWidth/Height constraints (the 256-height expectation) and MAGIC_1 vs MAGIC_2 behavioral difference (screen offsets) | M2 finding; M4 + assets |
 | Q-56 | SSSQ "24-entry" subfile-4 variant vs base 16-entry: which retail sounds use it? | M2 finding; M9 + assets |
-| Q-57 | XA `SKIPS` mask rationale (which interleaved slots carry real audio per LODXA0n) — derived from the original XA index or empirical? | M2 finding; assets |
+| Q-57 | XA `SKIPS` mask rationale (which interleaved slots carry real audio per LODXA0n) — derived from the original XA index or empirical? | **Advanced by M6-03**: per-archive map corrected in M2-10 §3 (00/01 → 1–15, 02 → 1–7/9–11, 03 → single stereo track; credits consumer evidence); rationale remains asset-validated-pending; register entry is authoritative |
 | Q-58 | `getTimSize` low-word assumption (`F < 0x10000`, segSize < 0x10000): do any retail TIMs exceed it? | M2 finding; assets |
 
 *(Existing Q-36/Q-37/Q-40/Q-42/Q-43 from R1 remain; Q-37 gains the TMD-renderer vs PSX-GPU cross-refs from M2-05 §6 and M2-10 §6.)*
