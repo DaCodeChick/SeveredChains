@@ -65,16 +65,17 @@ Supplementary M2 document (the M2 deliverable list covers TMD/TIM/ANIM/MCQ/SSSQ/
 ## 3. XA music on disc (source-verified)
 
 - `XA/LODXA00.XA` … `LODXA03.XA`: raw XA sector streams (M2-09 §2 sector geometry; ADPCM core per M2-09 §5).
-- Interleaving (source-verified, `XaTranscoder.transcode`):
-  - **LODXA00/01/02 (mono files)**: **16** interleaved audio tracks per sector set (each 2352-byte sector belongs to one track, round-robin); the skip mask `SKIPS = {0xFFFE, 0xFFFE, 0xEFE, 0x2}` selects which tracks are real audio: for LODXA00-02 (mask `0xFFFE`) tracks 1..15 are used (**track 0 is always discarded** — the transcode loop starts at track 1); each used track → `<path>/<track>.opus`.
-  - **LODXA03 (stereo file)**: **4** interleaved tracks, mask `0xEFE` → tracks 1..3 used (3 stereo pairs).
+- Interleaving (source-verified, `XaTranscoder.transcode`; **map corrected by M6-03** — the skip mask is selected by the archive's trailing digit, `SKIPS = {0xFFFE, 0xFFFE, 0xEFE, 0x2}` indexed 0–3, applied as "track *t* real iff bit *t* set", with the loop starting at track 1 — **track 0 is always discarded**):
+  - **LODXA00/01 (mono)**: 16 interleaved tracks, mask `0xFFFE` → tracks 1–15 all used → `<path>/<track>.opus` (mono).
+  - **LODXA02 (mono)**: 16 interleaved tracks, mask `0xEFE` → tracks 1–7 and 9–11 used (10 tracks; 8 and 12–15 skipped).
+  - **LODXA03 (stereo)**: **4** interleaved tracks, mask `0x2` → **track 1 only** — a single stereo track → `1.opus`. In-repo consumer: the credits play archive 3 file 1 (`Credits.java:294`, `playXaAudio(3, 3, 1)`). *(M6-03 §3 supersedes the earlier "LODXA00-02 → 0xFFFE, LODXA03 → 0xEFE tracks 1–3" wording.)*
 - Runtime: `Audio.playXaAudio`-style loads (`Audio.java:908`): `AUDIO_THREAD.loadXa(Loader.loadFileSync("XA/LODXA0%d.XA/%d.opus".formatted(xaArchiveIndex, xaFileIndex)))` — i.e. **the reference's in-game XA music playback consumes the unpack-time Opus transcodes**, not raw XA (source-verified). The original PSX played XA via SPU DMA hardware at 37800/18900 Hz (format-corroborated; the original's track selection is data-driven by the game — `Inferred`).
 
 ## 4. XA → Opus transcode (unpack-time) (source-verified)
 
 `core/audio/xa/XaTranscoder.java` (M2-03 #29, `Unpacker.xaTransformer`):
 
-- Decode: XA ADPCM (same core as M2-09 §5 — `shift = 12 - (b & 0xf)`, 4 filter tables, 28 samples per block call; mono uses the **low nibble only** here, unlike `XaAdpcm`'s SPU path which decodes both halves into one channel — a deliberate difference between the music transcode and the SFX/SPU decode, `Inferred` intent: music files are single-channel-per-nibble, SFX soundbank "mono" is dual-nibble; registered as an open item for asset validation).
+- Decode: XA ADPCM (same core as M2-09 §5 — `shift = 12 - (b & 0xf)`, 4 filter tables, 28 samples per block call). **Both nibble planes are decoded in both modes** (source-verified, `XaTranscoder.decodeNibbles`; **corrected by M6-03**): mono → sequentially into the *same* channel (nibble 0's 28 samples, then nibble 1's 28, per block, shared per-channel predictor state); stereo → nibble 0 = left, nibble 1 = right. *(The earlier "low nibble only" reading was wrong — the named Q-47 discrepancy between `XaTranscoder` and `XaAdpcm` did not exist; the two decoders agree. Q-47 closed by M6-03.)*
 - Resample 37800 → 48000: cubic interpolation, 80-step weight table, counter step 63 (output rate = input × 80/63 × … = 48000 exactly), output **halved in amplitude** (`>> 1`).
 - Encode: Opus, **48 kHz**, 960-sample frames, 128 kbps, `PRE_SKIP = 312`; the written Opus **container header records 37800** (the source rate) with comments `tracknumber=`, `totaltracks=`, `album=<original path>`.
 - Sector end: stream stops when sector byte 18 (submode) has bit `0x80` set (`readUByte(sectorOffset + 18) >>> 7 & 1` — the VHS EOF flag, M2-09 §2).
