@@ -9,7 +9,7 @@
 - `legend/core/GameEngine.java:102` (`CONFIG`), `:126-132` (static boot), `:248` (GLOBAL config load).
 - `legend/game/modding/coremod/CoreMod.java` (80 entries), `legend/lodmod/LodConfig.java` (7), `legend/turnorder/TurnOrderConfigs.java` (1); representative custom entries in `legend/game/modding/coremod/config/`.
 - UI: `legend/game/inventory/screens/OptionsScreen.java`, `OptionsPresetsScreen.java`, `OptionsCategoryScreen.java`, `MainMenuScreen.java:543-549`, `NewCampaignScreen.java`, `legend/game/combat/ui/BattleHud.java:1498-1499`, `CampaignSelectionScreen.java:105`.
-- Consumers: `legend/game/debugger/DebuggerController.java:186-196`; audio consumers per M6-01 §5/§6.
+- Consumers: `legend/game/debugger/DebuggerController.java:186-196`; audio consumers per M6-01 §5.1/§5.3/§8 (A4, A11).
 
 **Layering:** the entire configuration system is **layer 4** (reference implementation) — the retail game has no moddable config; the closest retail analog is the per-slot save data already documented in M7-01. The registry/event machinery it builds on (`Registrar`, `MutableRegistry`, `RegistryEntry`, `RegistryEvent.Register`, `ModContainer`) is documented under M8 (T-MOD); here only its use from the config side is recorded.
 
@@ -199,7 +199,7 @@ RUNTIME
    10. CONFIG.setConfig(entry, value)  ->  put + revision++ ->
         entry.onChange (if notifying) -> ConfigUpdatedEvent
        (consumers: DebuggerController.java:186-196; audio entries' onChange
-        re-application per M6-01 §5/§6; LanguageConfigEntry i18n reload;
+        re-application per M6-01 §5.1/§5.3/§8 (A4, A11); LanguageConfigEntry i18n reload;
         options widgets call setConfig on user change)
    11. mods may lockConfig entries (advisory UI lock, §3.4)
 
@@ -275,7 +275,7 @@ Notes:
 4. **`availableInBattle`** gates the in-battle options screen — the only place the config system is aware of game state. *(Layer 4 UX.)*
 5. **Implicit `.dcnf` size ceiling**: the Path save variant builds into a fixed 100 KiB buffer (§3.2).
 6. **Mod-Loader boundary**: `Registrar`/`RegistryDelegate`/`RegistryEntry`/`MutableRegistry`/`RegistryEvent.Register`/`ModContainer` semantics are M8 (T-MOD) deliverables; M7-02 records only their config-side usage (§2.1, §3.4).
-7. **Audio config consumers** (master/music/SFX/FMV volumes, music interpolation/pitch/granularity) are documented in M6-01 §5/§6 — they are ordinary `ConfigEntry`s of this system with `onChange` re-application; nothing audio-specific exists in the config machinery itself.
+7. **Audio config consumers** (master/music/SFX/FMV volumes — M6-01 §5.1/§5.3, A11; music interpolation/pitch/granularity quality configs — M6-01 §8, A4) are ordinary `ConfigEntry`s of this system with `onChange` re-application; nothing audio-specific exists in the config machinery itself.
 
 ---
 
@@ -296,6 +296,6 @@ Notes:
 
 **Register impact:** none opened/closed by this deliverable. The plan's config-entry count (90) is superseded by the verified 88 (D3) — recorded here rather than in the register (a plan correction, not an open question).
 
-**Cross-document notes:** M7-01 §6.3/§8.3/§9.3 (the SAVE-location tail is part of every save version's file; `SavedGame.config` is the deserialized tail collection copied into `CONFIG` at `SaveManager.loadGameState:408-409`), M6-01 §5/§6 (audio config consumers), M8 (T-MOD — `Registrar`/registry/event machinery, `RegistryEntry` translation keys), M10 (evidence worklist — none; all layer 4).
+**Cross-document notes:** M7-01 §6.3/§8.3/§9.3 (the SAVE-location tail is part of every save version's file; `SavedGame.config` is the deserialized tail collection copied into `CONFIG` at `SaveManager.loadGameState:408-409`), M6-01 §5.1/§5.3/§8 (A4, A11; audio config consumers), M8 (T-MOD — `Registrar`/registry/event machinery, `RegistryEntry` translation keys), M10 (evidence worklist — none; all layer 4).
 
 **No `asset-validated` claims** — no retail config/preset files exist for this system (it is reference-defined end to end); all claims above are `source-verified` from the reference serializers and consumers.

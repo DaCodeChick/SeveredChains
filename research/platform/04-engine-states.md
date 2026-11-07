@@ -152,4 +152,4 @@ Note: the Dabas minigame, FMV playback, and the modern video player all **save a
 
 ## 9. Open items
 
-- The exact update point of `lastSavableEngineState` (menu save path) — verify in M7.
+- ~~The exact update point of `lastSavableEngineState` (menu save path) — verify in M7.~~ **Resolved by M7** (M7-01, `research/saves/01-save-formats.md` §10): it is set in the `init()` of the two savable states only — `WMap.init()` (`WMap.java:435`) and `SMap.init()` (`SMap.java:451`) — each assigning `EngineStates.lastSavableEngineState = this.type`; no other code path updates it (source-verified by repo-wide grep).
