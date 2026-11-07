@@ -268,6 +268,8 @@ Consequences:
 
 ## M7 — Persistence: Saves, Campaigns, and Configuration
 
+**Status: IN PROGRESS (started 2026-11-07; approved starting point `5a37d97`).** Two sequential deliverables under `research/saves/` (01 save formats, 02 config system), each checkpoint-verified and committed, followed by a bounded cross-system reconciliation pass. Builds on M1 (engine states, `writeSaveData`/`readSaveData` flow, boot order) and the R1 state-and-ownership documentation; config-entry registry registration by mods is partially M8 territory (the mod side is documented there). No retail save files are available, so no `asset-validated` claims.
+
 **Scope.** Save data formats (retail and V1–V10: magic codes, structure, per-version fields, migration chain), memcards and campaign organization (`.dsav` files, memcard splitting, campaign naming), save/load lifecycle (which engine states are savable, `writeSaveData`/`readSaveData` Tag flow, crash-recovery saves), the `Tag` data model, and the configuration system (config entries typed/registry-registered, global vs per-save storage, `.dcnf` format, presets, runtime events).
 
 **Primary reference sources.**
