@@ -303,6 +303,8 @@ Consequences:
 
 ## M8 — Modding and Extensibility
 
+**Status: IN PROGRESS (started 2026-11-07; approved starting point `fc0881d`).** Three sequential deliverables under `research/modding/` (01 mod loading, 02 registries and events, 03 core mods), each checkpoint-verified and committed, followed by a bounded cross-system reconciliation. No retail assets are available, so no `asset-validated` claims.
+
 **Scope.** The modding contract at the *behavioral* level (not the Java class-loading mechanism): mod discovery and lifecycle (ids, semver, required mods, load order, failure/wrong-version reporting), the registry system (all 21 registries, entry lifecycle, locking, delegates, events), the event system (10 event families, priorities, cancelability, per-mod error isolation), i18n/lang overrides, the core mods (`lod_core`, `lod`) as reference content, the debugger as a modding-adjacent tool, and script-patch-based modding (replacement/diff patches, `patches/libs` Fate libraries, replacements of game behavior).
 
 **Primary reference sources.**
