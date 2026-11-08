@@ -342,6 +342,8 @@ Consequences:
 
 ## M9 — Game Systems (Content and Rules)
 
+**Status: IN PROGRESS (started 2026-11-08; approved starting point `5cbdd65`).** One checkpoint per planned document under `research/game/`: 01 Dabas minigame, 02 title, 03 submap, 04 world map, 05 battle (splits into 05a state machine / 05b entities & formulas / 05c additions & UI if size demands), 06 characters & progression, 07 inventory & items — each checkpoint-verified and committed, followed by a bounded cross-system reconciliation pass. Cross-cutting priority: the script vs hardcode boundary for each significant gameplay behavior (RQ7). No retail assets are available, so no `asset-validated` claims.
+
 **Scope.** The gameplay layer, system by system: title (menu, FMV intro, update check); submap/field (environment files, objects, collision primitives, scripted movement, encounters, save points, smoke/snow effects, cut transitions); world map (continents, locations, paths, destination markers, atmosphere/water/smoke effects, zoom overlays, Coolon Queen Fury overlay); battle (battle states, entity types BENT/DEFF, turn order, additions and their hit properties, formulas — damage/HP/MP/SP, effects, particles, encounters, post-battle actions, battle UI, environment); characters (stat types/mods, elements, level-up actions, spell unlocks, addition unlocks, dragoons/spirits, templates); inventory (goods/items/equipment, stack behavior, shops, the Dabas entry point and rewards); the Dabas minigame (Mogul machine model, game rules, save format, host integration); credits.
 
 **Primary reference sources.**
