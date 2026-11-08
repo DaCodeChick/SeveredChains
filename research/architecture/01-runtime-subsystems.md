@@ -21,7 +21,7 @@ This document inventories the major runtime subsystems, their responsibilities a
 | Unpacker | `legend.game.unpacker` | Startup asset pipeline: 4-disc ISO → MRG file tree → transforms → `files/` cache; script patching; runtime file access | `Unpacker.unpack`, `ScriptPatcher.apply`, `Loader`/`DrgnFiles` (async `CompletableFuture` loads) | unpack thread (startup), Async pool (runtime loads) |
 | Saves | `legend.game.saves` | Versioned save formats (V1–V10, retail), memcards/campaigns, migration, serializers, save-manager API, config storage (`.dcnf`), tags | `SaveManager`, `SaveVersion`, `serializers/*`, `ConfigStorage` | main |
 | Config | `legend.game.saves` (ConfigCollection/Entry) + `legend.core.Config` | Two layers: typed registry-driven entries (global + per-campaign + per-save, `.dcnf`; M7-02) and flat global properties (`config.conf`) | `CONFIG.getConfig/setConfig`, `Config.*` | main |
-| i18n | `legend.core.lang`, `legend.game.i18n`, Mod-Loader `LangManager` | `@I18nText`/`I18n.translate`, `.lang` overrides, locale handling (JVM forced to US; original locale kept) | `I18n.translate`, `LANG` | main |
+| i18n | `legend.core.lang`, `legend.game.i18n`, Mod-Loader `LangManager` | `@I18nText`/`I18n.translate`, `.lang` overrides, locale handling (JVM forced to US at `Main:39`; original locale captured at `Main:33` as `ORIGINAL_LOCALE` — M8-03 §4) | `I18n.translate`, `LANG` | main |
 | Modding | Mod-Loader + `legend.game.modding` | Mod discovery/boot/versioning, 21 registries, event bus, per-registry `Register*` events, core mod (`lod_core`) and retail content mod (`lod`) | `MODS`, `REGISTRIES`, `EVENTS`, `bootMods` | main |
 | Menus/UI | `legend.game` (SItem, Menus, Text, GameOverlay, `inventory.screens`) | Menu stack, renderable pool, textboxes, retail UI assets, option screens, reference HUD (notifications/FPS) | `Menus.loadAndRenderMenus`, `SItem.menuStack`, `Text` | main |
 | Game content | `legend.game.submap/wmap/combat/characters/inventory/title/fmv/credits/dabas`, `legend.turnorder`, `legend.lodmod` | All gameplay: submap/field, world map, battle, characters/progression, inventory, title, FMVs, credits, Dabas minigame, turn-order mod; retail values via lodmod registries | per-system (M9) | main (Dabas machine + debugger UI aside) |
@@ -35,7 +35,7 @@ Counts are from the R0 inventory (main repo: 1,322 main files). `Verified` for r
 
 1. **Singleton services** — `GameEngine`'s static fields (`MODS`, `EVENTS`, `REGISTRIES`, `SCRIPTS`, `CONFIG`, `SAVES`, `PLATFORM`, `RENDERER`, `FONTS`, `GTE`, `GPU`, `SPU`, `AUDIO_THREAD`, `DISCORD`, `SEQUNCER` facade). Every subsystem reaches every other through these; there is no DI container. (Architectural: a fixed set of process-wide services; the *static-field* carrier is incidental Java.)
 2. **Static global state** — the decompiled ROM's memory: `Scus94491BpeSegment*` segment classes (address-suffixed fields), `Graphics.*`, `GameState52c gameState_800babc8`. This is not an accident of Java — it is the original program's global address space, preserved. (Architectural requirement: the game state *is* global and flat.)
-3. **Event bus** — Mod-Loader `EventManager` (typed, priority-ordered, error-isolated, active-mod attribution): mod↔mod and mod↔engine communication, per-frame hooks (`RenderEvent`, `InputPressed/ReleasedEvent`), lifecycle events (registry add/remove, state change).
+3. **Event bus** — Mod-Loader `EventManager` (exact-class dispatch, priority-ordered, per-handler error isolation, active-mod attribution; M8-02): mod↔mod and mod↔engine communication, per-frame hooks (`RenderEvent`, `InputPressed/ReleasedEvent`), one-shot registry registration windows (the `Register*` events — there are no registry add/remove events, M8-02 D14), state-change and gameplay events.
 4. **Window events** — raw I/O callbacks (input, resize, focus, draw, close) fired on the main thread by the platform.
 5. **Async completions** — `CompletableFuture` (Async pool) for file loads; `thenAccept` callbacks may run on pool threads (VRAM uploads from async callbacks are the canonical example, guarded by `vramLock`).
 6. **Queues** — render batches/model pools (per-frame), menu stack, SPU queued sounds, frame-start task deque, ordering-table z-queues, script fork stack.
@@ -46,7 +46,7 @@ Counts are from the R0 inventory (main repo: 1,322 main files). `Verified` for r
 Construction graph (from GameEngine field/static-init order; lifecycle doc §2):
 
 ```
-EVENTS, REGISTRIES (need EVENTS)  →  MODS (needs nothing, reserves core IDs)
+MODS (needs nothing; required-mod ids `lod`+`lod_core`) → EVENTS (needs nothing at construction) → REGISTRIES (needs EVENTS)
 SCRIPTS (standalone)   SEQUENCER facade (standalone)   CONFIG, SAVES (standalone)
 PLATFORM (standalone)  RENDERER (needs nothing at construction)   FONTS
 static block: GTE, GPU, SPU, AUDIO_THREAD            (SPU needs nothing yet)
