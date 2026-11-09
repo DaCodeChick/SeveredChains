@@ -39,7 +39,7 @@ Once (flag `"SMAP"`). Keeps the file and extracts:
 
 | asset | offset | size | runtime consumer |
 |---|---|---|---|
-| `SUBMAP/savepoint` | `0x10694` | `0x904` (2308) | **no decompiled consumer found** — savepoint data for the original submap code (`Inferred`); retained for tooling |
+| `SUBMAP/savepoint` | `0x10694` | `0x904` (2308) | **Corrected by M9-03** (game/03 §4.3, 2026-11-09): the slice is an MRG archive — the generic `Unmrg` leaf transformation expands the node into the directory `SUBMAP/savepoint/` (≥6 entries: two indicator ANMs, savepoint TMD, savepoint anim, dust TMD, dust anim); runtime consumer = `SMap.java:4103–4110` (`LOAD_NEWROOT_1`). The earlier "no decompiled consumer found" note was an M2 gap, not a consumerless blob. The byte-level MRG-magic check is asset-validated-pending |
 | `SUBMAP/darker_shadow.tim` | `0x100b4` | TIM-sized | `SMap.java:2815` (hardcoded load) |
 | `SUBMAP/alert.tim` | `0x10214` | TIM-sized | `SMap.java:3341` (hardcoded load) |
 | `SUBMAP/big_arrow.tim` | `0x10f98` | TIM-sized | `SMap.miscTextures_800f9eb0[0]` |
