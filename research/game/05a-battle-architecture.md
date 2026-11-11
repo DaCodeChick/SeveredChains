@@ -130,7 +130,7 @@ Allocated per-battle by `FUN_800c8624` (`:2587`), nulled by `FUN_800c8748` (`:25
 
 ### 6.1 Initial turn values
 
-`BattleStateEf4.calculateInitialTurnValues()` (called at stage 20, once the opening camera move finishes): for every bent, **monster** `turnValue_4c = simpleRand() · 0xd9 / 0x10000` ∈ [0, ~108), **player** `turnValue_4c = simpleRand() · 0xa7 / 0x10000 + 0x32` ∈ [50, ~133) — both from the **retail global `simpleRand` LCG** (M4-05: seed 3, `>>>16 & 0x7fff`). Players start with a head start; the values are a "turn gauge" (B4).
+`BattleStateEf4.calculateInitialTurnValues()` (called at stage 20, once the opening camera move finishes): for every bent, **monster** `turnValue_4c = simpleRand() · 0xd9 / 0x10000` ∈ [0, 216] (max = 65535 × 217 / 65536 = 216), **player** `turnValue_4c = simpleRand() · 0xa7 / 0x10000 + 0x32` ∈ [50, 216] — both from the **retail global `simpleRand` LCG** (M4-05 §2.3: seed 3, 16-bit word `seed/2 & 0xffff`). Players start with a head start; the values are a "turn gauge" (B4).
 
 ### 6.2 Turn selection — `getCurrentTurnBent` (@ 0x800c7ea0)
 
@@ -148,9 +148,9 @@ Turn order is **not** deterministic ATB. It is a bounded random-accumulation sim
 | | Retail (before the commit) | Reference (current) |
 |---|---|---|
 | Source | global `simpleRand()` LCG (shared with submap encounters, M9-03 SM2) | per-battle `legend.core.Random turnOrderRng` field (a `java.util.Random` subclass whose only override is `nextInt` — a mix64 `mix32` remix; `nextFloat` unmodified), **re-seeded with `timestamp_a0` at the start of every `getCurrentTurnBent` call** |
-| Jitter formula | `simpleRand() / (float)0xffff · 0.2 + 0.9`, `simpleRand()` ∈ [0, 0x7fff] | `nextFloat() · 0.2 + 0.9`, `nextFloat()` ∈ [0, 1) |
-| Jitter range / mean | **[0.9, 1.0999]**, mean ≈ 1.0 (0.9 + 0.2·0x3fff/0xffff ≈ 0.99995) | **[0.9, 1.1)**, mean 1.0 |
-| Granularity | 15-bit LCG word (32,768 distinct jitter values) | 24-bit `nextFloat` (≈16.7M distinct values) |
+| Jitter formula | `simpleRand() / (float)0xffff · 0.2 + 0.9`, `simpleRand()` ∈ [0, 0xffff] | `nextFloat() · 0.2 + 0.9`, `nextFloat()` ∈ [0, 1) |
+| Jitter range / mean | **[0.9, 1.1]**, mean ≈ 1.0 (0.9 + 0.2·(65535/2)/65535 ≈ 0.99998) | **[0.9, 1.1)**, mean 1.0 |
+| Granularity | 16-bit LCG word (65,536 distinct jitter values) | 24-bit `nextFloat` (≈16.7M distinct values) |
 
 So the reference battle's turn order is (a) **decoupled from the global LCG stream** — the actual point of the change: the `turnorder` mod (`TurnOrderMod`/`TurnOrderConfigs`, M7-02/M8-03) must be able to steer turn order without perturbing other `simpleRand` consumers — and (b) statistically near-identical in range and mean, but finer-grained and deterministic given the `timestamp_a0` progression (the per-turn re-seed makes the jitter reproducible for a given battle's tick history, though with different values than retail). The initial values (§6.1) and the opening-camera draws (§7.2) still use the retail `simpleRand`. This is the battle leg of the Q-70 seed/RNG-source discussion: the *mechanism* is fully source-verified on both sides of the change; which behavior a "retail-faithful" Rust port wants is an M10 decision.
 
@@ -242,11 +242,11 @@ effectAccuracy   = effectAccuracy · (tempHitStat + 100) / 100          // hit-r
 avoidChance      = defender.ATTACK_AVOID (physical) | MAGIC_AVOID (magic)
 modifiedAvoid    = avoidChance · (tempAvoidStat + 100) / 100           // avoid modifier %
 HIT ⟺ modifiedAvoid < effectAccuracy
-        AND (effectAccuracy − modifiedAvoid) ≥ (simpleRand() · 101 >> 16)   // roll ∈ [0, 50]
+        AND (effectAccuracy − modifiedAvoid) ≥ (simpleRand() · 101 >> 16)   // roll ∈ [0, 100]
 overrides: ITEM_MAGIC + item.alwaysHits(); (alwaysHitStat & alwaysHitMask) ≠ 0
 ```
 
-The roll is a uniform integer in [0, 50] from the **retail `simpleRand`** — accuracy must strictly exceed the defender's modified avoid by more than the roll (B11).
+The roll is a uniform integer in [0, 100] (16-bit `simpleRand` word × 101, 16-bit right shift — max = 65535 × 101 >> 16 = 100) from the **retail `simpleRand`** — the accuracy must strictly exceed the defender's modified avoid, and the margin must be at least the roll (B11).
 
 ### 8.3 Magic damage (`calculateMagicDamage`, @ 0x800f204c, `:8577`)
 
@@ -311,14 +311,14 @@ Frame-counted per tick: frame 0 fires `postBattleAction.onCameraFadeoutStart` an
 | B1 | Entry model: 4 start paths (submap `RetailSubmap.java:527`, wmap `WMap.java:3728`, game var 43 dual int/RegistryId, debugger); `SBtld` dissolve transition ticks globally at vsyncMode 1 (`Scus94491BpeSegment.java:174`), `BattleTransitionMode` + `REDUCE_MOTION_FLASHING` L4 modifiers, `battleFlags 0x1/0x2` gate the viewport init | 3 (+4 modifiers) | source-verified |
 | B2 | 28-entry `battleLoadingStage` machine with `waitForFilesToLoad` interlace; per-stage work as tabled in §3 | 3 | source-verified |
 | B3 | Timing: `tickMultiplier 1`, `framesPerTick 1`, vsyncMode 1→3→2 lifecycle, `timestamp_a0 += vsyncMode` (3/tick in play), `encounter.introWaitTicks`, vsync-scaled transition constants | 3 | source-verified |
-| B4 | Turn system: gauge init players [50, ~133) / monsters [0, ~108) via retail `simpleRand`; selection = bounded (32-round) max-gauge simulation, strict `> 0xd9` trigger, ties last-wins, increment `round(SPEED · U)`; **jitter RNG is L4** (`eae9fb4f6`/GH#2481: retail `simpleRand()/0xffff·0.2+0.9` ∈ [0.9, 1.0999] (15-bit) → per-turn-reseeded `legend.core.Random` (`java.util.Random` subclass, `nextFloat`) jitter ∈ [0.9, 1.1) (24-bit) — range/mean near-identical, generator + stream independence differ); seed = `timestamp_a0` re-applied per `getCurrentTurnBent` call; fallback = first alive player; `turnCount_b8` per player turn | 3 (+4 RNG) | source-verified (both sides of the RNG change) |
+| B4 | Turn system: gauge init players [50, 216] / monsters [0, 216] via retail `simpleRand` (16-bit); selection = bounded (32-round) max-gauge simulation, strict `> 0xd9` trigger, ties last-wins, increment `round(SPEED · U)`; **jitter RNG is L4** (`eae9fb4f6`/GH#2481: retail `simpleRand()/0xffff·0.2+0.9` ∈ [0.9, 1.1] (16-bit) → per-turn-reseeded `legend.core.Random` (`java.util.Random` subclass, `nextFloat`) jitter ∈ [0.9, 1.1) (24-bit) — range/mean near-identical, generator + stream independence differ); seed = `timestamp_a0` re-applied per `getCurrentTurnBent` call; fallback = first alive player; `turnCount_b8` per player turn | 3 (+4 RNG) | source-verified (both sides of the RNG change) |
 | B5 | Data model: `BattleStateEf4` combat vars 1–20 + addition/counter/script-param fields + 256-slot asset pool; `CombatantStruct1a8[10]`; `battleFlags` multi-purpose bit table (§5.3); `loadingAudioFiles` bit table | 3 | source-verified |
 | B6 | Turn gating: a new turn starts only when no bent has `FLAG_400 \| FLAG_CURRENT_TURN` (`FUN_800c7da8`); forced turns via `FLAG_TAKE_FORCED_TURN` (0x20) — the persistent mechanism — with game var 42 as a direct `forcedTurnBent` assignment that the gate's unconditional flag-scan re-resolution overwrites (§6.3); `BattleEntityTurnEvent` per turn start | 3 | source-verified |
 | B7 | Script boundary: battle turn flow lives in the (replaced) player combat script + DRGN1/401 controller + per-enemy scripts; the engine is the 362-slot function table + native formulas | 3 (scripts) + 4 (replacement) | source-verified (retail base-script behavior asset-validated-pending) |
 | B8 | 362 active script-function slots in 32-aligned ranges (32–50 camera … 1020–1021), 243 Battle / 111 SEffe / 8 segment-owned; 4 further slot assignments commented out (445/603/617/842); 69 still `FUN_-`named; formulas embedded (`scriptPhysicalAttack` @ 0x800f2500); full contract catalog = M3-06 §3 + meta CSVs | 3 | source-verified (census, matches M3-06) |
 | B9 | Opening camera: 50/50 `simpleRand() & 0x8000` monster/player camera; `cameraPosIndices[simpleRand() & 3]`; jump index overridable via game var 44 | 3 | source-verified |
 | B10 | Player battle stats = character stats + full equipment aggregation (raw stat sums + bitmask/list accumulation, §8.1); end-of-battle write-back: HP ≥ 1, MP if castable, `status &= 0xc8` persistence mask, repeat-item refund | 3 | source-verified |
-| B11 | `checkHit` formula: accuracy (stat or 100 or monster spell accuracy) × hit% vs avoid × avoidMod%; roll `simpleRand()·101>>16` ∈ [0, 50]; always-hit overrides (§8.2) | 3 | source-verified |
+| B11 | `checkHit` formula: accuracy (stat or 100 or monster spell accuracy) × hit% vs avoid × avoidMod%; roll `simpleRand()·101>>16` ∈ [0, 100] (16-bit LCG word; hit iff acc > avoid and acc − avoid ≥ roll, i.e. P = (d+1)/101 for 1 ≤ d ≤ 99); always-hit overrides (§8.2) | 3 | source-verified |
 | B12 | Magic damage pipeline: HP% spells (flag 0x4, multi/100, targetType 0x8 AoE), attacking/defending element adjustments, power-stat ±½ scaling (sign-dependent, `adjustDamageForPower`), Dragoon-Space element pass, clamp ≥ 0; `formula/` package = data-driven formula storage (05b) | 3 | source-verified (formula objects 05b) |
 | B13 | Music: 32-entry ROM tables → battle files 702 (idx 0, 3–15), 707 (idx 1), 722 (idx 2), 712 (idx 16, 20–31), 717 (idx 17), 727 (idx 18), 732 (idx 19, Melbu); victory jingles 696–701 + 732 (Melbu dual-use); `sssqResetStuff` teardown; per-bent/phase/cutscene/deff SFX packages; 24-voice SPU sequencing (M4-03) | 3 | source-verified |
 | B14 | Rewards: ROM `enemyRewards_80112868` + mutable `EnemyRewardsEvent`; XP/gold accumulators reset in `initBattle`; drop lists with overflow (`equipmentOverflow`/`itemOverflow`); 192-boundary drop encoding (same as M9-01 D7) | 3 | source-verified (retail reward values asset-validated-pending — from registry content, M8-03) |
