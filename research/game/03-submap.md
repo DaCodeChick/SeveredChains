@@ -63,7 +63,7 @@ The submap therefore runs the game loop at 60 Hz (vsyncMode 1) while the script 
 
 Consequences, all source-verified:
 
-- Every submap entry re-seeds the gameplay RNG from the host clock, so the reference's `rand()` stream (the 50 call sites documented in Q-70: encounter weighting §7.3, battle accuracy/drops/loot in M9-05) is **non-reproducible across runs**.
+- Every submap entry re-seeds the gameplay RNG from the host clock, so the reference's `rand()` stream (the 59 call sites documented in Q-70 as advanced through M9-04/05a/05b: submap encounter weighting §7.3, world-map presentation in M9-04, battle presentation in M9-05 — the battle accuracy/drops/loot rolls draw the *separate* `simpleRand` LCG) is **non-reproducible across runs**.
 - The only in-submap consumer is `randomEncounterIndex()` (`RetailSubmap.java:748–764`) via `rand()`; battle re-uses the same stream after combat return (no re-seed on return — the seed persists from entry).
 
 The design decision for a deterministic reimplementation (seed source) remains **Proposed/M10** (Q-70); this document documents the observed behavior only.
@@ -433,7 +433,7 @@ The per-primitive transition encoding (§4.1) is consumed in the env-state funne
 
 ### 9.1 The script function surface (SM15)
 
-`SMap.getScriptFunctions()` (:749–940) installs **144 functions** into the 1024-slot native table (M3-06: 592 slots total, 578 with implementations). The submap's slots, by family:
+`SMap.getScriptFunctions()` (:749–940) installs **144 functions** into the 1024-slot native table (M3-06: 592 slots total — 86 base + 362 battle + 144 submap — all implemented, resolving to 578 unique implementations with four alias groups). The submap's slots, by family:
 
 | Slots | Family |
 |---|---|
@@ -489,7 +489,7 @@ Everything in §2 (timing), §3 (the state machines, latches, fades), §4 (asset
 
 ### 10.1 Save tags (SM17)
 
-`writeSaveData`/`readSaveData` (`SMap.java:462–522`): the SMap contributes a `MapTag` with `scene` (int), `cut` (int), `indicatorsDisabled` (bool — the script-controlled cutscene flag is save-persistent), `primaryPartyBackup` (int list — the party-order backup for the char-swap system, M9-06), and — "we need wmap stuff for when we're sailing the Queen Fury, go inside, and save" (source comment, :483) — the world-map sailing state: `pathIndex`, `dotIndex`, `dotOffset`, `facing`, `directionalPathIndex`. On read, `unstuckMovementBudget` is reset to 60.0 (§6.3) and a legacy-save fallback (no `scene` tag) restores cut/scene from the flat `GameState52c` fields (`submapScene_a4`/`submapCut_a8` — the M7-01 V1–V10 migration chain). The WMap/SMap-only savable-state model and the legacy-blob migrator (WMAP 0x3156 / SMAP 0x3256) are M7-01; this document fixes the SMap side's field set.
+`writeSaveData`/`readSaveData` (`SMap.java:462–522`): the SMap contributes a `MapTag` with `scene` (int), `cut` (int), `indicatorsDisabled` (bool — the script-controlled cutscene flag is save-persistent), `primaryPartyBackup` (int list — the party-order backup for the char-swap system, M9-06; script-accessible as **game var 63** — read `GameVarParam.java:142`, write case 63 `:299` appends an int — the script-side party-restore surface), and — "we need wmap stuff for when we're sailing the Queen Fury, go inside, and save" (source comment, :483) — the world-map sailing state: `pathIndex`, `dotIndex`, `dotOffset`, `facing`, `directionalPathIndex`. On read, `unstuckMovementBudget` is reset to 60.0 (§6.3) and a legacy-save fallback (no `scene` tag) restores cut/scene from the flat `GameState52c` fields (`submapScene_a4`/`submapCut_a8` — the M7-01 V1–V10 migration chain). The WMap/SMap-only savable-state model and the legacy-blob migrator (WMAP 0x3156 / SMAP 0x3256) are M7-01; this document fixes the SMap side's field set.
 
 ### 10.2 Savability (SM17)
 
@@ -497,7 +497,7 @@ Everything in §2 (timing), §3 (the state machines, latches, fades), §4 (asset
 
 ### 10.3 Loading
 
-`loadSaveFromMenu` (:529–549, §3.1) plus `restoreMusicAfterMenu` → `submap.startMusic()`; the load path resets `encounterAccumulator_800c6ae0 = 0` and re-arms the music. The `loadingSave` flag suppresses `renderSubmap` during the load-in (:3778–3780) so the fade-in shows the save's position cleanly.
+`loadSaveFromMenu` (:529–549, §3.1) plus `restoreMusicAfterMenu` → `submap.startMusic()`; the load path resets `encounterAccumulator_800c6ae8 = 0` and re-arms the music. The `loadingSave` flag suppresses `renderSubmap` during the load-in (:3778–3780) so the fade-in shows the save's position cleanly.
 
 ---
 
@@ -567,7 +567,7 @@ The `encounters` registry (M8-03: 512 `lod` entries) is the content seam for enc
 | SM14 | Collision-driven transitions: NEWROOT bit 0x10 + scene bits 16–21 + cut bits 22+, fired only on script-ticked frames (GH#1195); wmap-exit boundary latching (`MapTransitionData4c`) | 3 (decompiled + data) | source-verified |
 | SM15 | 144 native script functions (slot map §9.1); controller script = file 0, per-sobj scripts = files 1..N; 20-sobj capacity, sobj 0 = player; sobj-sobj collision flags; attached effects (dust/smoke/snow/footprints/Law Pod) | 3 (decompiled table + scripts) | source-verified (patch corpus M8-03) |
 | SM16 | Script-patch surface: 353 entries (351 diff + 2 replacement), submap scripts under `SECT/DRGN21.BIN`; the patch pipeline is M8-03 §3 (CRC-gated, restore-on-removal) | 4 (tooling) over 3 (scripts) | source-verified |
-| SM17 | Save contract: `scene/cut/indicatorsDisabled/primaryPartyBackup/pathIndex/dotIndex/dotOffset/facing/directionalPathIndex` tags; unstuck budget reset on load; `canSave` = ALWAYS (savepoint) / NEVER (blacklist cuts, retail-bug-justified) / SAVE_ANYWHERE (config); post-battle auto-save | 3 (decompiled) + 4 (blacklist, autosave) | source-verified |
+| SM17 | Save contract: `scene/cut/indicatorsDisabled/primaryPartyBackup`/`pathIndex`/`dotIndex`/`dotOffset`/`facing`/`directionalPathIndex` tags; `primaryPartyBackup` also script-accessible as game var 63 (`GameVarParam.java:142/:299`); unstuck budget reset on load; `canSave` = ALWAYS (savepoint) / NEVER (blacklist cuts, retail-bug-justified) / SAVE_ANYWHERE (config); post-battle auto-save | 3 (decompiled) + 4 (blacklist, autosave) | source-verified |
 | SM18 | Music: 3-tier resolution (flag-gated `_8004fb00` with per-entry story bits in `gameState._1a4`, unflagged `_8004fa98`, base `submapMusic_80050068` [64 ids] with Moon's `moonMusic_8004ff10` and the submap-57 intro special case); `FUN_8001c84c` change detection (−1 stop / −2 retrigger / −3 keep); per-submap SFX from DRGN0/{5750+id} at volume 0x7f, gated by audio bit 0x2 | 3 (decompiled + tables) | source-verified |
 | SM19 | `_800bd7b0` transition-mode global: 2/9/−4/3 written by `FUN_80020ed8` on state change (+ one-shot `_800bd7ac` title flag re-asserting 9 via `FUN_800218f0`), 1 written on `unloadSmap`; the sole runtime read is game var 67 (script-visible) — **closes Q-03** | 3 (decompiled) | source-verified (retail script usage of var 67 asset-validated-pending) |
 | SM20 | Savepoint system: script-placed (772), engine-rendered (TMD + 2 ring quads + 8 rotating petals + scrolling VRAM strip), `standingInSavePoint_8005a368` (game var 124) → `canSave = ALWAYS`; triangle indicators: 21 slots, player indicator CLUT-colored by accumulator (≤0xa00 / ≤0xf00 / else), indicator-mode config with live toggle, reduce-motion gate | 3 (decompiled) | source-verified |
