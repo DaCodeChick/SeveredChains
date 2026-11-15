@@ -2,6 +2,13 @@
 
 Status: **Complete, pending user approval (2026-11-15).** Activated 2026-11-14 with approved starting point `4a2acb8` (the M10 commit). This directory contains the complete P0 deliverable set: the proposed Rust architecture, the technical decision records, the compatibility decision dispositions, the implementation roadmap, the verification strategy, and the research-to-implementation traceability matrix. **Nothing here is approved.** The six crate names are fixed user decisions; every internal design, dependency, decision record, and milestone in this directory is a **proposal** awaiting explicit user approval. No production Rust code, no crates, no dependencies, and no commits by the agent were produced in P0.
 
+**Update, 2026-11-15 — I0 executed against these documents.** I0 (the workspace skeleton plus the
+bit-exact primitive core) has been built and gated on top of this plan; the milestone's gate record
+is `05-verification-strategy.md` §6 and the row-level record is `06-traceability-matrix.md` §12. The
+two places where a P0 document claimed more than I0 delivers (the I0 row list in `04`
+and the §10 milestone roll-up here) were corrected in place rather than left to match the code. The
+rest of this file describes P0 as delivered and still reads as of 2026-11-15.
+
 ## 1. The deliverable set
 
 | Document | Contents | Key artifacts |
@@ -59,7 +66,7 @@ Nothing in the implementation phase (I0 onward) begins without explicit approval
 
 ## 5. Boundaries (restated)
 
-- **Planning only.** P0 produced planning documents and the documented in-place research corrections. No Rust production code, no crates, no dependencies installed, no build configuration.
+- **Planning only, for P0.** P0 produced planning documents and the documented in-place research corrections. At the time of writing there was no Rust production code, no crates, no dependencies installed, no build configuration. (Superseded as a description of the repository by I0, which added the two-crate workspace; it remains true of P0 itself.)
 - **No commits by the agent.** The P0-01..04 deliverables + the governance/research corrections were committed by the user as `f67d268` (2026-11-15). The remaining P0 files (05, 06, this README) and the governance updates below are presented as a verified working tree for the user's commit.
 - **Reference repositories unmodified.** All four remain at their pinned revisions (verified at P0 preflight; the P0 work performed read-only inspection only).
 - **No `asset-validated` claims.** The planning set asserts none; the I10 asset pass is the only claim-upgrade surface, and it runs only on user-provided assets.

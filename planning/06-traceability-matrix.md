@@ -8,20 +8,20 @@ Legend — **V** columns: `U` unit, `G` golden vector, `P` property, `I` integra
 
 | Row | Obligation (short) | O | Milestone | V | Notes |
 |---|---|---|---|---|---|
-| G1 | VRAM 1024×512, dual 15/24-bit stores, 4/8-bit texels | rt | I0 (model) / I5 (backend) | M G | The dual-store model in I0 (memory layout); the mode-0 `vramTexture15` sampling in I5 |
-| G2 | Bpp 4/8/15/24 encode/decode pair + TPage/CLUT fields | rt | I0 | G P | Exhaustive 15-bit pattern goldens + round-trip property (the I0 headline) |
+| G1 | VRAM 1024×512, dual 15/24-bit stores, 4/8-bit texels | rt | I5 (backend) | M G | **I0 correction (2026-11-15): the dual-store model was not built in I0.** What I0 delivered is the texel-width half — the 4/8/15/24 line packing and the index-within-word rule — verified exhaustively in `psxrt/tests/bpp_exhaustive.rs`. The 1024×512 geometry, the two stores and the mode-0 `vramTexture15` sampling land together in I5, where there is a surface to sample into |
+| G2 | Bpp 4/8/15/24 encode/decode pair + TPage/CLUT fields | rt | I0 | G P | **Verified at I0.** Exhaustive decode over all 65,536 words × slots at each paletted depth (`psxrt/tests/bpp_exhaustive.rs`, 9 tests) + the packed-line round-trip property over in-domain indices and the out-of-domain companion (`psxrt/tests/properties.rs`). No fixture: the sweep is its own oracle, digests taken from the reference's expressions |
 | G3 | Center-origin offset; double buffer; PSDCNT frame-counter cache invalidation | rt | I0 / I5 | M G | The offset model in I0; the matrix-cache invalidation in the I5 wgpu backend |
 | G4 | 384 → 368 display/draw-width clamp | cp | I5 | M D | **CD-04** owns the clamp behavior; UR row — the retail-width evidence is the I10 asset/external pass (`A`); the clamp is a divergence-note row |
 | G5 | Ordering table (14 bits, 0x4000, zMax clamp, slot-0x3fff clear, back-to-front) | rt | I0 / I5 | M G | The mechanism in I0; the psx/01 §7 worked trace as golden in I5 |
 | G6 | Same-z order: LIFO (reference) vs FIFO (PSX) | cp | I5 | M D | **CD-01** (default LIFO, knob to FIFO); the `Battle.applyTextureAnimation` dependency = the I8 divergence guard; the retail-overlap census = I10 `A` |
-| G7 | z-insertion `(avgZ/4 + zOffset)/2^zShift` clamped, float division | rt | I0 / I5 | M G | I0 arithmetic; I5 trace |
+| G7 | z-insertion `(avgZ/4 + zOffset)/2^zShift` clamped, float division | rt | I5 | M G | **I0 correction: not built in I0** — the formula is meaningless without the ordering table it writes into, and I0 built no table. I5 with the trace |
 | G8 | Rasterizer edge rules (clockwise, zero-area drop, top-left, integer barycentric) | rt | I5 | M | Mode-0 replay reproduces the rules; pixel-exactness stays Blocked (no baseline) — model-conformance only |
-| G9 | Texturing: 15-bit index, CLUT from vram24, index-0 transparent, `T×C>>>7` | rt | I0 / I5 | M G | The decode in I0; the `vertColour × texColour` float path in I5 |
-| G10 | Blend equations (B+F)/2, B+F, B−F, B+F/4 (F/4 first, truncating) | rt | I0 | G | Exhaustive (B,F) pair goldens; the B+F/4 decomposition rounding-delta documented in I5 |
+| G9 | Texturing: 15-bit index, CLUT from vram24, index-0 transparent, `T×C>>>7` | rt | I0 (arithmetic) / I5 (lookup) | M G | **Partly verified at I0:** the `T×C>>>7` modulation and the 15-bit index extraction exist and are swept exhaustively (`psxrt::blend::modulate` + `psxrt/tests/blend_exhaustive.rs`, `Bpp::Bits15` decode). The CLUT-from-vram24 read and the index-0 transparency need a VRAM model and move to I5, together with the `vertColour × texColour` float path |
+| G10 | Blend equations (B+F)/2, B+F, B−F, B+F/4 (F/4 first, truncating) | rt | I0 | G | **Verified at I0.** `psxrt/tests/blend_exhaustive.rs` sweeps all 65,536 (B,F) pairs per mode and pins the F/4-first truncating order; the saturation/truncation census per mode is asserted, so the sweep cannot quietly become a no-op. The B+F/4 decomposition rounding-delta stays a documented divergence, re-checked at I5 against the shader path |
 | G11 | TPage rate-00 → B+F/2 | cp | I5 | M D | **CD-05** (default: keep the reference mapping); the retail rate-00 census = I10 `A` |
 | G12 | Mask bit set/skip; NOT_TO_MASKED_AREAS; textured-alpha gate | rt | I5 | M G | The two-pass rule over a scripted attribute stream |
 | G13 | One-frame display latency; swap-before-onDraw +1; FMV render-tick cadence | rt | I5 | M G | The buffer-flip model golden; the FMV cadence cross-checked in I6 (CL-ENG-13) |
-| G14 | CPU→VRAM upload (both stores, 15-bit LE words, partial-rect guard) | rt | I0 / I5 | M G | I0 model; I5 host (the async load path — CL-AST-11) |
+| G14 | CPU→VRAM upload (both stores, 15-bit LE words, partial-rect guard) | rt | I5 | M G | **I0 correction: not built in I0** — no upload path without a VRAM to upload into. I5; I5 host (the async load path — CL-AST-11) |
 | G15 | VRAM→VRAM copy (per-pixel, mask-honoring, no overlap protection) | rt | I5 | M D | The (960,256) backing-store behavior; the PSX BLT overlap semantics stay Unresolved (register) — the *no-protection* behavior is the D-guard |
 | T1 | RTPS/RTPT/NCLIP/AVSZ/NCCS register-model subset | rt | I5 | M G | The psx/02 §4 worked-example chains; the unused-tail absence asserted (not ported) |
 | T2 | Float vs fixed-point per-op rounding (SXY 22.10, NCCS 12.12, MAC0 32) | rt/cp | I5 | M D | **CD-03** (default: float model + documented bounded divergence; the integer variant exists per T4); the external worklist = I10 `A` |
@@ -46,10 +46,10 @@ Legend — **V** columns: `U` unit, `G` golden vector, `P` property, `I` integra
 | X5 | 6→7 zigzag FIR (dead) | — | — | D | **Not ported** (cross/02 §11) — documented in the im::xa module |
 | X6 | Static never-reset XA predictor (leaks across FMV files) | im | I1 | D | **CD-07** (default: preserve the leak as the documented behavior; the knob for per-file reset is dev-only); the retail-boundary observation = I10 `A` |
 | X7 | Mono = two mono streams; FMV XA single stream per file | im | I1 | M G | The lane-geometry golden over a synthetic mono sector |
-| R1 | PSX degree 4096/turn | rt | I0 | G | The `psxDegToRad` golden |
-| R2 | `rsin`/`rcos` float×0x1000 short-cast; positive-only-at-constrained-sites | rt | I0 | G D | The theta-grid goldens; the "always positive only at constrained call sites" note as a D-guard (a call site passing an out-of-range theta is a divergence test) |
-| R3 | `simpleRand` LCG16 (×9+0x3711, seed 3; /2 & 0xffff; the unreachable guard) | rt | I0 (algo) / I6 (wiring) | G I | The 10k golden; the guard's vsync-sourcing documented; the consumer census traced at I7/I8 (the gameplay rolls) |
-| R4 | `rand` LCG15 (×0x41c64e6d+0x3039; bits 30:16; initial 0x24040001) + **seed source** | rt/cp | I0 (algo) / I6 (wiring) | G D | The algorithm golden in I0; **CD-02** owns the seed source (default: mirror the reference's host-clock `srand` at submap entry + the dev `--seed` override); the 59 call sites' non-reproducibility = the tier-2 invariants (planning/05 §5); the original-behavior evidence = I10 `A` (Q-70) |
+| R1 | PSX degree 4096/turn | rt | I0 | G | **Verified at I0.** `psxrt/tests/golden_trig.rs` pins the constant's bit pattern (`0x3ac90fdb`) and the 16,385-angle grid it produces with |
+| R2 | `rsin`/`rcos` float×0x1000 short-cast; positive-only-at-constrained-sites | rt | I0 (golden) / I5 (sites) | G D | **Golden half verified at I0:** 32,770 assertions over θ = −8192…8192 from an independent Java oracle (`trig_grid.txt`), including the double narrowing. The D-guard half needs call sites — a state passing an out-of-range theta is a divergence test that can only exist once there are states, so it lands at I5 with the call-site census |
+| R3 | `simpleRand` LCG16 (×9+0x3711, seed 3; /2 & 0xffff; the unreachable guard) | rt | I0 (algo) / I6 (wiring) | G I | **Algorithm verified at I0:** 12,000 steps from seed 3, replayed in file order, from an independent Java oracle (`rng_lcg16.txt`), plus the reseed branch exercised deliberately (`golden_rng.rs`, `properties.rs`). Two findings the fixture recorded: the `/2` is a truncating signed divide, not a shift, and the guard multiplies the frame count by 9 *before* the ordinary update, so a guarded step advances by 81. The guard's vsync-sourcing is documented; the consumer census still lands at I7/I8 |
+| R4 | `rand` LCG15 (×0x41c64e6d+0x3039; bits 30:16; initial 0x24040001) + **seed source** | rt/cp | I0 (algo) / I6 (wiring) | G D | **Algorithm verified at I0:** 12,000 steps from 0x24040001 (`rng_lcg15.txt`) and the output-range invariant swept as a property. **CD-02** still owns the seed source (default: mirror the reference's host-clock `srand` at submap entry + the dev `--seed` override); the 59 call sites' non-reproducibility = the tier-2 invariants (planning/05 §5); the original-behavior evidence = I10 `A` (Q-70) |
 | R5 | Fate op bodies: `RAND = X × simpleRand() >>> 16`; SIN_12/COS_12/ATAN2_12 | sdk | I4 | G | The op-body goldens against the injected LCG16 stream (the R3 integration point) |
 
 The M4-05 posture check: the 4 HA/BE/FO/UR classes carry into the status column semantics — the FO rows (T5, S9, X5) are *non-port or host-internal* (D or I), the UR rows (G4, G6, G11, S7, X6, R4-seed) are CD-owned (planning/03) with their evidence at I10, the HA row (T4) is the bit-exact I7 golden.
@@ -59,7 +59,7 @@ The M4-05 posture check: the 4 HA/BE/FO/UR classes carry into the status column 
 | Row | Obligation (short) | O | Milestone | V | Notes |
 |---|---|---|---|---|---|
 | CL-ENG-01 | Frame loop shape + one-frame input edges | en | I3 | I D | The 21-phase trace (I3 (a)); the edge suite (I3 (b)) |
-| CL-ENG-02 | Per-context rates (60/30/20 Hz; the 19-site census; the 1/60 s unit) | en | I3 (rates) / I6–I9 (write-site census) | I D | The rate-table suite (I3 (e)); the per-context write sites land with each state (the census is the D-guard: a state that writes an undocumented rate is a regression) |
+| CL-ENG-02 | Per-context rates (60/30/20 Hz; the 19-site census; the 1/60 s unit) | en | I3 (rates) / I6–I9 (write-site census) | I D | The rate-table suite (I3 (e)); the per-context write sites land with each state (the census is the D-guard: a state that writes an undocumented rate is a regression). **The unit half is verified at I0** — `psxrt::timing` models the cadence → rate → clock-increment chain and the tick gate over a 352-row oracle matrix (`psxrt/tests/timing_matrix.rs`); what remains is where the rates get *written*, which needs states |
 | CL-ENG-03 | Frame-locked pacing; tick-skip; speed 1..16 | en/bin | I3 | I | The pacing suite (liveness bounds, planning/05 §4); the speed multiplier over both real rate + virtual counter |
 | CL-ENG-04 | Queued transition (frame-top apply; destroy-before-init; forced vsyncMode 2; native-table reinstall at apply) | en | I3 | I D | The transition suite (I3 (c)); the reinstall call recorded (the I4 hook exercised at I4's integration) |
 | CL-ENG-05 | Teardown at the same onDraw's end-of-frame fixed point | en | I3 | I D | The teardown suite (I3 (d)); the "renders once more" observation |
@@ -218,7 +218,7 @@ Milestone roll-up (rows whose *implementation* obligation lands at the milestone
 
 | Milestone | Rows landed | Headline obligations |
 |---|---|---|
-| I0 | 11 (R1–R5, G2, G7-arithmetic, G10, G1-model, G9-decode, G14-model, + the timing unit) | The bit-exact primitives |
+| I0 | 7 verified (R1, R2-golden half, R3-algorithm, R4-algorithm, G2, G10-equations, the CL-ENG-02 timing unit) + 4 moved out (G1-dual-store, G7-arithmetic, G9-lookup, G14-upload → I5, with the VRAM and ordering model they need) | The bit-exact primitives |
 | I1 | 15 (CL-AST-01..12, X1–X3, X5-nonport, X7, CL-AUD-10) | The format + codec core |
 | I2 | 9 (CL-MOD-01..07-framework, CL-SAV-10..15-framework) | The SDK contract layer |
 | I3 | 13 (CL-ENG-01..13 framework halves, S2, CL-AST-11, CL-ENG-02 rates) | The frame contract, headless |
@@ -239,3 +239,70 @@ Milestone roll-up (rows whose *implementation* obligation lands at the milestone
 3. **The CD rows (G4, G6, G11, S7, X6, R4-seed, T2, C-01, Q-74, Q-80) carry dual status**: the *implementation* status (verified at the owning milestone — the policy is live with its knob + note) and the *evidence* status (open until the I10 pass or external documentation closes it — the register). The implementation status never blocks on the evidence status.
 4. **The P0 corrections propagate here as notes, not silent edits**: the battle-RNG identity (the 48-bit LCG, not a Mersenne Twister) and the 135-row count are the two P0 in-place corrections to the research corpus; this matrix's CL-GLP-02 note is the implementation-side statement.
 5. **New rows are added only by a research correction** (a finding that changes a constraint) — the plan does not invent obligations; the register is the queue.
+
+## 12. The I0 record (closed 2026-11-15)
+
+The first application of rule 1, and the reason this section exists: from here on, a row's status
+is carried with its evidence, not with anyone's memory of what the milestone was supposed to do.
+Two crates exist — `psxrt` (fixed-point and trig, three RNG streams, texture-depth addressing,
+blend arithmetic, frame cadence) and `psxrt-compat` (the policy framework with the CD defaults
+mounted as data). 72 tests run. The test-data contract, the fixture inventory and the two
+fixture-reading paths are in `README.md`; enforcement is `crates/psxrt/tests/fixtures.rs` plus
+`scripts/prepare_test_fixtures.sh`, which together check the inventory, the bytes, the provenance
+and the target-directory copies.
+
+### What is verified, and against what
+
+| Row | Status | Check | Expected values from |
+|---|---|---|---|
+| R1 | **verified** | `psxrt/tests/golden_trig.rs` (constant + grid) | `testdata/generators/GoldenTrig.java` |
+| R2 (golden half) | **verified** | `psxrt/tests/golden_trig.rs`, 32,770 comparisons over 16,385 angles | `trig_grid.txt`, same oracle |
+| R2 (site half) | open → I5 | needs call sites to guard | — |
+| R3 (algorithm) | **verified** | `psxrt/tests/golden_rng.rs` (12,000-step replay, guard branch), `properties.rs` | `rng_lcg16.txt` from `GoldenRng.java` |
+| R4 (algorithm) | **verified** | `psxrt/tests/golden_rng.rs` + the range property in `properties.rs` | `rng_lcg15.txt` |
+| G2 | **verified** | `psxrt/tests/bpp_exhaustive.rs` (9 tests, every word × slot per paletted depth) + round-trip and out-of-domain properties | the reference's packing expressions, digested independently |
+| G10 | **verified** | `psxrt/tests/blend_exhaustive.rs` (all 65,536 pairs × 4 modes, plus the modulation sweep and its saturation census) | the reference's blend expressions, FNV digests taken from Java |
+| CL-ENG-02 (unit half) | **verified** | `psxrt/tests/timing_matrix.rs` (353-row cadence matrix + the tick-gate bitmap), the composition test, `properties.rs` gate equivalence | `timing_matrix.txt`, `script_gate.txt` from `GoldenTiming.java` |
+
+### What was moved, and why it is not a deferral
+
+Four halves that P0 assigned to I0 were not built: the dual 15/24-bit store model (G1), the
+z-insertion arithmetic (G7), the CLUT lookup and index-0 transparency (G9), and the CPU→VRAM
+upload (G14). They now sit at I5, which is where the ordering table, the VRAM surface and the
+shader path land together — I5's own scope has always named them.
+
+This is a scope correction, not an evidence deferral, so it carries no register entry and no
+evidence class: nothing about the original hardware is in question here — the mechanism was simply
+never written. How it was recorded is worth keeping, because it is how a milestone passes its own
+check on paper. The I0 scope line in `planning/04` lists five `psxrt` modules, none of them a
+memory model, while the row list beside it claimed "G1 (mechanism)"; and the milestone roll-up at
+§10 counted eleven rows, adding G7's arithmetic, G9's decode, G14's upload and R5 — R5 being the
+Fate op bodies, whose own row has always said `sdk`/I4. Both lists now say what was built and
+what was not, and nothing in the I0 suite claims a VRAM, an ordering table or an upload path.
+
+### The claim ceiling on all of the above
+
+Every golden above is source-derived: it proves the Rust matches the documented/reference formula
+as transcribed by an independent program (`source-verified` + `experimentally verified`, per
+planning/05 §3.5). None of it is `asset-validated`; no retail bytes were used, and none of these
+rows needed any. Three things the fixtures settled rather than assumed, each recorded in
+`testdata/fixtures.provenance` with the derivation:
+
+- the 48-bit generator's identity with `java.util.Random` (48,000 comparisons, zero mismatches,
+  re-runnable via `Random48Probe.java`) — the P0 battle-RNG correction, now executable;
+- `mix32` widens a **sign-extended** int, so half of all draws are negative before the mix — the
+  first implementation zero-extended and matched nothing;
+- `Math` and `StrictMath` agree across the whole trig grid, which is why the open jOML question
+  stays classified as immaterial instead of being guessed at.
+
+### The rule for the next fixture-adding milestone
+
+No fixture is shared between crates today. The first documented case where two crates will want
+data out of the same source is the ADPCM core: the `psx/04` §5 worked example feeds the codec in
+`psxrt` (rows X2/X3, and the S5 block goldens, which this matrix says share that codec core) and
+`psxrt-import`'s XA extraction/transcode fixtures at I1. That is a shared **oracle**, not a shared
+**file** — each crate gets its own fixture from its own generator, and if two byte streams ever do
+come out identical, the sharing has to be declared in both manifests and then checked against one
+fingerprint. `psxrt/tests/fixtures.rs` pins the current census (`psxrt: 7`, and no `testdata/`
+directory in `psxrt-compat`), so an accidental cross-crate name collision fails the suite rather
+than passing on a coincidence. See `README.md` §Fixtures shared between crates.

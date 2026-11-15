@@ -1,0 +1,53 @@
+# Provenance record for the psxrt golden fixtures (planning/05 §3 rule 1).
+#
+# One block per fixture, keyed by file name. `oracle` names where the expected values came from,
+# `derivation` is the steps that produced the bytes, `seed` is the input state, `note` is what a
+# reader needs in order to refresh the file correctly. The three first keys are required for
+# every registered fixture — checked by scripts/prepare_test_fixtures.sh and by
+# tests/fixtures.rs — because a fixture whose derivation nobody can state is a fixture nobody can
+# re-derive, and it silently stops being evidence.
+#
+# Nothing here is extracted from game data. Every file is generated from a published algorithm or
+# from a reference expression, which is the project's boundary for test data (planning/05 §1.4).
+
+[rng_lcg15.txt]
+oracle = testdata/generators/GoldenRng.java, an independent Java program written for the fixture
+derivation = 12000 steps of seed = seed * 0x41c64e6d + 0x3039 in 32-bit wrapping arithmetic; output = (seed >>> 16) & 0x7fff
+seed = 0x24040001
+note = rows are `seed_before output`, replayed in file order so that state consumption is pinned as well as the values; the reference's `rand` generator, psx/02 §5 and cross/02 row R4
+
+[rng_lcg16.txt]
+oracle = testdata/generators/GoldenRng.java, an independent Java program written for the fixture
+derivation = 12000 steps of base = reseeded ? vsync * 9 : seed, then seed = base * 9 + 0x3711 in 32-bit wrapping arithmetic; output = (seed as a signed int / 2) & 0xffff, where the divide truncates toward zero and is deliberately not an arithmetic shift
+seed = 3, with a host-vsync stand-in of 0x1234 injected whenever the low 12 bits of the state are zero
+note = the third column records that injection (1 = reseeded); the divide-versus-shift distinction is the reason the fixture is generated rather than reasoned about, and psx/02 §4 records the guard as unreachable in the original game
+
+[rng_random48.txt]
+oracle = testdata/generators/GoldenRng.java, drawing from a real java.util.Random instance
+derivation = four blocks of 12000 draws from one stream — nextInt(bound) over a 16-bound cycle that covers both the power-of-two shortcut and the rejection loop; nextFloat(); nextFloat(bound) with the bound taken as the bit patterns 0x40c90000 | (i & 0x3f); nextDouble(). Floats and doubles are recorded as bit patterns, not decimal values
+seed = 0x123456789ABC, applied through setSeed, so the 48-bit mask and the xor of the multiplier are exercised
+note = the identity of this generator with legend.core.Random (and therefore its difference from a Mersenne Twister) was established by testdata/generators/Random48Probe.java at 48000 comparisons with zero mismatches, JDK 27; the rejection paths are the reason the file is one continuous stream
+
+[trig_grid.txt]
+oracle = testdata/generators/GoldenTrig.java, an independent Java program written for the fixture
+derivation = for each angle theta from -8192 to 8192, rad = theta * PSX_DEG_TO_RAD in float, then rsin = (short)((float)Math.sin(rad) * 0x1000) and rcos = (short)((float)Math.cos(rad) * 0x1000), where the narrowing to float happens before the multiply because the reference's MathHelper.sin returns float
+seed = the grid itself, 16385 angles; PSX_DEG_TO_RAD = (360.0f / 4096.0f) * (float)(Math.PI / 180.0f) = 0x3ac90fdb
+note = the reference narrows twice, and both narrowings are reproduced in the oracle rather than in the Rust code; psx/02 §3 and cross/02 rows R1 and R2
+
+[trig_strictmath_divergences.txt]
+oracle = testdata/generators/GoldenTrig.java, the same pass over the grid with StrictMath in place of Math
+derivation = the angles at which the two transcriptions produce a different i16 result for sine or cosine
+seed = the same 16385-angle grid
+note = header only, because the two agree everywhere; this is the reason the open question about which transcendental the reference's math library resolves to is recorded as immaterial rather than guessed. The file is kept so that a platform where they differ reports it as a list of angles to reconcile
+
+[timing_matrix.txt]
+oracle = testdata/generators/GoldenTiming.java, which transcribes reference expressions rather than reimplementing them
+derivation = 22 vsync counts x 16 speed values, emitting the clamped cadence (frames = max(1, vsyncMode)), the rate (hz = 60 / frames * speed) and the unclamped clock increment (timestamp += vsyncMode)
+seed = the vsync counts -2, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 15, 20, 24, 30, 40, 60, 61, 70 and 120; speeds 1 through 16
+note = the negative and zero counts are not reachable from the shipped configurations; they are in the matrix because the reference reads the value from a script variable, and because the clamp and the increment disagree there. 48 of the 352 rows have a zero rate
+
+[script_gate.txt]
+oracle = testdata/generators/GoldenTiming.java, transcribing the menu tick test
+derivation = for each divisor the reference can reach (max(1, 3 - vsyncMode) for vsyncMode 1, 2 and 3), the tick bitmap over 48 frames, frame 0 first, 1 meaning the logic runs
+seed = divisors 1, 2 and 3
+note = the second key is the divisor, not a frame count; the reference's counter is a global that counts frame-loop iterations and is not reset mid-game, which is what tests/properties.rs checks the gate against

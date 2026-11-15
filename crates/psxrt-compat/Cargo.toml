@@ -1,0 +1,16 @@
+[package]
+name = "psxrt-compat"
+description = "Compatibility policy layer: the documented divergences between original PSX behaviour and the reference implementation, as typed defaults with knobs."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+psxrt = { path = "../psxrt" }
+
+[lints]
+workspace = true
+[dev-dependencies]
+proptest = "1.12.0"

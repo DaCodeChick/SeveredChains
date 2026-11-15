@@ -1,0 +1,15 @@
+[package]
+name = "psxrt"
+description = "Backend-agnostic PSX platform/runtime mechanisms: fixed-point math, random streams, pixel formats, blend arithmetic, frame timing."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true
+[dev-dependencies]
+proptest = "1.12.0"

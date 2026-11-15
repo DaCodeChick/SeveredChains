@@ -61,8 +61,7 @@ Each milestone's gate (planning/04) is defined as: **(a)** the `cargo test` suit
 
 | Milestone | Load-bearing suites | The "proof of gate" artifact |
 |---|---|---|
-| I0 | The RNG golden (3 parameterizations × 10k); the `rsin`/`rcos` grid; the Bpp exhaustive pair; the 4 blend equations exhaustive; the timing unit table | The golden manifest v1 (the committed derivation) |
-| I1 | The 12 format suites (incl. the ISO conformance over the synthetic 4-disc image); the pipeline determinism (the `files/` tree byte-stable); the patch-orchestration idempotence | The fixture manifest v1 (no proprietary bytes — asserted by a content scan) |
+| I0 | The RNG golden (3 parameterizations × 10k); the `rsin`/`rcos` grid; the Bpp exhaustive pair; the 4 blend equations exhaustive; the timing unit table | The golden manifest v1 (the committed derivation) || I1 | The 12 format suites (incl. the ISO conformance over the synthetic 4-disc image); the pipeline determinism (the `files/` tree byte-stable); the patch-orchestration idempotence | The fixture manifest v1 (no proprietary bytes — asserted by a content scan) |
 | I2 | The D-row contract suites (the 21-registry window; the 113-event-class dispatch matrix; the i18n 4-level matrix; the 12-step boot; the Tag 10-type round-trip; the config `.dcnf`/`.dpre` byte matrix) | The framework vertical slice (the synthetic first-party mod booted) |
 | I3 | The 21-phase trace; the lifecycle suite (boot 14 steps + shutdown order); the teardown fixed point; the rate table; the error 4-class matrix; the edge-word protocol | The headless harness v1 (the reusable asset) |
 | I4 | The VM conformance (allocation/pacing/storage/lifecycle/dispatch/ops/errors); the round-trip fidelity property (the hazard set + 100 random scripts); the meta alignment; the C-01 dual-table documentation | The round-trip gate report (the property pass + the hazard-set regression list) |
@@ -74,6 +73,49 @@ Each milestone's gate (planning/04) is defined as: **(a)** the `cargo test` suit
 | I10 | The 353-entry patch pipeline (the CRC gate + idempotence + restore); the data-mod end-to-end (3-mod set over the full smoke); the i18n live re-translation; the debugger `*Source.DEBUGGER` tags; the **full-game smoke** (the composed integration); the determinism meta-test (the `--rerun` diff = 0); the asset pass (or the Blocked list); the audits | The final gate report (135/135 rows accounted; the CD statuses; the register updates; the claim-class ledger) |
 
 The gate is **binary**: all (a)–(e) green, or the milestone is not complete. A red suite with an "acceptable" explanation is still red (the explanation goes to the register, the gate stays closed) — the research-phase discipline, continued.
+
+### The I0 gate record (closed 2026-11-15)
+
+**What ran.** `cargo test --workspace` — 72 tests over 8 test binaries (the two golden-vector
+suites, the two exhaustive sweeps, the timing matrix, the property suite, the fixture suite, the
+policy-ledger suite), no failures. `cargo clippy --workspace --all-targets` — no warnings.
+`scripts/audit_file_endings.py` — no violations. `scripts/prepare_test_fixtures.sh --check` —
+clean, including the target-directory copies.
+
+**The oracle rule (§3, "the oracle is the documented contract, not the reference code").**
+Held. Every expected value comes from outside the code under test: a committed generator under
+`crates/psxrt/testdata/generators/`, a digest computed once from the reference's own expressions,
+or an exhaustive sweep whose oracle is the reference's formula. Delivered volumes: 12,000 steps per
+RNG stream (48,000 draws for the 48-bit stream), one 16,385-angle trig grid, 65,536 pairs × 4 blend
+modes plus the modulation sweep, the full Bpp word/slot sweep, 352 cadence rows and 3 gate
+divisors.
+
+**Rows (gate item c).** 7 verified with their test IDs, 4 moved to I5; recorded in planning/06 §12.
+
+**Audits (gate item d).** Naming scan: no placeholder-pattern identifier in the new code — the only
+grep hit is the English word "undefined" inside a doc comment. Dependency allow-list: no runtime
+dependency anywhere (`psxrt` none; `psxrt-compat` → `psxrt`; `proptest` is a dev-dependency in
+both), so TD-04's std-only side holds. No proprietary bytes: the seven fixture files under
+`crates/psxrt/testdata/` are machine-generated and manifest-registered, and the inventory test
+fails on an unregistered file — that is §8.5 enforced at crate level, in both directions.
+
+The §8.2 naming scan and the §8.3 map check were run by hand, because I0's scope carried the
+file-ending audit only (planning/04 §I0) and no scanner was built. Naming: no placeholder-pattern
+identifier in production or test code (the sole grep hit is the English word "undefined" in a doc
+comment). Map: the crate's cited original identifiers are mapped in `crates/psxrt/src/REMAP.md`,
+which also records the one cited original with **no** Rust item behind it — the two disagreeing
+page-word encoders (`MathHelper.makeTpage` and `Graphics.GetTPage`), documented as a divergence in
+`bpp.rs` and deferred to I5 with the ordering table they feed.
+
+**Open after I0.** The R2 call-site guard (I5); the CL-ENG-02 per-context rate table (I3) and its
+write-site census (I6–I9); CD-02's seed source (the I6 wiring, the I10 `A` evidence); and the §8.2
+naming scanner, which stays manual until something enforces it. None of the four is asset-blocked.
+
+**Claim ceiling.** Nothing in I0 is `asset-validated` or `format-corroborated`. The seven fixtures
+are `source-verified` derivations; the two identity checks that lean on a JDK (the 48-bit
+generator's identity with `java.util.Random`, and `Math`/`StrictMath` agreement across the whole
+trig grid) are `experimentally verified` on JDK 27, and the probe that established the first one is
+committed so it can be re-established on another JDK.
 
 ## 7. The asset-validated pass (I10; the only claim-upgrade surface)
 
