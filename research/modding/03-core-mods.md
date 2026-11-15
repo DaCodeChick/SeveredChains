@@ -17,7 +17,7 @@ Per-registrar counts (each `REGISTRAR.register(...)` call = one entry; the 14 ex
 | Registry | lod_core | lod | turn_order | Total | Notes (examples) |
 |---|---|---|---|---|---|
 | `config` | 80 | 7 | 1 | **88** | M7-02 census (e.g. `lod_core:language`, `lod:max_level`, `turn_order:show_turn_order`) |
-| `inputActions` | 40 | 29 | — | 69 | core: menu navigation, `general_*` (fullscreen/speed/turbo), freecam, debug controls; lod: gameplay actions |
+| `inputActions` | **41** | 29 | — | **70** | core: menu navigation (20), title actions (2), `fmv_skip`, `general_*` (5: fullscreen/speed/turbo), freecam (7), debug controls (6); lod: gameplay actions |
 | `items` | 1 | 54 | — | 55 | `lod_core:nothing` (identity item) + retail items |
 | `campaignTypes` | — | 1 | — | 1 | `lod:retail` |
 | `engineStateTypes` | 2 | 5 | — | 7 | core: `title`, `credits`; lod: `submap`, `world_map`, `battle`, `final_fmv`, `game_over` |
@@ -37,7 +37,9 @@ Per-registrar counts (each `REGISTRAR.register(...)` call = one entry; the 14 ex
 | `additions` | — | 35 | — | 35 | |
 | `encounters` | — | 512 | — | 512 | the largest category by far |
 | `battleActions` | — | 10 | — | 10 | |
-| **Total** | **126** | **1110** | **1** | **1237** | |
+| **Total** | **127** | **1110** | **1** | **1238** | |
+
+**M10 adversarial-verification correction (2026-11-14, in place; re-counted at both pins `0c08c67`/`71ce130`):** the M8 record counted **40** `lod_core` input actions (total **1237**). Re-counting `REGISTRAR.register` calls per registrar shows `CoreMod.java` registers 80 config + **41** input actions + 1 item — all 41 are distinct ids (menu_* 20, title_* 2, `fmv_skip` 1, general_* 5, freecam_* 7, debug_* 6) — plus 2 non-entry `@EventListener` boot-window handlers (`CoreEngineStateTypes.register(event)`, `CorePostBattleActions.register(event)`, the CoreMod analogue of the 14 LodMod handler delegations above). Correct totals: lod_core **127**, grand total **1238**, inputActions **70**. Corrected in place in this document and at every reference (cross/01 §10, cross/02 CL-ENG-07/CL-MOD-10, cross/03 §1/§A5, README, plan M8-03 log).
 
 Source: the 27 registrar files censused in M8-02 §5 (per-file counts: `CoreMod.java` 80+1+40, `CorePostBattleActions.java` 3, `CoreEngineStateTypes.java` 2; `LodMod.java` 1+29+17+2+9+10+2, `LodEngineStateTypes.java` 5, `LodEquipment.java` 148, `LodEncounters.java` 512, `LodCharacterTemplates.java` 9, `LodLevelUpActions.java` 4, `LodPostBattleActions.java` 3, `LodShops.java` 41, `LodGoods.java` 37, `LodSpells.java` 131, `LodDeffs.java` 44, `LodConfig.java` 7, `LodAdditions.java` 35, `LodBattleActions.java` 10, `LodItems.java` 54; `TurnOrderConfigs.java` 1).
 
@@ -45,11 +47,11 @@ Source: the 27 registrar files censused in M8-02 §5 (per-file counts: `CoreMod.
 
 What the census shows about where "engine" ends and "content" begins:
 
-1. **The split is mechanism vs. configured behavior, not code vs. data.** The game class (non-mod) contains all *mechanism* — the state machine, render/audio/input, the script VM, the save system — while **all 1237 registered entries, including things that are behaviorally part of the "engine", live in mods**: `lod_core` registers the title/credits engine states, the victory/game-over/FMV post-battle actions, and 40 of the 69 input actions. A mod can in principle replace any of them (they are ordinary registry entries resolved through delegates), even though the reference ships them as core content.
-2. **`lod_core` is the UI/system baseline** (126 entries): 80 config entries (the entire user-facing option set), 40 engine input actions (menu navigation, fullscreen/speed/turbo, freecam, the six `debug_*` actions), the `nothing` identity item, the two non-gameplay engine states, and the three generic post-battle actions.
+1. **The split is mechanism vs. configured behavior, not code vs. data.** The game class (non-mod) contains all *mechanism* — the state machine, render/audio/input, the script VM, the save system — while **all 1238 registered entries, including things that are behaviorally part of the "engine", live in mods**: `lod_core` registers the title/credits engine states, the victory/game-over/FMV post-battle actions, and 41 of the 70 input actions. A mod can in principle replace any of them (they are ordinary registry entries resolved through delegates), even though the reference ships them as core content.
+2. **`lod_core` is the UI/system baseline** (127 entries): 80 config entries (the entire user-facing option set), 41 engine input actions (menu navigation, fullscreen/speed/turbo, freecam, the six `debug_*` actions), the `nothing` identity item, the two non-gameplay engine states, and the three generic post-battle actions.
 3. **`lod` is all LoD gameplay content** (1110 entries) — every character, stat, element, item, spell, shop, encounter, and the five gameplay engine states. Content scale is dominated by encounters (512), equipment (148), and spells (131).
 4. **`turn_order` is the shape of a pure behavioral mod**: zero content entries beyond one config entry (`show_turn_order`) — its substance is Java code (the turn-order UI, M8-02 §4.3's five event handlers).
-5. **Implication for the Rust project (analysis only, no design decision):** the mod boundary already separates *every piece of retail configuration* from the mechanism; a Rust reimplementation that hardcodes retail content inside the engine would change the observable mod surface (a mod that overrides e.g. `lod:retail` campaign type or a post-battle action relies on those being swappable entries, and the save format stores their `RegistryId`s — M7-01). The 1237-entry census is the scale of the content surface any content-loading mechanism must support.
+5. **Implication for the Rust project (analysis only, no design decision):** the mod boundary already separates *every piece of retail configuration* from the mechanism; a Rust reimplementation that hardcodes retail content inside the engine would change the observable mod surface (a mod that overrides e.g. `lod:retail` campaign type or a post-battle action relies on those being swappable entries, and the save format stores their `RegistryId`s — M7-01). The 1238-entry census is the scale of the content surface any content-loading mechanism must support.
 
 ---
 
@@ -177,7 +179,7 @@ The in-repo `lang/` directory ships five override files: `core.pl.lang`, `lod.pl
 
 | # | Finding | Class | Note |
 |---|---|---|---|
-| D20 | The engine/content boundary is mechanism vs. configured behavior: all 1237 retail entries (incl. title/credits states, generic post-battle actions, 40 of 69 input actions) are mod-registered and delegate-resolved | **Contract** | Swappability of core content is observable (save files store entry ids — M7-01); hardcoding retail content in the engine would shrink the mod surface |
+| D20 | The engine/content boundary is mechanism vs. configured behavior: all 1238 retail entries (incl. title/credits states, generic post-battle actions, 41 of 70 input actions — M10 census correction) are mod-registered and delegate-resolved | **Contract** | Swappability of core content is observable (save files store entry ids — M7-01); hardcoding retail content in the engine would shrink the mod surface |
 | D21 | Patch application is unpack-time only; the game never sees patch files at runtime | **Contract** | The observable unit of script modding is the *unpacked* script tree; a Rust pipeline must produce equivalent bytes, not replicate this patching machinery |
 | D22 | Diffs apply to the pristine backup (idempotent re-unpack); removal restores the original | **Contract** | Unidirectional original→patched with full rollback is the observable behavior |
 | D23 | Patch language is assembly (the disassembler's textual form), not Fate; Fate sources are manually compiled to the committed `.txt` outputs | **Contract + observation** | The char_utils.fate header comment is explicit; a runtime Fate-compile path exists (`SCRIPTS.compile`) but is unused in-repo |
@@ -193,7 +195,7 @@ The in-repo `lang/` directory ships five override files: `core.pl.lang`, `lod.pl
 
 | Criterion | Where answered |
 |---|---|
-| Core-mod content inventory (what lod_core vs lod each register, with counts and examples) | §1.1 (full census: 126 / 1110 / 1 = 1237, per-registry with examples) |
+| Core-mod content inventory (what lod_core vs lod each register, with counts and examples) | §1.1 (full census: 127 / 1110 / 1 = 1238, per-registry with examples) |
 | What the engine/content boundary implies (analysis only) | §1.2 (five analysis points; D20) |
 | The debugger as a modding-adjacent tool | §2 (architecture, coupling, contract classification) |
 | Modding extension points for scripts (Fate libs, replacements, diffs, registry read/write from scripts, script event hooks) | §3 (layout, patch semantics, asset replacements, the runtime hook table, engine↔script interlock) |

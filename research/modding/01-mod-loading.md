@@ -104,12 +104,12 @@ Fields (`ModContainer.java:19-25`): `modId`, `mod` (the instance), `classLoader`
 11. **User-visible failure reporting** — for every `failedToLoad` id: `GameOverlay.addNotification(7, I18n "lod_core.ui.mods.error" [modId])`; for every `wrongVersion` id: `… "lod_core.ui.mods.wrong_version" [modId]` (`GameEngine.java:344-349`). `addNotification(seconds, text)` takes a **duration in seconds** (`GameOverlay.java:37-41`) — these are 7-second toast notifications.
 12. Returns `missingMods` to the caller.
 
-**Re-entrancy is a first-class contract, not a startup phase.** Call sites (12, source-verified):
+**Re-entrancy is a first-class contract, not a startup phase.** Call sites (**13**, source-verified — M10 adversarial-verification correction, 2026-11-14: the table below enumerates 13 distinct sites; the earlier "12" was an off-by-one, and the `:582` row's enclosing-method attribution is corrected below; verified at both pins `0c08c67`/`71ce130`):
 
 | Call site | Mod set | Purpose |
 |---|---|---|
 | `GameEngine.java:246` (start) | all | boot for the title screen |
-| `Scus94491BpeSegment.java:582` (decompiled `main`, `@Method(0x800e5d44)`) | all | the retail game-entry path (new game from the campaign flow) |
+| `Scus94491BpeSegment.java:582` (last statement of `resetSubmapToNewGame` at `:574` — **M10 correction**: the earlier attribution to decompiled `main` `@Method(0x800e5d44)` was wrong; `main` at `:598` is `gameInit()` + `preload()` and contains no `bootMods` call) | all | the new-game boot reached from the campaign flow / title "New Game" / Game Over / world-map paths |
 | `Ttle.java:570` (title, `finally` after memcard split) | all | restore the full mod set after the memcard flow (§5.4) |
 | `SaveManager.java:232` (memcard split) | **`Set.of()`** — required mods only | the split operates without optional mods |
 | `CampaignSelectionScreen.java:133` | campaign's `ENABLED_MODS` | per-campaign mod set on campaign entry |
@@ -209,7 +209,7 @@ Constructed with the mutable `enabledMods` set (`ModsScreen.java:24-28`): each n
 | D2 | `@Mod{id, version}` with NPM-semver gate over game version 3.0.0; in-repo core mods declare `^3.0.0`; wrong-version → skip + map | 4 | `source-verified` |
 | D3 | Required mods = `lod` + `lod_core`; missing → `MissingRequiredModException` → hard boot failure (crash log + exit, no UI) | 4 | `source-verified` |
 | D4 | Instantiation = no-arg ctor, no init hook; failure → `failedToLoad` + removal from discovered caches (incl. the no-op `pathToModId.remove`); two-state lifecycle INITIALIZED/READY; no unloading | 4 | `source-verified` |
-| D5 | `bootMods` is a re-entrant 12-step rebuild (framework reset → load → event init → AddRegistryEvent → 8 menu registries → READY → bindings → lang → toasts → missing return); 12 call sites incl. the required-only memcard boot and per-campaign sets | 4 | `source-verified` |
+| D5 | `bootMods` is a re-entrant 12-step rebuild (framework reset → load → event init → AddRegistryEvent → 8 menu registries → READY → bindings → lang → toasts → missing return); **13 call sites** (M10 adversarial-verification correction, 2026-11-14, in place — re-verified at both pins `0c08c67`/`71ce130`: the earlier "12" was an off-by-one census error): `GameEngine:246` (startup), `Scus94491BpeSegment:582` (inside `resetSubmapToNewGame` — the new-game/ROM-main path), `SaveManager:232` (memcard required-only `Set.of()`), `Ttle:570` (memcard `finally` restore), `CampaignSelectionScreen:133/136/169/255` (per-campaign set + fallback, post-load restore, return-to-title restore), `NewCampaignScreen:130/134/160/163/260` (preset-editing + mods-screen reboot pairs, escape restore) | 4 | `source-verified` |
 | D6 | Resource namespacing by `<modId>/` jar prefix; locale detection at container construction; `LANGUAGE_COUNTRY → LANGUAGE → FALLBACK(en)` resolution chain | 4 | `source-verified` |
 | D7 | Reporting surfaces: 7-s boot toasts, ModsScreen red rows (sorted by translated name, required locked), crash-log mod census, consent boxes for installed-mods-changed / missing-mods on campaign entry; `enabled_mods`/`known_mods` CAMPAIGN string-array entries with the `lod-core`→`lod_core` read alias | 4 | `source-verified` |
 | D8 | The J1–J8 mechanism table: observable contract vs implementation detail; no sandbox/capability model exists; attribution via the process-wide static active mod (thread-affinity assumed) | 4 | `source-verified` (the "no determination" items marked as observations) |
