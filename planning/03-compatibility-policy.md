@@ -60,7 +60,7 @@ A checklist row, and every module that grew out of one, is exactly one of five t
 1. **Dispatch point.** **`Gpu` dispatches translucency at draw-command execution time; `TmdFormat` dispatches at decode time.** These are genuinely different points. One is a single enum carrying a TPage mode **plus** a flag-word mode; the other is a four-flag `TmdFormat`. They must not be forced into a shared `TmdMode`, and they must not be forced into a single "modern" name.
 2. **`TmdFormat` is not a compatibility-policy type, even if a future policy references it.** It is a format discriminator in `psxrt-import`, **plus** a decode-time selection; and the modern path must also work when TMD is never involved at all. The `psxrt-compat::model` encoder consumes the same discriminator in the other direction — that is a class-D consumer of a class-A type, which is exactly the shape the crate is for.
 
-## 4. The four-level record template (ADR-005)
+## 4. The five-field record template (ADR-005)
 
 Every class-C record carries five things. **The template carries the divergence documentation. It does not carry the implementation, and it is not compiled.**
 
