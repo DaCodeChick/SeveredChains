@@ -47,7 +47,12 @@
 //! the reference, not a behaviour with a claim on it.
 //!
 //! Assembling a whole page word needs VRAM coordinates and so belongs with the renderer, not
-//! here. Bits 5 and 6 are documented in `psxrt-compat::rate_00`.
+//! here. Bits 5 and 6 of a TPage word encode the same four modes as bits 28-29 of a draw
+//! flag, and the decoder for both is scheduled for `psxrt::gpu::pixel` (`planning/07` F5,
+//! landing at I5a) — it does not exist yet. Until it does, the record of that mapping,
+//! including the fact that the "no translucency" encoding is itself a visible mode, is the
+//! `rate_00` row of `planning/03-compatibility-policy.md` §5. The module this paragraph used
+//! to point at was deleted at I1a; a pointer to a file that is gone is worse than none.
 
 use crate::blend::Rgb8;
 

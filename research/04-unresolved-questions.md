@@ -197,7 +197,7 @@ Complete re-triage of every register item per the M10 mission (verification crit
 | Closed before M10 | 24 | C-01; Q-01–Q-05, Q-08–Q-10, Q-12, Q-14–Q-16, Q-18, Q-19, Q-30–Q-32, Q-39, Q-41–Q-43, Q-47, Q-48 |
 | **Closed by the M10 re-triage** | **11** | C-02; Q-13, Q-24, Q-25, Q-26, Q-27, Q-28, Q-29, Q-33, Q-34, Q-36 (in-place status lines carry the pointers) |
 | Advanced / partially closed (still open, narrowed) | 14 | Q-07, Q-11, Q-17, Q-20, Q-21, Q-22, Q-23, Q-50, Q-56, Q-57, Q-69, Q-70, Q-71, Q-74 |
-| Open (evidence specified — groupings below) | 50 | Q-06, Q-35, Q-37, Q-40, Q-44, Q-45, Q-46, Q-49, Q-51–Q-55, Q-58–Q-68, Q-72, Q-73, Q-75–Q-80, Q-81–Q-98 |
+| Open (evidence specified — groupings below) | 51 | Q-06, Q-35, Q-37, Q-40, Q-44, Q-45, Q-46, Q-49, Q-51–Q-55, Q-58–Q-68, Q-72, Q-73, Q-75–Q-80, Q-81–Q-99 |
 | Hygiene | 1 | **Q-38 was never registered** — the render-mode census was resolved in `platform/04` §8 during R1 but the register entry was never written; recorded here as closed (→ platform/04 §8) for completeness (cross/01 §7 ledger; cross/02 CL-ENG-06) |
 
 ### The M10 bounded verifications that drove closures
@@ -214,7 +214,9 @@ Per cross/01 §9 (the mission's bounded-verification exception — no new subsys
 - **Q-21** (residual b), **Q-22**, **Q-23**, **Q-45**, **Q-52**, **Q-53**, **Q-65**, **Q-67**, **Q-68**(c), **Q-69**(a/c external halves), **Q-61** (external half), **Q-63** (external half).
 
 **C. Retail disc assets / retail script disassembly / real save & memcard files (plan P-02 — the user decision gating the whole cohort, cross/03 §5):**
-- **Q-07** (residual), **Q-11** (residual), **Q-44**, **Q-46**, **Q-49**, **Q-50** (encounters leg), **Q-51**, **Q-54**, **Q-55**, **Q-58**, **Q-59**, **Q-60**, **Q-61** (census half), **Q-63** (fork-pattern audit half), **Q-64**, **Q-71** (visual half), **Q-72**, **Q-73**, **Q-75**, **Q-76** (repacked-sample half), **Q-77**, **Q-78**, **Q-79**, **Q-80** (memcard dump), **Q-81–Q-98** (the M9 retail-side cohort: retail script/byte decompilations or emulator comparison).
+- **Q-07** (residual), **Q-11** (residual), **Q-44**, **Q-46**, **Q-49**, **Q-50** (encounters leg), **Q-51**, **Q-54**, **Q-55**, **Q-58**, **Q-59**, **Q-60**, **Q-61** (census half), **Q-63** (fork-pattern audit half), **Q-64**, **Q-71** (visual half), **Q-72**, **Q-73**, **Q-75**, **Q-76** (repacked-sample half), **Q-77**, **Q-78**, **Q-79**, **Q-80** (memcard dump), **Q-81–Q-98** (the M9 retail-side cohort: retail script/byte decompilations or emulator comparison), **Q-99**.
+
+**Q-99** — opened 2026-11-16 by `planning/08` §3 (D-3). Does any real game read cross an *alias* boundary? The reference gives archive members two different readable windows: `slice` bounds strictly at the slice's own length, while `FileData.virtual` sets the window to the **whole backing array** (`Severed-Chains …/unpacker/FileData.java:34-36,57-63,723-736` — not the Dig-Dabas `core/FileData.java`, which is an unrelated class with the same name), and `hasVirtualSize()` is branched on in live game code (`Battle.java:2945,3032`; `RetailSubmap.java:572,602,616`). Whether that extended window is ever actually *read past* the logical payload — as opposed to being merely permitted — determines whether the Rust port must replicate the alias type or may bound it strictly. Source alone cannot settle it: it depends on the byte layout of real archives. Closing it needs a disc image (P-02).
 
 **D. Original-behavior observation (playthrough capture / emulator comparison):**
 - **Q-37** (render-path faithfulness vs modes 1/2), **Q-66** (same-z order — the observation half; the external half is B), **Q-71** (equal-depth 2D visual comparison), **Q-72**, **Q-73**, **Q-92** (retail shop-screen quantity-sell behavior).

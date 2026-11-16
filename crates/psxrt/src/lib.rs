@@ -4,8 +4,13 @@
 //! stateful stream whose behaviour is fully determined by its inputs; nothing here reads a
 //! host clock, touches a GPU, or knows what a battle is. Where retail hardware and the
 //! reference implementation disagree, or where a choice has to be made about which behaviour
-//! to reproduce, that choice is a policy toggle and lives in `psxrt-compat`. This crate
-//! exposes the mechanisms those toggles select between, and never a knob to switch them.
+//! to reproduce, that choice is **not made here, and it is not made for this crate somewhere
+//! else either.** No layer selects between these mechanisms: a divergence is recorded as a
+//! comment next to the code and an entry in `planning/03-compatibility-policy.md`, and a caller
+//! passes a value rather than a flag. If a subsystem eventually needs to pick one behaviour over
+//! another, the knob is introduced with that subsystem, at the point where a test can set it one
+//! way and the game can observe the other — which is the arrangement that replaced the
+//! `CompatPolicy` scaffold at I1a.
 //!
 //! Two rules hold throughout and are checked by tests:
 //!

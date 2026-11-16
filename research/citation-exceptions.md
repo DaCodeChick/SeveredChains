@@ -66,6 +66,26 @@ transcripts of past verification passes, the second quotes citations in order to
 **Headline: 925 citations confirmed correct at `d47ac8637`, 154 open in 22 documents, 178 pointers
 that a script *could* rewrite and deliberately will not.**
 
+**Re-run 2026-11-16, same pin, same command:** 1 333 citations (+3), 953 `RESOLVED`, 201 needing a
+human — 77 `NO-SUCH-FILE`, 56 `BLANK-LINES`, 30 `AMBIGUOUS-REPO`, 22 `CHANGED`, 12
+`IMPLAUSIBLE-RANGE`, 4 `PAST-EOF` — plus 179 `MOVED` pointers that `--apply` could rewrite and
+deliberately will not. Nothing was repaired at I1a: the pass added three citations and re-ran the
+audit.
+
+**These figures do not reconcile with the table above, and the cause is not established.** Two things
+differ beyond the +3 citations. `AMBIGUOUS-REPO` has fallen 58 → 30, and the pair
+`UNCHECKED-NO-BASELINE` 73 + `NO-SUCH-FILE` 2 has become a single `NO-SUCH-FILE` 77. Re-running
+today *without* `--from 0c08c679b` does not reproduce the 2026-11-15 table either — that prints 1 154
+resolved and 179 needing a human — so the drift is not merely a flag difference. The audit script is
+unmodified in the working tree and has one commit behind it. So either the corpus changed in a way
+that moves 47 items into a human-required class, or the figures recorded on 2026-11-15 were taken
+from a differently-configured run and were never comparable to this one. Nobody has checked which,
+and this register is exactly the place where that gets declared rather than smoothed over: **the 154
+is unverified history, the 201 is what the tool reports today, and neither should be quoted without
+re-running it.** One caution that does hold in either reading: without `--from` the script cannot
+classify `MOVED` or `CHANGED` at all, so its `RESOLVED` count inflates by roughly 200 and that number
+is not a measure of anything.
+
 Of the 22 `CHANGED`, 20 are pre-existing; the other 2 are `LodMod.java:312` in `modding/02` §4.3,
 written by hand on 2026-11-15 after reading the source at `d47ac8637`. They point at real code and are
 flagged only because the two-line block around them differs from the baseline. The audit counts, it
@@ -163,3 +183,31 @@ out; do not re-read from this register alone.**
   `UNCHECKED-NO-BASELINE`: that is the absence of evidence, not evidence of correctness.
 - The three reference repositories other than `Severed-Chains` are exactly at their recorded
   revisions, so their citations cannot have drifted.
+
+## 8. A second class: pointers that were never correct
+
+Everything in §2–§7 is *drift* — a pointer that described real code, which the repository then moved
+out from under. The three items below are different and worse, so they are recorded separately: they
+never pointed at anything. They were found on 2026-11-16 while preparing I1a, and each is a
+placeholder that reads like evidence.
+
+| # | Where | What it asserts | Why it is wrong |
+|---|---|---|---|
+| 1 | `planning/01` §4 (module map), `space` row | the file-space model, citing "planning/07 §3.1" | `planning/07` §3 is a five-item prose list about what I0 gets right. There is no §3.1, and no section of `planning/07` describes a file-space model. |
+| 2 | `planning/04` §4 (risk-ordered view), risk row 1 | the 63-bit key / 4 GiB wall / 16 MiB fallback, citing "§A §3.1; planning/05 §5.6" | `planning/05` §5 is the three-tier determinism contract and has no §5.6. The same row also names "the path-as-identity cache key", which contradicts the 63-bit key it is meant to support. |
+| 3 | `planning/04` §I1b, `fmv/mdec` row | that `patches/scripts/DRGN1/254.diff` "proves the `disc:FILE:…`/`bin`/`bin\` shape, an 0x800-byte alignment rule … and that the mode flag is data-driven" | `254.diff` is a unified diff of Fate assembly text with the header `--- original` / `+++ modified`. It contains no path, no alignment rule and no mode flag. `disc:` occurs in **zero** files in the whole `Severed-Chains` checkout, and `bin\` occurs nowhere. |
+
+Two consequences, both for the owner rather than for the audit script:
+
+- **The script cannot catch this class.** `citation_audit.py` resolves `file.java:123` pointers
+  against a reference checkout. Item 3 cites a file that *does* exist, so it resolves; item 1 and
+  item 2 cite planning sections, which the script does not read. A green `make citations` says
+  nothing about any of the three.
+- **Do not auto-patch these.** Items 1 and 2 want their *claims* deleted or rewritten, not their
+  pointers nudged. Per `planning/07` §8b, `--apply` is untrusted and a second pass invents more
+  moves than it resolves. The replacement text is in `planning/08` §1 and §6.
+
+The underlying investigation — what the reference actually does for file identity and read bounds —
+is in `planning/08`, and the one part of it that source alone cannot settle is registered as
+**Q-99** in `04-unresolved-questions.md`. None of this changes a claim about observed behaviour;
+all three items are scaffolding that had been left in place after it stopped being supported.

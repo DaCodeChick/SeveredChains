@@ -1,0 +1,20 @@
+[package]
+name = "psxrt-import"
+description = "Import-side readers: resolve, read and decompress original-format game containers and codecs. Read-only; the writers that make these readable are in psxrt-compat."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+psxrt-compat = { path = "../psxrt-compat" }
+# TD-19: a named, pinned PRNG for generated tests. proptest's default engine is rand_chacha's
+# ChaCha with a fixed start seed, which is what that decision asks for.
+proptest = "1.12.0"
+
+[lints]
+workspace = true

@@ -14,7 +14,8 @@
 //!
 //! Nothing in this module reads a clock. Where the reference reached for one, the value is an
 //! argument, so a recorded run replays bit-for-bit and a headless test never depends on when
-//! it ran. Choosing *what* to feed those arguments is policy and lives in `psxrt-compat`.
+//! it ran. Choosing *what* to feed those arguments is the caller's, and there is no selector
+//! module that makes the choice on anyone's behalf — see the crate header.
 
 mod lcg15;
 mod lcg16;

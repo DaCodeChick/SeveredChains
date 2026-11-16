@@ -7,21 +7,29 @@ immediately: how to run the tests, and how the golden test data gets to a test.
 
 ## Crates in the workspace
 
-| Crate | What it holds | Depends on |
+Three crates exist. This table is the tree as it stands after I1a, not the target layout.
+
+| Crate | What it holds today | Depends on |
 |---|---|---|
 | `psxrt` | PSX platform mechanisms: fixed-point and trig, the three RNG streams, texture-depth addressing, blend arithmetic, frame cadence | nothing |
-| `psxrt-compat` | Original-format **export**: writing bytes back into the form the disc held (TIM emission, CTMD re-encoding, XA re-encoding, reinjection), plus the divergence documentation that travels with those formats. It is not a place to put a runtime switch, and it is not on the boot path | `psxrt` |
+| `psxrt-compat` | Three writers, all of them test oracles: a BPE encoder, an MRG container writer, a `files/` cache index writer | nothing |
+| `psxrt-import` | Import-side readers: the MRG container, the BPE decoder and its passthrough, the `files/` cache index, and the patch orchestration layer | `thiserror`; and for tests only, `psxrt-compat` and `proptest` |
 
-**Read the second row as the target, not the audit.** As committed at I0, `psxrt-compat` holds a
-policy scaffold — enum selectors, format constants, traceability records — and no encoder. The
-planning revision of 2026-11-15 retires all nine of those files (`planning/03` §5–§6, `planning/07`
-§5/§8b); the description above is what replaces them, starting at I1a. The crate's `psxrt` edge is
-used by exactly one file (`rate_00.rs`) and is deleted with it, which is the point: a toolchain
-crate that depends on nothing cannot be dragged down to a device, and one that a runtime crate
-depends on can.
+**The dependency rule, and why it is a test.** No crate whose purpose is running the game may
+depend on `psxrt-compat`. The `psxrt-compat → psxrt` edge that existed at I0 is gone, deleted with
+the nine policy files the 2026-11-15 revision retired, so the crate restarts with zero project
+dependencies. The only edge into it is a `dev-dependency`, and its direction is enforced twice:
+cargo rejects a package-level dependency cycle outright, and
+`crates/psxrt-import/tests/dependency_direction.rs` fails if any runtime crate names
+`psxrt_compat` in a code path. A toolchain crate that depends on nothing cannot be dragged down to
+a device; one that a runtime crate depends on can.
 
-The other four names in the approved layout (`psxrt-import`, `severedchains`,
-`severedchains-sdk`, `severedchains-game`) are not created yet; nothing is stubbed for them.
+`psxrt-compat` is still not a place to put a runtime switch, and it is not on the boot path. What
+it holds is now the thing its name asks for — original-format output — rather than a scaffold
+describing that intention.
+
+The other three names in the approved layout (`severedchains`, `severedchains-sdk`,
+`severedchains-game`) are not created yet; nothing is stubbed for them.
 
 ## Running the tests
 

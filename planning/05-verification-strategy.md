@@ -61,7 +61,8 @@ Each milestone's gate (planning/04) is defined as: **(a)** the `cargo test` suit
 
 | Milestone | Load-bearing suites | The "proof of gate" artifact |
 |---|---|---|
-| I0 | The RNG golden (3 parameterizations × 10k); the `rsin`/`rcos` grid; the Bpp exhaustive pair; the 4 blend equations exhaustive; the timing unit table | The golden manifest v1 (the committed derivation) || I1 | The 12 format suites (incl. the ISO conformance over the synthetic 4-disc image); the pipeline determinism (the `files/` tree byte-stable); the patch-orchestration idempotence | The fixture manifest v1 (no proprietary bytes — asserted by a content scan) |
+| I0 | The RNG golden (3 parameterizations × 10k); the `rsin`/`rcos` grid; the Bpp exhaustive pair; the 4 blend equations exhaustive; the timing unit table | The golden manifest v1 (the committed derivation) || I1a | The container/codec round trips (BPE encode∘decode, MRG table∘writer, cache index write∘parse) over the `psxrt-compat` oracles; the patch-orchestration idempotence and restore; the dependency-direction guard; the round-trip inventory | The round-trip report: every decoder either paired with an independently-written oracle or carrying a declared reason |
+| I1b | The ISO conformance suite over the synthetic 4-disc image; the content decoders each against their `psxrt-compat` writer; the pipeline determinism (the `files/` tree byte-stable across thread counts) | The fixture manifest v1 (no proprietary bytes — asserted by a content scan) |
 | I2 | The D-row contract suites (the 21-registry window; the 113-event-class dispatch matrix; the i18n 4-level matrix; the 12-step boot; the Tag 10-type round-trip; the config `.dcnf`/`.dpre` byte matrix) | The framework vertical slice (the synthetic first-party mod booted) |
 | I3 | The 21-phase trace; the lifecycle suite (boot 14 steps + shutdown order); the teardown fixed point; the rate table; the error 4-class matrix; the edge-word protocol | The headless harness v1 (the reusable asset) |
 | I4 | The VM conformance (allocation/pacing/storage/lifecycle/dispatch/ops/errors); the round-trip fidelity property (the hazard set + 100 random scripts); the meta alignment; the C-01 dual-table documentation | The round-trip gate report (the property pass + the hazard-set regression list) |
@@ -136,23 +137,70 @@ names, and `citation-exceptions.md` is where an unresolved pointer is declared r
 trusted.
 
 **A sixth and seventh, added by the same revision — the two guards that replace the ledger's shape.**
-Neither has a home yet and neither is asset-blocked. **(6) the dependency-direction guard:** a
-workspace-level test that fails if any runtime crate lists `psxrt-compat` as a dependency, or if any
-`psxrt` source file names `psxrt_compat` in a `use`, a `dep` edge or a doc comment. It belongs
-wherever the runtime crates are enumerable — a workspace-level test target, not one crate's `tests/`
-— and it is worth more than the ledger it replaces, because a ledger entry can be satisfied by a
-type nobody calls while this one cannot be satisfied by anything but the real arrow. **(7) the
-round-trip inventory:** for every decoder in `psxrt-import`, either a paired encoder exists and is
-exercised by a `decode → encode → compare` test, or the module's doc header says why none is
-planned (a format that cannot be reconstructed, or one the project has no reason to write). Without
-it, "`psxrt-compat` is for exporters" quietly becomes "`psxrt-compat` is where unfinished exporters
-and unowned notes go", which is the shape this revision just retired.
+**Built at I1a, with one deliberate divergence on (6).** Both guards exist; the description above is
+how they stood as sketches at P0.
+
+**(6)** is `crates/psxrt-import/tests/dependency_direction.rs`, 5 cases. It walks every crate
+manifest and every `.rs` file under every crate's `src/`, so a violation cannot hide in a submodule
+nobody thought to grep, and it fails on: a production dependency on `psxrt-compat`; a
+dev-dependency on it taken by any crate other than `psxrt-import`; any `psxrt_compat::` path
+expression anywhere in the workspace; and `psxrt-compat` reaching back into `psxrt-import`, in
+manifest or in source. The divergence is the doc-comment clause. This sketch asked the guard to fail
+on a *mention* in prose as well as in code; the shipped guard drops comment lines. The reason is
+that prose legitimately names the neighbouring crate — `psxrt-compat`'s BPE writer explains itself
+by reference to the decoder it is tested against — and a fence that flags correct prose gets an
+allow-attribute within a week. Staleness is the real hazard behind the strict rule, and it was
+handled at the source: three doc comments in `psxrt` did claim that policy lived in `psxrt-compat`
+modules that no longer exist, and all three were corrected at I1a. A stale doc comment is now a
+review problem with no mechanical backstop, and that is a known gap rather than a settled design.
+
+**(7)** is `crates/psxrt-import/tests/round_trip_inventory.rs`, 3 cases. It treats the decoder→
+writer pairings as data, fails if a declared pairing stops being driven by a test, fails if a new
+`decode`/`parse`/`read` entry point appears with neither a pairing nor a declared reason, and
+refuses a declaration that gives no reason. Its first implementation matched on function name alone
+and passed with its own escape hatch deleted; the version described here is the second one, and it
+was checked by deleting a declaration and by renaming a writer out of the tree.
 
 **Claim ceiling.** Nothing in I0 is `asset-validated` or `format-corroborated`. The seven fixtures
 are `source-verified` derivations; the two identity checks that lean on a JDK (the 48-bit
 generator's identity with `java.util.Random`, and `Math`/`StrictMath` agreement across the whole
 trig grid) are `experimentally verified` on JDK 27, and the probe that established the first one is
 committed so it can be re-established on another JDK.
+
+### The I1a gate record (2026-11-16, gate review pending)
+
+**What ran.** `cargo test --workspace` — 186 tests over 20 binaries, no failures, and no doc tests anywhere in the workspace. Of the 186, 65 are `psxrt`'s seven suites, untouched; 5 are `psxrt-compat`'s; the other 116 belong to `psxrt-import`. The I0 record's 72 does not reconcile with the 65 by subtraction of nothing: 7 of those 72 were the `psxrt-compat` policy-ledger tests, deleted with the framework they covered. `cargo clippy
+--workspace --all-targets` — zero warnings. `scripts/audit_file_endings.py` — 133 text files, no
+violations. `cargo fmt --check` was run: the remaining 50 diffs are all in pre-existing `psxrt`
+test files and no new I1a file is among them.
+
+**What the milestone actually contains, against what was specified.** Three modules were cut before
+any code was written against them — `space.rs`, `container/iso.rs`, `pipeline.rs` — because all
+three need real disc bytes to be verifiable and `space.rs` additionally specified a 63-bit file key
+the reference does not use. The cut is recorded in `planning/04` §I1a with its costs, not quietly
+taken. What was built is the container/codec layer, the cache index pair, the patch orchestrator,
+and the two guards.
+
+**The oracle rule (§3) held where it could.** Three writers exist in `psxrt-compat` — the MRG
+writer, the BPE encoder, the cache index writer — 5 unit tests between them, each written from the format description
+rather than from the reader's control flow, which is the only condition under which a round trip can
+contradict anybody. The BPE encoder is larger than its input; it is not a compressor and it is not
+tested as one. Where a divergence exists it is written down and pinned by a test rather than
+harmonised: the reference's index writer omits an entry with no bytes, `Index::text()` writes
+`name=;0`, and a test asserts that the two spellings are different and mean the same thing.
+
+**One thing this record withholds.** The §8.2 naming scan and §8.3 map check were run by hand again,
+because no scanner was built for them and I1a added no module of that shape. The three `psxrt` doc
+comments corrected at I1a are the entire finding, and they were found by reading, not by a tool.
+
+**Open after I1a.** The file-space read-domain model (`planning/08` §5 items 1, 2, 4, 5) — that is
+I1b's precondition, not this gate's. 154 citation items needing human judgment. The doc-comment
+staleness gap described above. Nothing in I1a is `asset-validated` or `format-corroborated`: the
+MRG container is *LoD-specific*, with no external PSX corroboration available, and the whole
+container layer is therefore `source-verified` — read from `MrgArchive.java`, never checked against
+a disc.
+
+
 
 ## 7. The asset-validated pass (I10; the only claim-upgrade surface)
 
