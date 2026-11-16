@@ -4,6 +4,10 @@ Status: **Proposed (P0, 2026-11-14).** Row-level coverage of all **135 compatibi
 
 Legend — **V** columns: `U` unit, `G` golden vector, `P` property, `I` integration (headless), `M` model conformance, `C` census, `D` divergence guard, `A` asset pass (I10). **O** = owning crate: `rt` psxrt, `cp` psxrt-compat, `im` psxrt-import, `en` severedchains, `sdk` severedchains-sdk, `gm` severedchains-game, `bin` scus94491.
 
+**Owning crate means the crate that must make the behavior correct, and after 2026-11-15 that is never a policy crate.** `psxrt-compat` is a reverse-conversion toolchain — it emits original-format bytes and holds no runtime decision point (planning/01 §2, planning/03 §5–§6). A row may *cite* `psxrt-compat` as the place its evidence came from, as several rows did, without `psxrt-compat` owning the row. Six rows were re-owned on 2026-11-15 for exactly that reason; each note below says where the mechanism lives and, where one is still wanted, which subsystem owns the parameter that selects between mechanisms.
+
+**Milestone letters.** This matrix was written against the pre-split milestone set and keeps its letters, so a bare `I1`/`I5`/`I10` here means the pair in `planning/04`: **I1 = I1a containers+codecs + I1b content+sequences**, **I5 = I5a PSX models in `psxrt` + I5b native backends and profiles in `severedchains`**, **I10 = I10a toolchain + I10b end-to-end**. Where a row's note now names a specific module, that name is the precise statement and the letter is the approximate one. Per-row owning crate beats both.
+
 ## 1. CL-PSX — the 43 carried M4-05 rows (cross/02 §2; source psx/05 §3)
 
 | Row | Obligation (short) | O | Milestone | V | Notes |
@@ -11,20 +15,20 @@ Legend — **V** columns: `U` unit, `G` golden vector, `P` property, `I` integra
 | G1 | VRAM 1024×512, dual 15/24-bit stores, 4/8-bit texels | rt | I5 (backend) | M G | **I0 correction (2026-11-15): the dual-store model was not built in I0.** What I0 delivered is the texel-width half — the 4/8/15/24 line packing and the index-within-word rule — verified exhaustively in `psxrt/tests/bpp_exhaustive.rs`. The 1024×512 geometry, the two stores and the mode-0 `vramTexture15` sampling land together in I5, where there is a surface to sample into |
 | G2 | Bpp 4/8/15/24 encode/decode pair + TPage/CLUT fields | rt | I0 | G P | **Verified at I0.** Exhaustive decode over all 65,536 words × slots at each paletted depth (`psxrt/tests/bpp_exhaustive.rs`, 9 tests) + the packed-line round-trip property over in-domain indices and the out-of-domain companion (`psxrt/tests/properties.rs`). No fixture: the sweep is its own oracle, digests taken from the reference's expressions |
 | G3 | Center-origin offset; double buffer; PSDCNT frame-counter cache invalidation | rt | I0 / I5 | M G | The offset model in I0; the matrix-cache invalidation in the I5 wgpu backend |
-| G4 | 384 → 368 display/draw-width clamp | cp | I5 | M D | **CD-04** owns the clamp behavior; UR row — the retail-width evidence is the I10 asset/external pass (`A`); the clamp is a divergence-note row |
+| G4 | 384 → 368 display/draw-width clamp | rt | I5 | M D | **CD-04** owns the clamp behavior; UR row — the retail-width evidence is the I10 asset/external pass (`A`); the clamp is a divergence-note row. **Re-owned from `cp` (2026-11-15):** the clamp is `psxrt::gpu` arithmetic; the on/off is a `PresentationProfile` discriminant owned by `severedchains` at L2 |
 | G5 | Ordering table (14 bits, 0x4000, zMax clamp, slot-0x3fff clear, back-to-front) | rt | I0 / I5 | M G | The mechanism in I0; the psx/01 §7 worked trace as golden in I5 |
-| G6 | Same-z order: LIFO (reference) vs FIFO (PSX) | cp | I5 | M D | **CD-01** (default LIFO, knob to FIFO); the `Battle.applyTextureAnimation` dependency = the I8 divergence guard; the retail-overlap census = I10 `A` |
+| G6 | Same-z order: LIFO (reference) vs FIFO (PSX) | rt | I5 | M D | **CD-01** (default LIFO, parameter to FIFO on `psxrt::gpu`'s ordering replay); the `Battle.applyTextureAnimation` dependency = the I8 divergence guard; the retail-overlap census = I10 `A`. **Re-owned from `cp` (2026-11-15):** ordering is a runtime mechanism; `SameZOrder` is its parameter, not a `psxrt-compat` module |
 | G7 | z-insertion `(avgZ/4 + zOffset)/2^zShift` clamped, float division | rt | I5 | M G | **I0 correction: not built in I0** — the formula is meaningless without the ordering table it writes into, and I0 built no table. I5 with the trace |
 | G8 | Rasterizer edge rules (clockwise, zero-area drop, top-left, integer barycentric) | rt | I5 | M | Mode-0 replay reproduces the rules; pixel-exactness stays Blocked (no baseline) — model-conformance only |
 | G9 | Texturing: 15-bit index, CLUT from vram24, index-0 transparent, `T×C>>>7` | rt | I0 (arithmetic) / I5 (lookup) | M G | **Partly verified at I0:** the `T×C>>>7` modulation and the 15-bit index extraction exist and are swept exhaustively (`psxrt::blend::modulate` + `psxrt/tests/blend_exhaustive.rs`, `Bpp::Bits15` decode). The CLUT-from-vram24 read and the index-0 transparency need a VRAM model and move to I5, together with the `vertColour × texColour` float path |
 | G10 | Blend equations (B+F)/2, B+F, B−F, B+F/4 (F/4 first, truncating) | rt | I0 | G | **Verified at I0.** `psxrt/tests/blend_exhaustive.rs` sweeps all 65,536 (B,F) pairs per mode and pins the F/4-first truncating order; the saturation/truncation census per mode is asserted, so the sweep cannot quietly become a no-op. The B+F/4 decomposition rounding-delta stays a documented divergence, re-checked at I5 against the shader path |
-| G11 | TPage rate-00 → B+F/2 | cp | I5 | M D | **CD-05** (default: keep the reference mapping); the retail rate-00 census = I10 `A` |
+| G11 | TPage rate-00 → B+F/2 | rt | I5 | M D | **CD-05** (default: keep the reference mapping); the retail rate-00 census = I10 `A`. **Re-owned from `cp` (2026-11-15):** the three decoders went to `psxrt::gpu::pixel` at I1b/I3; a decoder is not a policy and not an encoder — the encoding half is `psxrt-compat::texture`, which is a different module and does not own this row |
 | G12 | Mask bit set/skip; NOT_TO_MASKED_AREAS; textured-alpha gate | rt | I5 | M G | The two-pass rule over a scripted attribute stream |
 | G13 | One-frame display latency; swap-before-onDraw +1; FMV render-tick cadence | rt | I5 | M G | The buffer-flip model golden; the FMV cadence cross-checked in I6 (CL-ENG-13) |
 | G14 | CPU→VRAM upload (both stores, 15-bit LE words, partial-rect guard) | rt | I5 | M G | **I0 correction: not built in I0** — no upload path without a VRAM to upload into. I5; I5 host (the async load path — CL-AST-11) |
 | G15 | VRAM→VRAM copy (per-pixel, mask-honoring, no overlap protection) | rt | I5 | M D | The (960,256) backing-store behavior; the PSX BLT overlap semantics stay Unresolved (register) — the *no-protection* behavior is the D-guard |
 | T1 | RTPS/RTPT/NCLIP/AVSZ/NCCS register-model subset | rt | I5 | M G | The psx/02 §4 worked-example chains; the unused-tail absence asserted (not ported) |
-| T2 | Float vs fixed-point per-op rounding (SXY 22.10, NCCS 12.12, MAC0 32) | rt/cp | I5 | M D | **CD-03** (default: float model + documented bounded divergence; the integer variant exists per T4); the external worklist = I10 `A` |
+| T2 | Float vs fixed-point per-op rounding (SXY 22.10, NCCS 12.12, MAC0 32) | rt | I5 | M D | **CD-03** (default: float model + documented bounded divergence; the integer variant exists per T4); the external worklist = I10 `A`. **Re-owned from `rt/cp` (2026-11-15):** `GtePrecision` becomes `TransformPrecision`, a parameter of `psxrt::gte`. A transform precision is a way the runtime computes, not a statement about a disc format |
 | T3 | SXY saturation → whole-primitive discard (no clipping) | rt | I5 | M D | The discard-over-saturation golden; the float ±1-px admission documented |
 | T4 | `GsSetSmapRefView2L` integer-precision submap camera | rt | I7 | M G | **The only HA row** — bit-exact integer-program golden (int deltas, `(int)Math.sqrt`, ×0x1000/len); the Q-67 camera-path audit = I10 `A` |
 | T5 | MAC0 depth-cue term (dead) | rt | — | D | **Not ported** (explicitly not a constraint, cross/02 §11) — the non-port is documented in the psxrt GTE module |
@@ -36,7 +40,7 @@ Legend — **V** columns: `U` unit, `G` golden vector, `P` property, `I` integra
 | S4 | ADSR phase machine + 44.1 kHz cycle counting + keyOn reset | rt | I5 | M G | The tick-trace goldens over scripted key sequences |
 | S5 | Voice ADPCM (28 samples/8 bytes, 3-bit filter, POS/NEG, loop flags) | rt | I5 | M G | The block-decode goldens (shared codec core with X2/X3) |
 | S6 | Pitch stepping + 512-position 4-tap interpolation + FM + shared noise | rt | I5 | M G | The interpolation golden; the reference-specific interpolator documented (layer 4) |
-| S7 | Sweep-mode volume unimplemented (full volume) | cp | I5 | D | **CD-06** — the only CD whose default *diverges* from the reference (the sweep envelope is implemented per the documented SPU behavior; the divergence note is prominent); the retail sweep-bit census = I10 `A` |
+| S7 | Sweep-mode volume unimplemented (full volume) | rt | I5 | D | **CD-06** — the only CD whose default *diverges* from the reference (the sweep envelope is implemented per the documented SPU behavior; the divergence note is prominent); the retail sweep-bit census = I10 `A`. **Re-owned from `cp` (2026-11-15):** the envelope evaluator is `psxrt::spu` arithmetic over `Clock` phases; `spu::SweepMode` is its parameter and `AudioProfile::psx_reference()` is where a set of them is chosen |
 | S8 | Reverb float IIR network (work area 0x4000, /32768) | rt | I5 | M G | The network-output golden; the hardware-topology equivalence stays Unresolved (register) |
 | S9 | Single Spu monitor (host-internal) | en | I5 | I | Format-only (FO) — the Rust equivalent is the narrow locked surface (cross/01 §5.4); the observable semantics is S2 |
 | X1 | XA 24-byte header; 18×128-byte portions; 2016 samples/sector/lane | im | I1 | M G | The synthetic-sector golden; the format corroboration (37.8 kHz × CD sector) noted |
@@ -49,7 +53,7 @@ Legend — **V** columns: `U` unit, `G` golden vector, `P` property, `I` integra
 | R1 | PSX degree 4096/turn | rt | I0 | G | **Verified at I0.** `psxrt/tests/golden_trig.rs` pins the constant's bit pattern (`0x3ac90fdb`) and the 16,385-angle grid it produces with |
 | R2 | `rsin`/`rcos` float×0x1000 short-cast; positive-only-at-constrained-sites | rt | I0 (golden) / I5 (sites) | G D | **Golden half verified at I0:** 32,770 assertions over θ = −8192…8192 from an independent Java oracle (`trig_grid.txt`), including the double narrowing. The D-guard half needs call sites — a state passing an out-of-range theta is a divergence test that can only exist once there are states, so it lands at I5 with the call-site census |
 | R3 | `simpleRand` LCG16 (×9+0x3711, seed 3; /2 & 0xffff; the unreachable guard) | rt | I0 (algo) / I6 (wiring) | G I | **Algorithm verified at I0:** 12,000 steps from seed 3, replayed in file order, from an independent Java oracle (`rng_lcg16.txt`), plus the reseed branch exercised deliberately (`golden_rng.rs`, `properties.rs`). Two findings the fixture recorded: the `/2` is a truncating signed divide, not a shift, and the guard multiplies the frame count by 9 *before* the ordinary update, so a guarded step advances by 81. The guard's vsync-sourcing is documented; the consumer census still lands at I7/I8 |
-| R4 | `rand` LCG15 (×0x41c64e6d+0x3039; bits 30:16; initial 0x24040001) + **seed source** | rt/cp | I0 (algo) / I6 (wiring) | G D | **Algorithm verified at I0:** 12,000 steps from 0x24040001 (`rng_lcg15.txt`) and the output-range invariant swept as a property. **CD-02** still owns the seed source (default: mirror the reference's host-clock `srand` at submap entry + the dev `--seed` override); the 59 call sites' non-reproducibility = the tier-2 invariants (planning/05 §5); the original-behavior evidence = I10 `A` (Q-70) |
+| R4 | `rand` LCG15 (×0x41c64e6d+0x3039; bits 30:16; initial 0x24040001) + **seed source** | rt/en | I0 (algo) / I6 (wiring) | G D | **Algorithm verified at I0:** 12,000 steps from 0x24040001 (`rng_lcg15.txt`) and the output-range invariant swept as a property. **CD-02** still owns the seed source (default: mirror the reference's host-clock `srand` at submap entry + the dev `--seed` override); the 59 call sites' non-reproducibility = the tier-2 invariants (planning/05 §5); the original-behavior evidence = I10 `A` (Q-70). **Re-owned from `rt/cp` (2026-11-15):** the stream is `psxrt::rng`; the seed source is the game crate's boot decision, taken explicitly (`WiringProfile`), and is not released as a runtime-readable flag |
 | R5 | Fate op bodies: `RAND = X × simpleRand() >>> 16`; SIN_12/COS_12/ATAN2_12 | sdk | I4 | G | The op-body goldens against the injected LCG16 stream (the R3 integration point) |
 
 The M4-05 posture check: the 4 HA/BE/FO/UR classes carry into the status column semantics — the FO rows (T5, S9, X5) are *non-port or host-internal* (D or I), the UR rows (G4, G6, G11, S7, X6, R4-seed) are CD-owned (planning/03) with their evidence at I10, the HA row (T4) is the bit-exact I7 golden.
@@ -183,20 +187,22 @@ The M4-05 posture check: the 4 HA/BE/FO/UR classes carry into the status column 
 
 ## 9. The 10 decision items (cross/02 §10) → CD dispositions → closure paths
 
+Owning crate here is **where the mechanism lives** — the crate that has to compute something when the alternative is selected. The place a *choice* is declared is named in the Status column, and after 2026-11-15 it is never `psxrt-compat`.
+
 | # | Item | CD (planning/03) | Owning crate | Decision milestone | Closure path (evidence) | Status at P0 |
 |---|---|---|---|---|---|---|
-| 1 | G6 same-z order (LIFO ref vs FIFO PSX) | CD-01 | cp | I5 (the policy live) | Retail TMD/UI same-z overlap census + external PSX GPU documentation | **Open** (default: LIFO, knob to FIFO; the I10 `A` may close it) |
-| 2 | R4/`rand()` seed source (Q-70) | CD-02 | gm/cp | I6 (the wiring) | Original-behavior evidence (asset/external) — or the decision stands as documented | **Decided by proposal** (Option A: mirror the host-clock seed + the dev `--seed`; the user approval is the P0 gate) |
-| 3 | T2 float GTE (Q-20/Q-67) | CD-03 | rt | I5 (the policy) | External PSX GTE documentation + the per-camera-path integer audit (the T4 precedent) | **Open** (default: float model + bounded-divergence note; the integer variant exists for T4) |
-| 4 | G4 384→368 clamp (Q-65/Q-37) | CD-04 | cp | I5 (the clamp live) | External NTSC/PSX display documentation + the visual cross-check | **Open** (default: keep the reference clamp) |
-| 5 | G11 rate-00 (Q-65) | CD-05 | cp | I5 (the mapping live) | External PSX GPU GP0 documentation + the retail TMD/UI rate-00 census | **Open** (default: keep the reference B+F/2 mapping) |
-| 6 | S7 sweep volumes (Q-68a) | CD-06 | cp | I5 (the envelope live) | Retail SSSQ sweep-bit census + PSX SPU sweep documentation | **Decided by proposal — the deliberate divergence** (default: implement the sweep envelope per the documented SPU behavior, diverging from the reference's gap; flagged prominently for user attention) |
-| 7 | X6 predictor continuity (Q-69a) | CD-07 | im | I1 (the policy) | Asset observation of the first block per FMV boundary | **Open** (default: preserve the documented leak; the dev knob for per-file reset) |
+| 1 | G6 same-z order (LIFO ref vs FIFO PSX) | CD-01 | rt | I5 (the ordering replay + `SameZOrder`) | Retail TMD/UI same-z overlap census + external PSX GPU documentation | **Open** (default: LIFO, parameter to FIFO on `psxrt::gpu`; the I10 `A` may close it) |
+| 2 | R4/`rand()` seed source (Q-70) | CD-02 | gm | I6 (the wiring) | Original-behavior evidence (asset/external) — or the decision stands as documented | **Decided by proposal** (Option A: mirror the host-clock seed + the dev `--seed`; the user approval is the P0 gate). The seed source is a `WiringProfile` value passed into the game states, not a flag read out of a crate |
+| 3 | T2 float GTE (Q-20/Q-67) | CD-03 | rt | I5 (the transform model + `TransformPrecision`) | External PSX GTE documentation + the per-camera-path integer audit (the T4 precedent) | **Open** (default: float model + bounded-divergence note; the integer variant exists for T4) |
+| 4 | G4 384→368 clamp (Q-65/Q-37) | CD-04 | rt | I5 (the clamp + `PresentationProfile`) | External NTSC/PSX display documentation + the visual cross-check | **Open** (default: keep the reference clamp) |
+| 5 | G11 rate-00 (Q-65) | CD-05 | rt | I1b/I3 (the decode) + I5 (the drawing path) | External PSX GPU GP0 documentation + the retail TMD/UI rate-00 census | **Open** (default: keep the reference B+F/2 mapping, which is the only mapping until a second decoder exists) |
+| 6 | S7 sweep volumes (Q-68a) | CD-06 | rt | I5 (the envelope + `SweepMode`) | Retail SSSQ sweep-bit census + PSX SPU sweep documentation | **Decided by proposal — the deliberate divergence** (default: implement the sweep envelope per the documented SPU behavior, diverging from the reference's gap; flagged prominently for user attention) |
+| 7 | X6 predictor continuity (Q-69a) | CD-07 | rt/im | I1 (the codec, then the transcode that calls it) | Asset observation of the first block per FMV boundary | **Open** (default: preserve the documented leak; the reset point is a parameter of `psxrt::spu::xa_adpcm`, supplied by `psxrt-import::audio::transcode`, not a policy module) |
 | 8 | C-01 opcode tables | CD-08 | sdk | I4 (the dual-table module) | Per-opcode reconciliation against the retail script bytes (the I10 disassembly pass) | **Open** (default: VM = runtime table, toolchain = recompiler table, the discrepancy preserved as data) |
 | 9 | Q-74 SSSQ tempo unit | CD-09 | en | I5 (the tempo code) | Retail SSSQ bytes (a tempo value + an audible duration) or original-engine documentation | **Open** (default: the reference's conversion code as-is) |
 | 10 | Q-80 memcard shape | CD-10 | gm | I6 (the model) | One real PSX memcard dump | **Open** (default: the documented 0x20000 handling) |
 
-Cross-cutting: CD-02 and CD-06 are the two rows where the *proposal itself is a decision* (the others are "keep the documented behavior + knob + evidence path"). Every CD carries its owning crate, its blocking milestone, its knob, and its register pointer (planning/03) — this table is the single view of their closure state at P0.
+Cross-cutting: CD-02 and CD-06 are the two rows where the *proposal itself is a decision* (the others are "keep the documented behavior + parameter + evidence path"). Every CD carries its owning crate, its blocking milestone, its parameter, and its register pointer (planning/03) — this table is the single view of their closure state at P0. **The owner column was revised on 2026-11-15**, from a wording that treated a decision as something a crate contains: a decision is recorded here and *realised* by a parameter with a named consumer, or by a writer that produces an original-format artifact. Six of the ten rows changed owner (CD-01, CD-02, CD-04, CD-05, CD-06, CD-07 — the five that named `psxrt-compat`, plus CD-02 which dropped it); four kept theirs (CD-03, CD-08, CD-09, CD-10). No default changed and no decision was dropped.
 
 ## 10. Coverage accounting
 
@@ -223,7 +229,7 @@ Milestone roll-up (rows whose *implementation* obligation lands at the milestone
 | I2 | 9 (CL-MOD-01..07-framework, CL-SAV-10..15-framework) | The SDK contract layer |
 | I3 | 13 (CL-ENG-01..13 framework halves, S2, CL-AST-11, CL-ENG-02 rates) | The frame contract, headless |
 | I4 | 8 (CL-SCR-01..09, 11, 12, 13; R5) | The Fate VM + toolchain |
-| I5 | 27 (the G-row presentation halves, the T-rows, the S-rows, X4-decode/X6-policy, CL-AUD-01..09, CL-ENG-06/11 projection, CL-ENG-10 threads) | The technical-risk cluster |
+| I5 | 27 (the G-row presentation halves, the T-rows, the S-rows, X4-decode/X6-reset, CL-AUD-01..09, CL-ENG-06/11 projection, CL-ENG-10 threads) | The technical-risk cluster, as `psxrt` modules with parameters |
 | I6 | 20 (CL-SAV-01..09, CL-MOD-02/03 sites + 10 census, CL-ENG-07 content + 12 save half, CL-ENG-13 content, CL-GLP-01 title half, CL-GLP-02 wiring, R3/R4 consumers) | The first real slice |
 | I7 | 7 (CL-GLP-01 submap/wmap halves, CL-GLP-09, CL-ENG-02 write sites, T4, R3/R4 legs, CL-MOD-09) | The exploration states |
 | I8 | 10 (CL-GLP-01 battle half, CL-GLP-03..07, 10 battle side, 13 battle side, 15, CL-GLP-17 replay, CL-SCR-07 battle slice) | The core loop |
@@ -236,7 +242,7 @@ Milestone roll-up (rows whose *implementation* obligation lands at the milestone
 
 1. **A row may not be marked `verified` without a test ID** (the planning/05 §8(c) gate check — mechanical).
 2. **A row may not be marked `deferred` without an evidence class + register pointer** (the deferral is an explicit register entry, not silence).
-3. **The CD rows (G4, G6, G11, S7, X6, R4-seed, T2, C-01, Q-74, Q-80) carry dual status**: the *implementation* status (verified at the owning milestone — the policy is live with its knob + note) and the *evidence* status (open until the I10 pass or external documentation closes it — the register). The implementation status never blocks on the evidence status.
+3. **The CD rows (G4, G6, G11, S7, X6, R4-seed, T2, C-01, Q-74, Q-80) carry dual status**: the *implementation* status (verified at the owning milestone — the mechanism is live, its parameter is declared at the call site that reads it, and the divergence note exists) and the *evidence* status (open until the I10 pass or external documentation closes it — the register). The implementation status never blocks on the evidence status.
 4. **The P0 corrections propagate here as notes, not silent edits**: the battle-RNG identity (the 48-bit LCG, not a Mersenne Twister) and the 135-row count are the two P0 in-place corrections to the research corpus; this matrix's CL-GLP-02 note is the implementation-side statement.
 5. **New rows are added only by a research correction** (a finding that changes a constraint) — the plan does not invent obligations; the register is the queue.
 
@@ -245,11 +251,20 @@ Milestone roll-up (rows whose *implementation* obligation lands at the milestone
 The first application of rule 1, and the reason this section exists: from here on, a row's status
 is carried with its evidence, not with anyone's memory of what the milestone was supposed to do.
 Two crates exist — `psxrt` (fixed-point and trig, three RNG streams, texture-depth addressing,
-blend arithmetic, frame cadence) and `psxrt-compat` (the policy framework with the CD defaults
-mounted as data). 72 tests run. The test-data contract, the fixture inventory and the two
+blend arithmetic, frame cadence) and `psxrt-compat`, which at I0 was a policy framework carrying
+the CD defaults as data. 72 tests run. The test-data contract, the fixture inventory and the two
 fixture-reading paths are in `README.md`; enforcement is `crates/psxrt/tests/fixtures.rs` plus
 `scripts/prepare_test_fixtures.sh`, which together check the inventory, the bytes, the provenance
 and the target-directory copies.
+
+**Correction, same date, and it reaches the paragraph above.** `psxrt-compat`'s I0 shape was
+retired by the planning revision on 2026-11-15 — see `planning/03` §5–§6 and `planning/07` §8b.
+The description "compatibility layer", the cross-subsystem `CompatPolicy` struct, and the
+string-keyed ledger that wrapped it were all wrong, and the crate's actual job — emitting original
+format bytes — had no implementation yet. Six §1 rows were re-owned as a result (G4, G6, G11, S7,
+T2, R4). Nothing recorded in this section is withdrawn by that: 72 tests still pass, the fixture
+census is unchanged, and the six re-owned rows describe mechanisms that were never built in either
+crate — which is why the owner column was the thing that had to change, rather than a status.
 
 ### What is verified, and against what
 

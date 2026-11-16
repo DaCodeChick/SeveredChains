@@ -113,14 +113,15 @@ naming scanner, which stays manual until something enforces it. None of the four
 
 **A fifth, added 2026-11-15: the citation rebuilder (no milestone owns it yet).** Roughly 1 350
 citations in this corpus point at a *file and line* in one of the reference repositories, and
-nothing in the workspace can tell whether one still resolves — `psxrt-compat`'s ledger test checks
-that cited `research/` paths exist and deliberately ignores reference-repository paths, so that a
-reference checkout cannot become a build dependency (TD-25). That is the right dependency rule and
-the wrong verification rule: a pointer that stops pointing is worse than no pointer, because it
-still reads like evidence. The fix is a **citation rebuilder** that resolves those citations against
-a reference checkout supplied through an environment variable, and **skips itself when that variable
-is unset** — so the default `make check` stays dependency-free and the check is opt-in for anyone
-who has the repos. See `planning/07` §8 for the drift that prompted it and for what it must report.
+nothing in the workspace could tell whether one still resolves — `psxrt-compat`'s ledger test, as
+shipped at I0, checked that cited `research/` paths exist and deliberately ignored
+reference-repository paths, so that a reference checkout cannot become a build dependency (TD-25).
+That is the right dependency rule and the wrong verification rule: a pointer that stops pointing is
+worse than no pointer, because it still reads like evidence. The fix is a **citation rebuilder**
+that resolves those citations against a reference checkout supplied through an environment variable,
+and **skips itself when that variable is unset** — so the default `make check` stays
+dependency-free and the check is opt-in for anyone who has the repos. See `planning/07` §8 for the
+drift that prompted it and for what it must report.
 
 **Update, same day: the rebuilder exists** as `scripts/citation_audit.py`, and the corpus has been
 run through it against `d47ac8637`: **925 of 1 330 citations are byte-identical to the reference, 154
@@ -133,6 +134,19 @@ present it exits 0 having done nothing, so TD-25 holds either way. What remains 
 but the discipline: a milestone that quotes a reference line number runs the audit at the revision it
 names, and `citation-exceptions.md` is where an unresolved pointer is declared rather than quietly
 trusted.
+
+**A sixth and seventh, added by the same revision — the two guards that replace the ledger's shape.**
+Neither has a home yet and neither is asset-blocked. **(6) the dependency-direction guard:** a
+workspace-level test that fails if any runtime crate lists `psxrt-compat` as a dependency, or if any
+`psxrt` source file names `psxrt_compat` in a `use`, a `dep` edge or a doc comment. It belongs
+wherever the runtime crates are enumerable — a workspace-level test target, not one crate's `tests/`
+— and it is worth more than the ledger it replaces, because a ledger entry can be satisfied by a
+type nobody calls while this one cannot be satisfied by anything but the real arrow. **(7) the
+round-trip inventory:** for every decoder in `psxrt-import`, either a paired encoder exists and is
+exercised by a `decode → encode → compare` test, or the module's doc header says why none is
+planned (a format that cannot be reconstructed, or one the project has no reason to write). Without
+it, "`psxrt-compat` is for exporters" quietly becomes "`psxrt-compat` is where unfinished exporters
+and unowned notes go", which is the shape this revision just retired.
 
 **Claim ceiling.** Nothing in I0 is `asset-validated` or `format-corroborated`. The seven fixtures
 are `source-verified` derivations; the two identity checks that lean on a JDK (the 48-bit

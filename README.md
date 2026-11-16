@@ -10,7 +10,15 @@ immediately: how to run the tests, and how the golden test data gets to a test.
 | Crate | What it holds | Depends on |
 |---|---|---|
 | `psxrt` | PSX platform mechanisms: fixed-point and trig, the three RNG streams, texture-depth addressing, blend arithmetic, frame cadence | nothing |
-| `psxrt-compat` | Compatibility policy: where "what the reference did" and "what the original hardware did" are different questions, and what this project ships in the meantime | `psxrt` |
+| `psxrt-compat` | Original-format **export**: writing bytes back into the form the disc held (TIM emission, CTMD re-encoding, XA re-encoding, reinjection), plus the divergence documentation that travels with those formats. It is not a place to put a runtime switch, and it is not on the boot path | `psxrt` |
+
+**Read the second row as the target, not the audit.** As committed at I0, `psxrt-compat` holds a
+policy scaffold — enum selectors, format constants, traceability records — and no encoder. The
+planning revision of 2026-11-15 retires all nine of those files (`planning/03` §5–§6, `planning/07`
+§5/§8b); the description above is what replaces them, starting at I1a. The crate's `psxrt` edge is
+used by exactly one file (`rate_00.rs`) and is deleted with it, which is the point: a toolchain
+crate that depends on nothing cannot be dragged down to a device, and one that a runtime crate
+depends on can.
 
 The other four names in the approved layout (`psxrt-import`, `severedchains`,
 `severedchains-sdk`, `severedchains-game`) are not created yet; nothing is stubbed for them.
@@ -101,9 +109,12 @@ kept so the identity can be re-established on a different JDK.
 
 Seven fixtures, all in `crates/psxrt/testdata/`, all consumed by `psxrt` tests.
 `psxrt-compat` has none: its one test file reads two research documents for citation
-traceability, which is not test data in this sense. **Expected total: 7. Expected in `psxrt`: 7.
+traceability, which is not test data in that sense. **Expected total: 7. Expected in `psxrt`: 7.
 Expected in `psxrt-compat`: 0.** Pinned in `fixtures.rs` (`PINNED`, and a count assertion) and
-in `fixtures.manifest`.
+in `fixtures.manifest`. A later milestone may give an export module a fixture — a TIM written from
+a known image, a CTMD re-encoded from a known model — and that would be the crate's first real
+test data; the census assertion is the place that expectation lives, so it changes with the
+milestone rather than silently.
 
 | File | Rows | Consumed by | Oracle behind it |
 |---|---|---|---|
@@ -160,7 +171,10 @@ never inherited from a filename.
   record in `planning/05` §6.
 - `crates/psxrt-compat/tests/policy_ledger.rs` embeds the two research documents its ledger cites
   (`research/cross/02-compatibility-checklist.md` and `research/04-unresolved-questions.md`) and
-  fails if a citation stops resolving, so a policy cannot quietly outlive its evidence.
+  fails if a citation stops resolving, so a policy cannot quietly outlive its evidence. That job
+  survives the ledger's retirement in two pieces: the same citation resolution, taken over the whole
+  corpus by `scripts/citation_audit.py`, and a dependency-direction guard that fails if any runtime
+  crate names `psxrt-compat` — see `planning/03` §6 and `planning/07` §4/F10.
 - Line-number citations in `research/` name a reference revision. **925 of 1 330 were verified
   byte-identical against the reference at `d47ac8637` on 2026-11-15; 154 are open** and itemised in
   `research/citation-exceptions.md` — check there before trusting a quoted line. `make citations`

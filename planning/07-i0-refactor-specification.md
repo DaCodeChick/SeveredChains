@@ -10,7 +10,9 @@ Two rules govern everything below.
 
 **R2 — a relocation must be provably behaviour-preserving.** When a move happens: the fixture bytes stay identical, every test that covered the moved code moves with it, and the workspace test count stays at its baseline (72) until new work is added on top. A move that changes a test count is not a move.
 
-Together these mean the answer to "when does the I0 code get reorganised?" is: **at I1b, I3, I5a and I5b, in pieces** — not in a separate cleanup milestone, and not before the code that needs the new shape exists.
+**R3 — a relocation is decided by what the code *is*, not by which crate its name suggests.** Three of the eleven findings below end in "delete the file, re-express its content as a doc header plus a traceability row", and that is deliberate. A relocation preserves behaviour; a deletion of a declaration that has no consumer preserves nothing, because there was no behaviour to preserve. Where this document says *delete*, it also names where the information goes, and the information is the part that was worth having.
+
+Together these mean the answer to "when does the I0 code get reorganised?" is: **at I1a, I1b, I3, I5a and I5b, in pieces** — not in a separate cleanup milestone, and not before the code that needs the new shape exists. The one exception runs the other way: the `psxrt-compat` policy scaffold is dismantled at **I1a**, together with the crate's first real module, because leaving a retired scaffold beside a new toolchain module makes the crate's purpose unreadable to whoever adds the third module.
 
 ## 2. The I0 inventory, as committed
 
@@ -79,9 +81,9 @@ Recorded first, because three of these are the things the revision *keeps*.
 
 1. **`BlendMode::HalfBackgroundPlusHalfForeground` is a description, not a transliteration** — the naming policy's requirement, met at the source. Same for `from_code` returning `Option` where "there is no fifth depth" is the real domain fact.
 2. **The oracle independence discipline held.** `trig_strictmath_divergences.txt` records 61 float-ordering divergence cases *against* the implementation rather than from it; `blend_exhaustive.rs` pins FNV digests computed from Java expressions independently; `timing_matrix.rs` is driven by a transcribed oracle (`testdata/generators/GoldenTiming.java`), not by Rust output.
-3. **`policy_ledger.rs` tests consequences, not wording.** It embeds two documents from outside the crate (`research/cross/02-compatibility-checklist.md` and `research/04-unresolved-questions.md`) with `include_str!`, and then checks three things as *data*: every `rows:` citation must still match a real checklist row (16 distinct rows are cited: G3, G4, G6, G10–G13, T1, T2, S2, S3, S7, X1, X4, X6, X7), every `register:` token must still name a real register item (12 distinct `Q-` items), and every `research/…` path named as evidence must still exist. It also fails if a record loses its divergence note or its closure condition, and it asserts that the knob surface is exactly the fields of `CompatPolicy`. **The revision retires the framework's shape and keeps every one of those checks**, redirected: a rewritten ledger test at I5a still resolves citations and still refuses a knob with nothing behind it.
-4. **No placeholder crate and no placeholder module.** `psxrt-compat`'s 16 records were 83 lines of `lib.rs` plus real content per module; nothing existed to satisfy a count.
-5. **The one framework property the revision depends on already holds:** `psxrt-compat` has no vtable in its public API and reaches no device — its eight modules are enums, constants and records. Its only project dependency is a path reference to `psxrt`, and that edge is used by **exactly one module** (`rate_00.rs`, for `psxrt::BlendMode`); the reference in `blend_select.rs` is a doc-link, not a code dependency.
+3. **`policy_ledger.rs` tests consequences, not wording.** It embeds two documents from outside the crate (`research/cross/02-compatibility-checklist.md` and `research/04-unresolved-questions.md`) with `include_str!`, and then checks three things as *data*: every `rows:` citation must still match a real checklist row (16 distinct rows are cited: G3, G4, G6, G10–G13, T1, T2, S2, S3, S7, X1, X4, X6, X7), every `register:` token must still name a real register item (12 distinct `Q-` items), and every `research/…` path named as evidence must still exist. It also fails if a record loses its divergence note or its closure condition, and it asserts that the knob surface is exactly the fields of `CompatPolicy`. **The revision retires the framework's shape and keeps every one of those checks**, redirected into `scripts/citation_audit.py` (which resolves the same class of pointer, over the whole corpus, without a Rust harness) and into the per-subsystem matrix fixtures. What it does not keep is the idea that a compiled table is the right home for a citation.
+4. **No placeholder crate and no placeholder module.** `psxrt-compat`'s 16 records were 83 lines of `lib.rs` plus real content per module; nothing existed to satisfy a count. The point cuts against the crate's purpose, not for it: the modules are real *files*, and a file can be honest documentation and still be the wrong shape for compiled code.
+5. **The one framework property the revision depends on already holds, and it is what makes deletion cheap:** `psxrt-compat` has no vtable in its public API and reaches no device — its eight modules are enums, constants and records. Its only project dependency is a path reference to `psxrt`, and that edge is used by **exactly one module** (`rate_00.rs`, for `psxrt::BlendMode`); the reference in `blend_select.rs` is a doc-link, not a code dependency. Because nothing calls any of it, deleting it cannot break a caller — and because the checks in item 3 are being redirected rather than dropped, nothing learned is lost either.
 
 ## 4. Findings and dispositions
 
@@ -118,17 +120,17 @@ I0 delivers the 4096-unit turn factor and the trig scale. It does not deliver th
 
 ### F5 — `blend.rs` and `rate_00.rs`: the equations are in the right crate, the decoder is in the wrong one
 
-`psxrt::blend` holds four equations plus `modulate`/`modulate_channel`, and `blend_exhaustive.rs` covers all 65 536 channel pairs per mode with an exhaustive check. That is representation (Kind B), and it is where it belongs.
+`psxrt::blend` holds four equations plus `modulate`/`modulate_channel`, and `blend_exhaustive.rs` covers all 65 536 channel pairs per mode with an exhaustive check. That is a representation, and it is where it belongs.
 
-`psxrt-compat::rate_00` holds `translucency(i32)`, `page_translucency(u32)`, `flag_translucency(u32)` — all returning `Option<BlendMode>` — plus `NO_TRANSLUCENCY` and the two shift constants. **These decode. They do not choose.** A reader who wants to know "which blend applies to this draw" has to know that a `u32` flag word's bits 28-29 and a TPage word's bits 5-6 encode the same four modes, and that fact is currently filed under *policy*.
+`psxrt-compat::rate_00` holds `translucency(i32)`, `page_translucency(u32)`, `flag_translucency(u32)` — all returning `Option<BlendMode>` — plus `NO_TRANSLUCENCY` and the two shift constants. **These decode. They do not choose, and they do not encode.** A reader who wants to know "which blend applies to this draw" has to know that a `u32` flag word's bits 28-29 and a TPage word's bits 5-6 encode the same four modes, and that fact is currently filed under *policy*.
 
-**Target:** the three decoders + 3 constants → `psxrt::gpu` at **I3** (with F4's page-word work); the "rate-00 is real translucency" divergence → `DIVERGENCE.md`. The flag that *chooses* the decode model stays in `psxrt-compat`, and its name must say "decode model", not "emulation" (CD-05).
+**Target:** the three decoders + 3 constants → `psxrt::gpu::pixel` at **I1b** (they arrive with the colour paths they decode), or at **I3** if the colour paths slip; the "rate-00 is real translucency" divergence → `DIVERGENCE.md`. **Nothing about this stays in `psxrt-compat`.** A decoder is not the inverse of an encoder for placement purposes, and the actual inverse here — RGBA8 → the 2-bit index encodings, needed to *emit* a TIM — is `psxrt-compat::texture`, built alongside these and reading the same four modes from `gpu::pixel`. If the flag that chooses the decode model is ever needed it is a parameter of `gpu::pixel` naming a *decode model*, never a name containing "emulation" (CD-05).
 
-### F6 — `predictor.rs` is a format header holding one policy
+### F6 — `predictor.rs` is a format header holding one parameter
 
 Seven constants, six of which are XA layout facts: `SOURCE_RATE_HZ = 37_800`, `HEADER_BYTES = 24`, `CODING_INFO_OFFSET = 19`, `PORTIONS_PER_SECTOR = 18`, `PORTION_BYTES = 128`, `SAMPLES_PER_SECTOR_LANE = 2_016`; the seventh, `MAX_BOUNDARY_LEAK_SAMPLES = 28`, is a measured divergence bound, not a format fact.
 
-**Target:** the six → `psxrt::spu::xa_adpcm` at **I1b** (with the codec). `MAX_BOUNDARY_LEAK_SAMPLES` → the divergence note beside the codec. `PredictorReset` stays as a policy and takes `psxrt::spu` as its consumer at I5a. The five-vs-six count in the first draft of `planning/03` §5 is corrected there.
+**Target:** the six → `psxrt::spu::xa_adpcm` at **I1b** (with the codec), declared **once** and read by both directions — by `psxrt-import::audio::transcode` on the way in and by `psxrt-compat::audio` on the way out, which is the only arrangement that makes the round-trip gate meaningful. `MAX_BOUNDARY_LEAK_SAMPLES` → the divergence note beside the codec. `PredictorReset` becomes a **decoder parameter of `xa_adpcm`**, not a `psxrt-compat` module: its two values describe how a decoder carries state across a boundary, and a fixture can set one without a policy layer. The five-vs-six count in the first draft of `planning/03` §5 is corrected there.
 
 ### F7 — `display_clamp.rs` mixes a layout fact with a profile choice
 
@@ -138,44 +140,53 @@ Seven constants, six of which are XA layout facts: `SOURCE_RATE_HZ = 37_800`, `H
 
 ### F8 — `voice_alloc.rs` holds a runtime data structure, not a policy
 
-`VoiceCapacity` is an enum with a `bound(phase: Phase) -> u32` method over a `Phase` enum. It is state-bearing arithmetic over a hardware capacity table (Kind C).
+`VoiceCapacity` is an enum with a `bound(phase: Phase) -> u32` method over a `Phase` enum. It is state-bearing arithmetic over a hardware capacity table.
 
-**Target:** `VoiceCapacity` + `Phase` → `psxrt::spu` at **I5a**; the allocation *policy* (which phase table applies, and when the 12/16 boundary moves) stays in `psxrt-compat` with `psxrt::spu` as consumer.
+**Target:** `VoiceCapacity` + `Phase` → `psxrt::spu` at **I5a**, and so does the capacity question that was going to be left behind in `psxrt-compat` (which phase table applies, and when the 12/16 boundary moves). Splitting a capacity table from the structure that reads it produces a toolchain crate containing a `pub` type whose only purpose is to be instantiated by the runtime — the dependency pointing the wrong way in its smallest possible form.
 
-### F9 — `same_z.rs` is the one module whose function really is its policy
+### F9 — `same_z.rs` is the one module whose function really is its selector, and that is why neither half belongs in `psxrt-compat`
 
-`SameZOrder::{Lifo, Fifo}` plus `draw_position(insertion_index, count) -> Option<usize>`. The function is the two orderings expressed as index arithmetic, so it moves *with* the selector rather than being split from it: a policy selector that has to be re-derived by each caller is not a selector.
+`SameZOrder::{Lifo, Fifo}` plus `draw_position(insertion_index, count) -> Option<usize>`. The function is the two orderings expressed as index arithmetic, so the two halves cannot be separated: a selector that has to be re-derived by each caller is not a selector, and an arithmetic helper stranded in a toolchain crate is a file whose reader has to guess which crate executes it.
 
-**Target:** stays in `psxrt-compat`, consumed by `psxrt::gpu`'s ordering-table replay at **I5a**, and it needs a modern-path counterpart in the same milestone or the flag is a flag and not a model (CD-01).
+**Target:** both halves to `psxrt::gpu`'s ordering-table replay at **I5a**, with `SameZOrder` as the parameter, and a modern-path counterpart in the same milestone or the knob is a knob and not a model (CD-01). Grep-verified as with all of these: `SameZOrder` currently has no caller outside its own crate, so this is a decision about where I5a will write the ordering, not a relocation of working code.
 
-### F10 — the framework: what dies, what is redirected
+### F10 — the framework: what dies, and what is redirected
 
-Dies: `PolicyRecord` as a shipped type, the 16-entry `LEDGER` as a table, `CompatPolicy` as the wholesale four-field struct, `Availability`'s two states as a way of talking about *alternatives* (they describe defaults). The `psxrt → psxrt-compat` direction question dies with them, because no `psxrt` module will ever read a policy: each takes an explicit parameter, defaulting to the modern behaviour.
+Dies, at **I1a**, as a block: `PolicyRecord` as a shipped type, the 16-entry `LEDGER` as a table, `CompatPolicy` as the wholesale four-field struct, and `Availability`'s two states as a way of talking about *alternatives* (they describe defaults). `Confidence` and `Layer` survive only as vocabulary — in `DIVERGENCE.md`, in module doc headers, in the `planning/06` columns — because "which layer is this, and how sure are we" is a question a reader answers, not a type a runtime consults.
 
-Redirected, keeping the check: the citation-resolution test (it must still resolve every `planning/` and `research/` citation after the moves), the "no record claims retail validation" test, the ledger-census test (reworded: no flag appears without an implementation *and* a consumer), and the reference-fidelity comparison (the shipped-default set and the reference-faithful set differ in exactly one field — the sweep envelope — and that statement keeps a test).
+The `psxrt → psxrt-compat` direction question dies with them, and so does its replacement candidate. A `psxrt::compat` module holding a `CompatFlags` bitset was proposed in the first pass of this revision and **withdrawn**: cross-subsystem flags, resolved at startup and addressed by name, are the retired `CompatPolicy` with the registry moved one directory up, and a flag nobody reads is a false claim about a capability. What replaces both is small: **each subsystem takes an explicit parameter, defaulting to the modern behaviour**, and a profile enum in `severedchains` chooses a set of them at boot.
+
+Redirected, keeping the check: the citation-resolution test (it must still resolve every `planning/` and `research/` citation after the moves — now via `scripts/citation_audit.py`, which covers the whole corpus rather than one crate's records), the "no record claims retail validation" test, and the reference-fidelity comparison (the shipped-default set and the reference-faithful set differ in exactly one field — the sweep envelope — and that statement keeps a test, expressed against `AudioProfile::default()` versus `AudioProfile::psx_reference()`). The ledger-census test is replaced by something with real teeth: **a workspace test that fails if any runtime crate lists `psxrt-compat` as a dependency, or if any `psxrt` source file names `psxrt_compat`.**
 
 ## 5. The move table
 
-| Now | Target | Crate | Milestone | Kind of change |
-| --- | --- | --- | --- | --- |
-| `psxrt/src/fixedpoint.rs` | `psxrt/src/math/trig.rs` | `psxrt` | I5a | repath; `TrigonometryModel` disposition per Q1 |
-| (the 4096-factor pieces stay with trig) | `psxrt/src/math/angle.rs` | `psxrt` | I5a | **new** work: the 65536 unit, wrapping, conversions |
-| `psxrt/src/bpp.rs` | `psxrt/src/gpu/pixel.rs` | `psxrt` | I1b | repath + colour paths added |
-| `psxrt/src/blend.rs` | `psxrt/src/gpu/blend.rs` | `psxrt` | I3 | repath, equations unchanged; exhaustive test moves with it |
-| `psxrt/src/timing.rs` | `psxrt/src/clock.rs` | `psxrt` | I3 | repath; no phase hooks, no host sleep |
-| `psxrt-compat/src/rate_00.rs` (decoders) | `psxrt/src/gpu/translucency.rs` | `psxrt` | I3 | relocation of Kind-B code out of the policy crate |
-| `psxrt-compat/src/display_clamp.rs` (constants + clamp) | `psxrt/src/gpu/display.rs` | `psxrt` | I3 | relocation; the profile choice goes to the engine crate at I5b |
-| `psxrt-compat/src/predictor.rs` (6 constants) | `psxrt/src/spu/xa_adpcm.rs` | `psxrt` | I1b | relocation |
-| `psxrt-compat/src/voice_alloc.rs` (`VoiceCapacity`, `Phase`) | `psxrt/src/spu/voice.rs` | `psxrt` | I5a | relocation |
-| `psxrt-compat/src/{same_z,gte_precision,sweep}.rs` | stay | `psxrt-compat` | I5a | gain a named consumer; nothing moves |
-| `psxrt-compat/src/lib.rs` | decomposed | — | I1a (`compat` vocabulary), I5a (ledger) | retirement, per `planning/03` §6 |
-| `psxrt/src/REMAP.md` | stays; `psxrt-compat` gains none | both | — | it needs one only when a module cites an original code identifier; today it cites checklist rows (`G12`, `S7`, `X6`), not identifiers |
+Class column per `planning/03` §3: **A** runtime mechanism, **B** selector/parameter, **C** research evidence, **D** original-format encoding, **E** obsolete. A slash means the file contains more than one class and the classes go to different places. **No row is class D** — that absence is the finding, and the right-hand column of `planning/03` §5 shows what would have been.
 
-Test files move with their subject, unchanged: `golden_trig.rs` with F1, `bpp_exhaustive.rs` with F4, `blend_exhaustive.rs` with F5, `timing_matrix.rs` with the clock repath, `properties.rs` splits along the same seams, `fixtures.rs` stays where the manifest is. `policy_ledger.rs` is rewritten at I5a, not deleted (§4/F10).
+| Now | Target | Crate | Milestone | Class | Kind of change |
+| --- | --- | --- | --- | --- | --- |
+| `psxrt/src/fixedpoint.rs` | `psxrt/src/math/trig.rs` | `psxrt` | I5a | A | repath; `TrigonometryModel` disposition per Q1 |
+| (the 4096-factor pieces stay with trig) | `psxrt/src/math/angle.rs` | `psxrt` | I5a | A | **new** work: the 65536 unit, wrapping, conversions |
+| `psxrt/src/bpp.rs` | `psxrt/src/gpu/pixel.rs` | `psxrt` | I1b | A | repath + colour paths added |
+| `psxrt/src/blend.rs` | `psxrt/src/gpu/blend.rs` | `psxrt` | I3 | A | repath, equations unchanged; exhaustive test moves with it |
+| `psxrt/src/timing.rs` | `psxrt/src/clock.rs` | `psxrt` | I3 | A | repath; no phase hooks, no host sleep |
+| `psxrt-compat/src/rate_00.rs` | decoders + 3 constants → `psxrt/src/gpu/pixel.rs`; the divergence note → `crates/psxrt/src/gpu/DIVERGENCE.md`; **no selector is created** | `psxrt` | I1b or I3 | A / C | **delete the file.** Nothing in it is class D: it decodes, and the inverse (RGBA8 → 2-bit) is a separate class-D module, `psxrt-compat::texture` |
+| `psxrt-compat/src/display_clamp.rs` | constants + clamp → `psxrt/src/gpu/`; the on/off → `severedchains::render::profile::PresentationProfile`; the 3 records → `DIVERGENCE.md` | `psxrt`, then `severedchains` | I3 (facts), I5b (profile) | A / B / C | **delete the file.** The profile lives in the engine crate because the profile is where a *set* of choices is made |
+| `psxrt-compat/src/predictor.rs` | 6 constants → `psxrt/src/spu/xa_adpcm.rs` (declared once, read by the I1b decoder **and** the I1b encoder); `PredictorReset` → a parameter of that module; the leak bound → `DIVERGENCE.md` | `psxrt` | I1b | A / B / C | **delete the file** |
+| `psxrt-compat/src/voice_alloc.rs` | `VoiceCapacity`, `Phase`, the allocation chain → `psxrt/src/spu/`; the capacity limit is a parameter the audio profile supplies | `psxrt` | I5a | A / B | **delete the file** |
+| `psxrt-compat/src/same_z.rs` | both halves → `psxrt/src/gpu/` (the OT replay), `SameZOrder` as its parameter | `psxrt` | I5a | A / B / C | **delete the file.** It does not "stay with a named consumer" — the consumer is written in `psxrt`, in the same step, and a parameter declared next to the code that matches on it is the shape that survives review |
+| `psxrt-compat/src/gte_precision.rs` | the 2 scale constants → `psxrt/src/gte.rs` with the transforms; `GtePrecision` → `TransformPrecision`, that module's parameter | `psxrt` | I5a | A / B / C | **delete the file** |
+| `psxrt-compat/src/sweep.rs` | the envelope evaluator → `psxrt/src/spu/`; `SweepEnvelope` → `spu::SweepMode`; S7 → `DIVERGENCE.md` | `psxrt` | I5a | A / B / C | **delete the file** |
+| `psxrt-compat/src/blend_select.rs` | the 2 records → the `psxrt/src/gpu/blend.rs` doc header + the `planning/06` rows | documentation | I1a | C / E | **delete the file.** Two records and no code: this file was never a module, it was a comment in a language that requires it to compile |
+| `psxrt-compat/src/lib.rs` | retired wholesale at **I1a**, with the crate's `Cargo.toml` description and its `psxrt` dependency | — | I1a | E | retirement, per `planning/03` §6 |
+| `psxrt/src/REMAP.md` | stays; **`psxrt-compat` gains its own only when a writer cites an original identifier** | both | — | C | today `REMAP.md` cites checklist rows (`G12`, `S7`, `X6`), not identifiers, so there is nothing to carry across |
 
-**The dependency consequence.** `psxrt-compat` declares `psxrt` as a dependency, and exactly one file uses it: `rate_00.rs`, which imports `psxrt::BlendMode` in order to *decode a flag word into* that type. Once F5 moves the three decoders to `psxrt::gpu`, nothing in `psxrt-compat` references `psxrt` at all — so the `Cargo.toml` edge is deleted at **I3**, and `psxrt-compat` becomes a crate with zero project dependencies. That is the architecture requirement "`psxrt-compat` must not require a running engine" met literally rather than by argument: a policy crate that depends on nothing cannot be dragged down to a device.
+**Read the milestone column as the ordering constraint it is.** Eight of these fourteen rows happen at **I1a or I1b**, and five of them are pure deletions. That is not a refactor schedule; it is a correction to a scaffold written before the question "what is this crate for?" was settled. Rows landing at I3/I5a are the ones where a *mechanism* has to be written, and they are written from `research/cross/02`, not copied from `psxrt-compat`.
 
-**The rule that follows, for any later policy module:** do not let a policy crate depend on a runtime crate in order to reuse a type. Where both sides genuinely need one enum, that enum is a representation type and lives in `psxrt`, and the policy module names a *selection between implementations* instead of sharing the vocabulary. `rate_00` is the case that proves the rule: the shared type existed only because a decoder had been parked in the wrong crate.
+Test files move with their subject, unchanged: `golden_trig.rs` with F1, `bpp_exhaustive.rs` with F4, `blend_exhaustive.rs` with F5, `timing_matrix.rs` with the clock repath, `properties.rs` splits along the same seams, `fixtures.rs` stays where the manifest is. `policy_ledger.rs` is **replaced** at I1b, not rewritten: by the matrix fixtures, and by the dependency-direction guard described in F10 and `planning/03` §6.
+
+**The dependency consequence.** `psxrt-compat` declares `psxrt` as a dependency, and exactly one file uses it: `rate_00.rs`, which imports `psxrt::BlendMode` in order to *decode a flag word into* that type. Once F5 moves the three decoders, nothing in `psxrt-compat` references `psxrt` at all — so the `Cargo.toml` edge is deleted at **I1a**, and the crate starts its toolchain life with zero project dependencies. If `psxrt-compat::texture` or `::audio` later needs `psxrt::gpu::pixel` or `psxrt::spu::xa_adpcm` in order to emit bytes correctly, the edge comes back, and it comes back as `psxrt-compat → psxrt`, which is the direction the architecture wants (planning/01 §8 question 2). Either way the crate never sits *underneath* a runtime crate — and that is the property the deleted scaffold was quietly moving it toward.
+
+**The rule that follows, for any later module in this crate:** do not let a toolchain crate depend on a runtime crate in order to reuse a type, and do not let a runtime crate depend on a toolchain crate in order to read a choice. Where both sides genuinely need one enum, that enum is a representation type and lives in `psxrt`, and the toolchain side names an *encoding of it*. `rate_00` is the case that proves the rule: the shared type existed only because a decoder had been parked in the wrong crate, and once the decoder moved, the dependency had nothing to justify it.
 
 ## 6. Verification after each move
 
@@ -189,13 +200,15 @@ The baseline is **72 tests / 8 binaries / 0 clippy warnings / 7 fixtures byte-id
 
 **No I0 test takes retail bytes as input, and none may start to.** All 7 fixtures are synthetic and oracle-generated. That boundary is P-02's, not this revision's.
 
+**One addition, for the I1a and I1b gates.** Two checks that do not exist today and are cheap to build once the shape is fixed: (a) the dependency-direction guard — no runtime crate lists `psxrt-compat`, no `psxrt` source file names `psxrt_compat` (F10); (b) a round-trip inventory — for every decoder in `psxrt-import`, either a paired encoder exists somewhere and is exercised, or the module's doc header says why none is planned. (b) is what stops "the compat crate is for exporters" from degrading into "the compat crate is where unfinished exporters go".
+
 ## 7. Open questions for the owner
 
 Three here, plus a fourth in §8. None is answerable from the repository alone.
 
 **Q1 — `TrigonometryModel`: keep or delete?** (§4/F2). Recommendation: **delete at the I5a repath**, keep its doc comment as a header note on `math::trig`, and let the table work introduce its own seam when there are two arms to choose between. The alternative is defensible only if the owner wants the +512 / `0x3ff` facts to stay in code rather than in `research/psx/02-gte.md`.
 
-**Q2 — do the per-subsystem matrix fixtures hold one fixture per checklist *row* or one per *policy*?** `research/cross/02` holds 135 rows (43 carried from M4-05 + 92 `CL-*`), and 16 of them are cited by the I0 ledger records (disposed in §4 and `planning/03` §5). The revision classifies the rows; it does not delete any, and `planning/06` still maps all 135. The open question is only the fixture shape at I5a/I5b. Recommendation: one per policy, because three of the ten CDs share a mechanism; the row→fixture mapping stays in `planning/06`.
+**Q2 — do the per-subsystem matrix fixtures hold one fixture per checklist *row* or one per *parameter*?** `research/cross/02` holds 135 rows (43 carried from M4-05 + 92 `CL-*`), and 16 of them are cited by the I0 ledger records (disposed in §4 and `planning/03` §5). The revision classifies the rows; it does not delete any, and `planning/06` still maps all 135. The open question is only the fixture shape at I5a/I5b. Recommendation: **one fixture per matrix, which is usually per parameter but not always** — the blend matrix and the voice-allocation matrix are the two that are genuinely one-per-mechanism, and three of the ten CDs share a mechanism. The row→fixture mapping stays in `planning/06`.
 
 **Q3 — script the naming/map scanner now, or keep it manual?** It is the only gate item in `planning/05` §8 that has no implementation. Recommendation: keep it manual through I3 and revisit at I5a, when there are enough modules for a scanner to pay for itself. Until then, the REMAP rule is enforced by review, and this document is where that is recorded.
 
