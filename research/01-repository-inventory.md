@@ -8,7 +8,7 @@ All four repositories are Gradle-based Java projects, AGPL-3.0 licensed, maintai
 
 | | Severed-Chains | Script-Recompiler | Mod-Loader | Dig-Dabas |
 |---|---|---|---|---|
-| **Revision (2026-11-02)** | `0c08c679b` (2026-11-02) | `3433e6f74` (2026-06-21) | `c69213490` (2026-10-11) | `4c1fbfebc` (2026-05-20) |
+| **Revision (2026-11-02)** | `0c08c679b` (2026-11-02) — **read-at, not current**: the checkout moved to `d47ac8637`, which is what citations are verified against; see §7 | `3433e6f74` (2026-06-21) | `c69213490` (2026-10-11) | `4c1fbfebc` (2026-05-20) |
 | **First commit** | 2021-06-09 | 2022-04-06 | 2023-09-02 | 2024-07-21 |
 | **Commit count** | 4545 | 176 | 44 | 73 |
 | **Maven coordinates** | `legend:lod` (version = git hash) | `org.legendofdragoon:script-recompiler:0.7.11` | `org.legendofdragoon:mod-loader:4.3.5` | `org.legendofdragoon:mogul-dabas:0.0.1` |
@@ -124,3 +124,36 @@ All four repositories are Gradle-based Java projects, AGPL-3.0 licensed, maintai
 - All repos target Maven Central with identical POM metadata conventions (same developer, same license, `promote` task for the new Sonatype portal).
 - The main repo consumes the other three as **published artifacts** (version-pinned), so the source revisions consumed at build time are whatever the pinned versions were cut from — not necessarily the local revisions listed above (`Inferred`: the local checkouts are the canonical upstream of those artifacts; exact source-to-artifact mapping per version is an M8 verification item).
 - Java level is not uniform (25/25/21/25) — Mod-Loader intentionally supports older runtimes.
+
+## 7. Citation revision policy (decided 2026-11-15)
+
+Two different things used to be written with the same notation, which is how the drift went unseen: the
+revision a document was **read at**, and the revision a line number is **true at**. They are now
+separate.
+
+> **Pin ≠ checkout.** The revisions in the table above are what the corpus was *read at*, not a
+> description of whatever happens to be checked out. `Severed-Chains` sat four commits above its
+> recorded revision (`0c08c679b` → `d47ac8637`, upstream pulls on 2026-11-12 and 2026-11-15) while
+> `research/audits/r0-r1-xhigh-audit.md` said "verified at pinned revisions". All four working copies
+> were and remain **unmodified**; the other three are still exactly at their recorded revisions. A
+> verification run has to name the revision it used, and a line citation in this corpus is a claim
+> about a *stated* revision, not about today's checkout.
+
+- **Citations are verified against `d47ac8637346f60b73736793642731999885960a`.** That is the revision
+  `make citations` checks against, and it is the checkout a future audit needs to be valid.
+- **Per-document `at <sha>` markers are provenance, not the pin.** They keep naming the revision that
+  document was written against — `0c08c679b` for M1–M9-06, `71ce130364e…` for M9-07 and M10 — and the
+  two audit transcripts deliberately report the revision they actually audited, because an audit record
+  rewritten to a newer revision would claim a verification that never happened.
+- **The check is `make citations`** (`scripts/citation_audit.py`). It resolves each citation inside the
+  repository named by the surrounding prose, separates *relocated* pointers from *changed* code, and
+  exits 0 doing nothing when no reference checkout is supplied — so no build or test depends on a
+  reference repository (TD-25). Its `--apply` mode is not trusted; see `citation-exceptions.md` §3.
+- **Unresolved pointers are declared, not hidden.** `research/citation-exceptions.md` holds the census
+  (925 verified, 154 open at `d47ac8637`) and, for each open one, what to re-read. Read it before
+  quoting a reference line number into Rust.
+
+Measured, so the numbers here can be re-derived: 1 330 citations across 58 documents (the two
+`audits/` transcripts and the exception register are excluded from the corpus); 925 byte-identical at
+the pin; 178 relocated but untouched by choice; 73 unverifiable for lack of a baseline; 154 open. Run
+`make citations` with `SEVERED_CHAINS_REPOS` set to reproduce.

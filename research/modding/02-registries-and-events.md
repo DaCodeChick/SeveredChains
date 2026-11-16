@@ -310,10 +310,21 @@ Total in-repo `postEvent` call sites: **99**.
 
 Exactly **7 classes, 39 handler methods** consume events in the reference — everything else is extension surface:
 
+> **Re-count before using this table (drift note, 2026-11-15).** The census was taken at
+> `0c08c679b`. At `d47ac8637` — the revision citations in this corpus are verified against — it is
+> **8 classes**: `legend/lodmod/LodTrainingHandler.java` was added by *Addition Practice* (#2907) and
+> is **instance-registered** (`LodMod.java:312`, `EVENTS.register(this.trainingHandler)`), so it joins
+> the weak-instance group, not the annotation-scan group. Its `handleLoadEnemy` is the first in-repo
+> consumer of `LoadEnemyEvent.scriptFuture`. Separately, **`LodMod` no longer carries a class-level
+> `@EventListener`** (2 such sites at `0c08c679b`, 1 now; the survivor is `CoreMod.java:95`), which is
+> what the `LodMod.java:114` citation in the row below pointed at. Explicit `priority = …` is still
+> unused in either revision, so the finding underneath this table holds. Re-count at whatever revision
+> is checked out when this is used; `make citations` reports the pointers.
+
 | Class | Kind | Handlers (event → method) |
 |---|---|---|
 | `CoreMod` (`game/modding/coremod/CoreMod.java:95` class-level) | static | 9: RegisterEngineStateTypesEvent, ConfigRegistryEvent, InputActionRegistryEvent, ItemRegistryEvent, RegisterDefaultInputBindingsEvent, RegisterPostBattleActionsEvent, GatherShopExtensionsEvent, GameLoadedEvent (inventory-size override), RegisterAtlasTexturesEvent |
-| `LodMod` (`lodmod/LodMod.java:114` class-level) | static | 19: one per registry window (campaignTypes, engineStates, inputActions, config, characterTemplates, levelUpActions, items, equipment, goods, shops, encounters, spells, statTypes, statModTypes, elements, elementIcons, bentTypes) + RegisterDefaultInputBindingsEvent + RegisterBattleEntityStatsEvent |
+| `LodMod` (`lodmod/LodMod.java:114` class-level at `0c08c679b` — annotation removed by `d47ac8637`, see the drift note above) | static | 19: one per registry window (campaignTypes, engineStates, inputActions, config, characterTemplates, levelUpActions, items, equipment, goods, shops, encounters, spells, statTypes, statModTypes, elements, elementIcons, bentTypes) + RegisterDefaultInputBindingsEvent + RegisterBattleEntityStatsEvent |
 | `TurnOrderMod` (`turnorder/TurnOrderMod.java:42` class-level; instance-registered in ctor `:61`) | weak instance | 5: ConfigRegistryEvent, GameLoadedEvent, BattleEndedEvent, BattleEntityTurnEvent, RenderEvent |
 | `DebuggerController` | weak instance | 2: ConfigLoadedEvent, ConfigUpdatedEvent |
 | `ScriptDebuggerController` | weak instance | 2: ScriptLifecycleEvent, RenderEvent |

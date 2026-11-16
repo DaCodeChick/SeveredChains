@@ -53,7 +53,11 @@ def repo_files(root: Path):
             continue
         p = root / name
         seen.add(p)
-        yield p, True
+        # A file tracked but deleted in the working tree is a pending removal, not a hygiene
+        # problem. `git ls-files` still lists it, so it has to be filtered here or the audit
+        # reports a read error for a path that deliberately no longer exists.
+        if p.is_file():
+            yield p, True
     for name in untracked:
         if not name:
             continue

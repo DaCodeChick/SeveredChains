@@ -1,344 +1,281 @@
-# P0-01 — Rust Architecture (Proposed)
+# P0-05 — Rust Architecture (Revised)
 
-Status: **Proposed (P0, 2026-11-14; approved starting point `4a2acb8`).** This is the first implementation-phase document. It is a *design proposal grounded in the M1–M10 research corpus*, not an established fact: every research-grounded statement carries a `research/` citation; every forward-looking choice is marked **Proposed** and awaits explicit user approval. Decision items are split out to `planning/02-technical-decisions.md` (TD-*) and `planning/03-compatibility-decisions.md` (CD-*); the milestone sequence is `planning/04-implementation-roadmap.md`; the test strategy is `planning/05-verification-strategy.md`; row-level coverage of the 135-row compatibility checklist (the M10 "109" figure was a P0-corrected transcription error — cross/02 §12) is `planning/06-traceability-matrix.md`.
+Status: **Revised (2026-11-15), superseding the 2026-11-14 P0 draft.** The revision is driven by the dependency analysis in `planning/04-implementation-roadmap.md` and the I0 source audit in `planning/07-i0-refactor-specification.md`. Decisions below carry `ADR-00n` labels; each is stated in full at its point of use — there is no separate ADR file, and the label is a citation handle, not a pointer to another document. The 2026-11-14 draft's §1 (design axioms A1–A13, freedoms L1–L12, the nine invariants) is **unchanged and still binding**; it is not reproduced here. What changes is the crate topology, the module map, the dependency rules, the naming rules, and the execution model.
 
-Evidence base: `research/cross/01-architecture-review.md` (init/shutdown, services, ownership, concurrency, flows), `research/cross/02-compatibility-checklist.md` (the consolidated constraint set — 135 rows + 10 decision items + the non-constraint list), `research/cross/03-implementation-readiness-notes.md` (A1–A13 architectural limitations, L1–L12 Java-specific limitations, decision points), `research/04-unresolved-questions.md` (M10 Re-triage), and the per-subsystem milestone documents they cite. Provenance: M1–M9-06 findings were verified against the primary reference at `0c08c679b`; M9-07 and M10 spot-checks against `71ce130364ed00431d420891370d5314a4e3d4c4` (cross/03 §2.2). P0 additionally verified the battle-RNG identity against `71ce13036` (`Battle.java:505`, `legend/core/Random.java`) — the "Mersenne Twister" label in M10 documents is the reference's own script-facing description; the class is a `java.util.Random` subclass (48-bit LCG). Corrected in place across the corpus with notes; see `planning/README.md` audit record.
+**Two corrections, and they are separable.** The 2026-11-14 draft grew separate crates for the GPU, the GTE and the SPU because the research corpus is organized by hardware unit; that inverted the dependency, making the research taxonomy the implementation taxonomy. This revision's first pass over-corrected and read as a workspace-wide three-crate limit. Neither is the rule. The project is not a PlayStation emulator and not a PSX emulator framework: it is a modern cross-platform runtime for one game and its ecosystem, with a compatibility-export layer on the side. Hardware-shaped code appears **only where observable behavior, bit-exact replay, or `psxrt-compat` actually requires it** — and *where* it appears is decided per responsibility, not by a crate budget.
 
-## 1. Design axioms (what the research obliges, what it frees)
+---
 
-### 1.1 Obligations — the architectural limitations A1–A13 (cross/03 §3)
+## 1. Crate boundary rule (ADR-001)
 
-| # | Obligation (synthesis) | Design consequence in this document |
-|---|---|---|
-| A1 | Global mutable state is the shared surface (`GameState52c` @ 800babc8 - campaign game state + per-segment globals, cross/01 §4.2); ownership is conventional single-main-thread-writer | The game state is a plain owned struct with a single owning thread; the single-writer convention is *enforced structurally* (Rust ownership), not conventionally — the observable behavior is identical (cross/03 A1) |
-| A2 | The segment-class monolith is the original's memory map; addresses/offsets are semantically load-bearing (scripts and saves address this state) | The state layout is a documented, asserted layout (offsets in layout docs + a compile-time size/offset assertion set); identifiers are semantic per the AGENTS.md naming policy; the reverse-engineering map (original identifier → Rust field) lives in one research-traceability module per state |
-| A3 | Single-core frame-locked simulation, real-time audio; RNG streams are call-order-dependent | One owner thread for the frame loop; audio on independent real-time clocks communicating only via queues and control words (cross/01 §5); no parallelization of the simulation |
-| A4 | The Fate VM is a core system (108 slots, 0–8 reserved, 1024-entry native table with per-state reinstall, 592-slot catalog, 63-slot dual int/float storage, fork/consume/deallocate) | The VM is a first-class SDK component (TD-07/TD-13); the VM contract (CL-SCR-05..09) is on the critical path |
-| A5 | The modding surface is observable (saves store registry entry ids; 1238 retail content entries are mod-registered; the 113-event-class contract and one-shot Register windows are user-visible) | Registries/events are SDK framework with one-shot windows; all retail content is registered by first-party mods at boot, never hardcoded in engine code (CL-MOD-10) |
-| A6 | The unpack-time transform pipeline defines the observable asset contract (the game reads the unpacked `files/` tree) | `psxrt-import` owns the pipeline and must produce equivalent unpacked bytes; patching machinery may differ, results must not (CL-AST-03, CL-MOD-08) |
-| A7 | The save compatibility floor: all 11 magics loadable unmodified; V10 the only writer; the RETAIL 0x6E4 layout with the struct at file offset 0x1FC | Version readers are obligations in `severedchains-game` persistence; the Tag codec is SDK framework (CL-SAV-01/02) |
-| A8 | RNG stream behavior is part of the observable contract (three generator families with distinct roles; the seed-source choice must be made and documented) | The three families are distinct owned generators (TD-13/CD-02); the seed-source decision is a compatibility decision (CD-02), not an afterthought |
-| A9 | Frame presentation ordering is a visual-comparison contract (swap-before-onDraw + display buffer + FMV tick cadence) | The frame driver preserves the decompiled 21-phase order exactly (CL-ENG-01; platform/02 §3) — including the frame-start display swap |
-| A10 | State-transition atomicity at the frame top (queued → applied next frame; old destroyed before new inits; native-table reinstall; end-of-frame teardown coalesced to the same onDraw) | The state machine is queued-transition with a frame-top apply point and a same-onDraw end-of-frame teardown fixed point (CL-ENG-04/05) |
-| A11 | Dabas is a self-contained machine island (dememulation of retail `DABAS.BIN`, own timers/RTC/DAC; host contract = 11-stage screen machine + 5 input actions + mutable rewards event) | The Dabas machine is a self-contained subsystem of the game crate with a fixed host contract (CL-GLP-08) |
-| A12 | The per-context timing structure (60 Hz submap/wmap/credits/battle-transition, 20 Hz battle, 30 Hz title/game-over/wmap-screens; 1/60 s game-time unit; frame-locked; speed 1..16) | The frame driver implements the per-context rate table with the 1/60 s unit and frame-locked pacing (CL-ENG-02/03) |
-| A13 | Bug preservation is the default (every documented retail bug/quirk is a preserved-behavior constraint unless the per-system tables mark a reference correction) | No "cleaner" alternative is taken silently; each preserved quirk is traced in `planning/06` to its row and test |
+**There is no workspace crate-count limit.** A new crate needs a concrete responsibility and a defensible dependency boundary; it does not need a slot. Nothing in this document caps the number of crates, and nothing in it retires an existing crate. What is fixed is narrower and more useful: the **responsibilities** of the three `psxrt`-family crates, and the placement of the PSX platform services *inside* one of them.
 
-### 1.2 Freedoms — the Java-specific limitations L1–L12 (cross/03 §4)
+### 1.1 The three `psxrt`-family crates
 
-The port may replace the *mechanism* of each L-row, provided the named observable contract survives: explicit service construction instead of static initializers (L1); a non-classloader mod discovery with the same semantics (L2); a non-`CompletableFuture` async model with the null-on-failure contract (L3); a non-exception error model with the same error *classes* (L4); a non-`Properties` global store (L5); a non-static active-mod attribution (L6); a non-monitor lock surface of the same shape (L7); non-JavaFX tooling (L8); a non-GC reclamation with the same deletion *timing* (L9); non-weak-reference delegate caching (L10); a deliberate `rand()` seed source (L11 — not a contract at all, Q-70); no updater/Discord dependency (L12). The concrete replacements are TD items in `planning/02`.
+| Crate | Responsibility | Direction |
+| --- | --- | --- |
+| `psxrt` | the modern runtime. Equivalent runtime services for graphics, geometry, audio, timing, random streams and math — modern first, hardware-exact only where a documented compatibility requirement forces it. Not a PlayStation emulator. | consumer of nothing below it |
+| `psxrt-import` | original PlayStation asset → modern engine-ready representation: decoding, extraction, geometry/texture/audio/animation conversion, legacy numeric conversion, source-metadata preservation | original → modern |
+| `psxrt-compat` | modern representation → original-compatible asset: encoding, quantization and hardware-limit validation, container reconstruction, replacement-asset generation, eventual disc reinjection and patching. Must not require a running engine. | modern → original |
 
-### 1.3 The nine invariants (cross/01 §5.6)
+The three exist because asset data flow has two directions and one substrate, and because a tool that turns a modern texture back into a TIM must link without a window, a device, or a game.
 
-1. Single owner thread for the frame loop and all frame-bound state. 2. Frame-bound deletion (mark at transition, delete at the same-onDraw end-of-frame fixed point). 3. One-frame input edges (the present frame sees input set by the tick before it; cleared after). 4. Atomic frame-top transitions with same-frame end-of-frame teardown. 5. Audio decoupling (independent real-time clocks; queues + control words only). 6. Isolated event delivery (per-handler; the critical set rethrown to the crash path). 7. Read-mostly config (explicit set + event; no per-frame writes). 8. The globals as the shared surface (the documented layout is the contract). 9. Locked async callbacks (any async completion touching a shared resource takes the narrow lock — VRAM, SPU, audio control, event listeners).
+### 1.2 What is *not* a crate
 
-## 2. Workspace layout
+GPU, GTE, SPU, RNG, timing and math are **internal modules and submodules of `psxrt`**, not `psxrt-gpu` / `psxrt-gte` / `psxrt-spu`. Three reasons, in order of strength:
 
-**Proposed (TD-01, TD-02).** One Cargo workspace rooted at the repository root:
+- `gpu` and its blitter are one pipeline. The command vocabulary and the strategy that executes it must not be separated by a published-API boundary that has no reason to exist.
+- Three GTE precisions (software float, integer, exact-emulation) and two audio/presentation backends are **configuration inside a module**, not crates.
+- The reference keeps SPU and XA in one package, and `XaPlayer` has no SPU reference at all. That is evidence about *functional* pairing, not about Cargo crates — and the two-surface rule (§3) keeps the boundary honest without paying for one.
 
+### 1.3 The rest of the workspace
+
+The engine, game, SDK and executable crates from the 2026-11-14 draft remain in scope and are **not** absorbed. Concretely, and as written in `planning/04`: the wgpu and cpal backends live in the **engine** crate (`severedchains::render::wgpu_backend`, `severedchains::audio::cpal_backend`); `tag`, `save` and `config` live **inside the SDK**, with no separate save or config crate; game content, states and persistence live in the game crate. The only 2026-11-14 proposal retired here is *per-hardware-unit crate splitting* (`sc-gpu`/`sc-gte`/`sc-spu` and their names).
+
+**Module growth path.** A module may be split out into a crate later on a demonstrated need: external reuse, a dependency-isolation requirement, a compile-time measurement, or a hard language-boundary problem. Not on architectural taste, and not to keep a count.
+
+## 2. Layer model: compatibility is orthogonal (ADR-011)
+
+Three vertical layers, and one horizontal axis that crosses all three.
+
+| Layer | Crate | Asks |
+| --- | --- | --- |
+| L1 modern runtime | `psxrt` | what does the modern runtime do? |
+| L2 original→modern | `psxrt-import` | how does original data become a modern representation? |
+| L3 modern→original | `psxrt-compat` | how is original behavior preserved or overridden? |
+
+**Compatibility is orthogonal to the layered architecture — it is not a layer.** A compatibility policy is a decision *about* a subsystem, consumed by whoever runs it; it is not a stratum of data flow. This is what the earlier "three clean layers" phrasing blurred, and it is the reason `psxrt-compat` must not sit under `psxrt`: a `psxrt` module that reads a policy from a crate below it has inverted the dependency and created a cycle.
+
+The layer model retains a real job: it describes **asset data flow** (disc → decoded asset → frame). The subsystem taxonomy (display / effects / camera / math / world / audio) describes **state ownership**. Compatibility describes **policy**. Three different axes; a crate boundary tracks the third one only.
+
+Consequences, both of them, not just the convenient one:
+- `psxrt` ships a **modern-default** implementation of every subsystem. A game must be able to run with `psxrt-compat` entirely absent.
+- A game may opt into a more compatible presentation or audio model. The opt-in is where compatibility *belongs*.
+- **A `psxrt-compat` compatibility-policy module may still be a compatibility escape hatch.** The `psxrt` module next to it is not automatically "modern and correct". The CD rows carry this: `CD-03`'s integer camera program and `CD-05`'s rate-00 mapping are compatibility behavior *that has no clean modern counterpart*, and they are implemented in `psxrt`, not only as a knob in `psxrt-compat`.
+
+## 3. Two-surface rule (ADR-011, the consequence most likely to be skipped)
+
+Some subsystems have **two different surfaces**, and naming, module placement, and the crate boundary must reflect that they are different things:
+
+| Subsystem | Surface 1 — decode / representation | Surface 2 — runtime / execution |
+| --- | --- | --- |
+| CLUT | `psxrt::gpu::clut` — CLUT entries + TPage + X/Y + GXY, a 5-bit `Texel` codec, BGR555↔RGBA8 for 16-bit CLUTs | `psxrt::gpu` (I5a) — VRAM, command queue, draw submit, blit |
+| ADPCM | `psxrt::spu::xa_adpcm` — the pure XA codec, **no SPU** | `psxrt::spu` (I5a) — the SPU voice model, its own 5-bit filter |
+| audio out | `psxrt::audio` — sample format, channel count, clock rate, the `AudioTransport` contract | the device implementations (I5b), in the **engine** crate |
+
+The decode/representation surface is **owned by `psxrt`** because it is a representation of data, not a policy. The runtime/execution surface is placed where its owner is. A policy module may *select between* the two, and may live in `psxrt-compat` — the `psxrt` representation module still has to exist.
+
+**VRAM: what actually exists (corrected 2026-11-15, against the reference).** An earlier draft of this section claimed the reference had "no VRAM write path". That was wrong and is withdrawn. `Gpu` has an explicit VRAM surface — `uploadData15` (two overloads), `downloadData15` (two overloads), `copyVramToVram`, `clear` — over a linear `vram15` store, plus `updateVramTexture()` which uploads the whole 1024×512 store to the GPU texture under `vramLock` **when `vramDirty`**, and is called per-object (`BattleEntity27c:772`), not at frame start. Command submission is a separate surface: `queueCommand(z, command)` + `resetCommandBuffer()`, bracketed by `startFrame()` / `endFrame()` (`Gpu.java:116–146`, `:202–360`, `:346–357`).
+
+Two consequences that *are* load-bearing: (a) the module is `psxrt::gpu`, and it owns both the VRAM store and the command queue — they are one pipeline, which is §1.2's reason for not splitting them; (b) `updateVramTexture` is a **transfer**, not a policy, so it belongs to the runtime module and its execution strategy, never to a `psxrt-compat` policy record.
+
+## 4. Module map
+
+**24 modules listed — 11 in `psxrt`, 13 in `psxrt-import`.** The count is total, not per crate, and it is a count of *rows in this section*, not a cap: §1.3's rule is that a module may later become a crate on demonstrated need, and a module may be split (as `audio` is below) without the map's arithmetic mattering. Each entry: module → what it owns → layer → the milestone where it is built.
+
+### `psxrt`
+
+| Module | Owns | Layer | Milestone |
+| --- | --- | --- | --- |
+| `math::trig` | `rsin`/`rcos` + the π/180 factor. Public **inside the workspace** (the game layer's collision and effect math calls it), kept off the general-purpose utility surface by module path — `psxrt::math::trig::sine`, not a crate-root re-export. See §6.5 for the naming caveat. | L1 | I0 (done) → repath I5a |
+| `math::angle` | the 4096/turn (PSX degree) unit — and that is all I0 delivers: `PSX_DEG_PER_REV`, `PSX_DEG_TO_RAD`, `TRIG_SCALE`, all three inside `fixedpoint.rs`. The 65536/turn unit, the wrapping rules, and the conversions between the two units are **I5a work**, not delivered by I0 | L1 | I0 (the factor only) → I5a |
+| `rng` | the three generator families as deterministic streams (ADR-006) | L1 | I0 (done) |
+| `gpu::clut` | see §3, surface 1 | L1 | **I1b** |
+| `gpu::pixel` | the BGR555 family, `Texel`, RGBA8, the 4-bit/8-bit index read paths, the mask/alpha semantics | L1 | I0 (4-bit addressing done) → I1b (the colour paths) |
+| `gpu` | the facade (**queue-then-submit**), `GpuCommand`, `CmdBuf`, `DrawCommand`, `DrawTopology`, `FilterMode`, the `Blitter` trait + the Native impl, the VRAM store + the transfer surface of §3, the CLUT/TPage decode | L1, with L3 policy | **I3**, completed I5a |
+| `gte` | the `Rotation2d`/`Transform3d`/`TransformMode` vocabulary, the three precisions. **No `Mat3`/`Mat4`/`Vector3` aliases, no `math::` GTE surface** | L1, with L3 policy | I5a |
+| `spu` | the voice model (ADSR, voice ADPCM, pitch, the reverb network) and, at I1b, the pure XA codec (`spu::xa_adpcm`) before the model exists around it | L1, with L3 policy | I1b (the codec) → I5a (the model) |
+| `audio` | the sample contract: `SampleFormat`/`SampleRate`/`ChannelLayout`, the `AudioTransport` trait. Split at I3 into `audio::transport` (the trait, with **one** device-owning implementation and one compile-time backend per build) and `audio::device` (the device state: `open` / `active` / `buffered` / `started` / `paused`) | L1 | I3 |
+| `clock` | the game clock. **Keeps only the `tick()` and `sync()` cadence entry points — not the 21 phase hooks, not `Sleep`-style host sleep** | L1 | I0 (done) → reworked I3 |
+| `compat` (in-crate) | the `Feature` vocabulary, the `GameConfig` shape, the `CompatFlags` bitset | cross-cutting | I5a |
+
+### `psxrt-import`
+
+| Module | Owns | Layer | Milestone |
+| --- | --- | --- | --- |
+| `space` | the canonical file-space abstraction: the 63-bit address, the four kinds, the four namespaces, DRGN-name resolution, the `disc:`/`region:`/`object:` access path, the three error codes (planning/07 §3.1) | L2 | **I1a** |
+| `container::iso` | the `files/` cache reader — region-major 63-bit keys, the 4-byte size header, four depth levels, path-length-bound keys | L2 | I1a |
+| `container::mrg` | the MRG container; per-file *no*-compression rule | L2 | I1a |
+| `container::bpe` | the BPE codec (both directions), the raw-LZSS variant, the three-mode flag | L2 | I1a |
+| `cache` | the `files/` cache write path, `VERSION = 5` | L2 | I1a |
+| `pipeline` | the orchestrator, the rayon pool, the 63-bit key builder, the streaming decoder | L2 | I1a |
+| `render::tmd` | TMD/CTMD decode **and encode**, the `TmdFormat` vocabulary, `updateTmdPacketIlen` | L2 | I1b |
+| `render::tim` | TIM parse + encode, the PXL sheet, the MCQ strip, `decode_16_to_rgba`, `decode_4_to_16`/`decode_8_to_16` | L2 | I1b |
+| `effect::anim` | the ANIM family — plain, LMB (the only truly compressed member), CMB (a plain container of three plain sub-animations) | L2 | I1b |
+| `fmv::mdec` | MDEC decode + the 10-sectors/frame demux, with a DRGN1 data cross-check | L2 | I1b |
+| `audio::sssq` | SSSQ parse-only | L2 | I1b |
+| `audio::sshd` | SSHD parse-only | L2 | I1b |
+| `audio::transcode` | decode → resample → encode; `AudioFileInfo` | L2 | I1b |
+
+### `psxrt-compat`
+
+No module is carried forward unchanged. The eight policy modules and the collecting framework in `lib.rs` are dispositioned one by one in `planning/03` §5; the shape is decided by the three-level registry there, not by symmetry with `psxrt`'s module list.
+
+## 5. Dependency rules (ADR-001, ADR-008)
+
+**Allowed, permanently:**
 ```
-SeveredChains/
-├── Cargo.toml                  # workspace: members, shared lint profile, Cargo.lock committed
-├── AGENTS.md, research/, planning/, scripts/
-└── crates/
-    ├── psxrt/                  # reusable PSX platform primitives (TD-03)
-    ├── psxrt-compat/           # PSX-compatibility policies + divergence documentation (TD-04)
-    ├── psxrt-import/           # asset conversion/import: original formats → engine-ready (TD-05)
-    ├── severedchains-sdk/      # modding/scripting/plugin framework: registries, events, Fate VM +
-    │                           #   toolchain, i18n, mod loading, Tag, config framework (TD-07)
-    ├── severedchains/          # core engine runtime: frame driver, state machine, services (TD-06)
-    ├── severedchains-game/     # LoD implementation: states, retail content, persistence, 1st-party mods (TD-08)
-    └── scus94491/              # binary crate (proposed name, TD-09): process entry, CLI, feature wiring
-```
-
-- The six library crate names are **fixed user decisions** (AGENTS.md, 2026-11-14). The binary crate name is **not** fixed; `scus94491` (the disc id — semantic per the naming policy) is proposed over `severedchains-app` (TD-09).
-- Rust edition 2024, MSRV ≥ the verified-installed 1.100.0 stable at P0 preflight (TD-01). Dependencies are recorded in `planning/02` with their verified 2026-11-14 index versions; nothing is installed or pinned until implementation is approved (TD-01/TD-24).
-- No crate beyond the seven is proposed; every candidate 8th crate (test harness, golden-vector generator, dev CLI) is placed *inside* an existing crate (in-crate `tests/`, `#[cfg(test)]` modules, the binary's dev features) to avoid scaffolding (mission constraint: avoid artificial scaffolding milestones).
-- Feature flags (binary-level): `dev-tools` (debugger, frame-advance, dev seed override — off by default; the reference's debugger is tooling-adjacent with no engine-state or save dependency — L8/CL-MOD-11), `updater` (L12; off by default), `discord` (L12; optional, off by default). The SDK is an **internal development framework that runs in release builds** (user decision) — nothing in the SDK is `dev`-gated.
-
-## 3. Crate chart
-
-For each crate: responsibility, public boundary (module map, planning-level), dependencies, data ownership, threading assumptions, and the compatibility rows it is the *primary* owner of (full row-level coverage: `planning/06`).
-
-### 3.1 `psxrt` — reusable PSX platform primitives (TD-03)
-
-- **Responsibility.** The *mechanical* PSX platform models and pure primitives: GPU (VRAM dual 15/24-bit store, TPage/CLUT, the ordering-table *mechanism*, GPU command representation, display buffer model), GTE (the T1 register-model subset — SZ/SXY FIFOs, error/flag register, projection test, saturation — with **both** the float behavior (default) and the integer-precision variant (T4 obligation)), SPU (24-voice model: voice structs, the ADSR phase machine, the voice ADPCM codec core (28 samples/8-byte, 3-bit filter 0–4), pitch stepping + 512-position 4-tap interpolation, FM, the shared noise generator, the reverb *network*), XA ADPCM decoder (X2/X3: the 2-bit XA filter field, the never-reset static predictor *state holder* — reset policy is `psxrt-compat`), the Bpp codec (G2), the exact blend-equation primitives (G10: (B+F)/2, B+F, B−F, B+F/4 with F/4-first truncating semantics), the fixed-point helpers (R1 `psxDegToRad` 4096/turn; R2 `rsin`/`rcos` float×0x1000 short-cast), the timing primitives (the 1/60 s game-time unit, vsyncMode concepts, the virtual 60 Hz vsync counter), and the RNG *primitives* (generic LCG core; the `java.util.Random`-family 48-bit LCG with bounded `nextInt(bound)`/`nextFloat(bound)` rejection semantics — the P0-verified identity, not Mersenne Twister).
-- **Boundary (modules).** `gpu`, `gte`, `spu`, `xa`, `bpp`, `blend`, `fixedpoint`, `rng`, `timing`. All pure or state-machine; no I/O, no threads, no allocation-driven globals.
-- **Dependencies.** None of the project crates. External (provisional, TD-24): none strictly required (std-only is the proposal; `bytemuck`-style zero-cost casts may be std-inlined).
-- **Ownership/threading.** All state is owned by its caller; the crate is re-entrant and thread-agnostic (the engine decides ownership — e.g., the SPU model is owned by the runtime audio service, ticked on the SFX thread).
-- **Primary rows.** G1–G2, G5 (mechanism), G7 (mechanism), G9 (mechanism), G14–G15 (mechanism), T1, T3, T5, T6, T7, S4–S6, S8 (network), X2–X3, X5 (dead — not ported by default), R1–R2, R5 (the op *bodies* live in the SDK VM but the generator they consume is this crate's primitive).
-
-### 3.2 `psxrt-compat` — PSX-compatibility policies (TD-04)
-
-- **Responsibility.** The *policy* layer over the `psxrt` models: which documented behavior is selected, where the reference diverges from the original, and the documented knobs. The rule: **`psxrt` models what the PSX *is*; `psxrt-compat` decides which documented behavior we *run*, and records the divergence.** Contents:
-  - Same-z ordering policy (G6/CD-01): LIFO (reference; load-bearing for `Battle.applyTextureAnimation`) default, FIFO (PSX) behind a knob; the modern 2D-pool LIFO / 3D-pool FIFO equal-depth tie-break is an engine (layer-4) matter, not here.
-  - GTE precision policy (T2/CD-03): float default with the documented bounded divergence (±1 SXY px, ±1 NCCS color step, animation-matrix quantization accumulation); the integer-precision submap camera (T4) is **mandatory** (the only Hardware-accurate row) — implemented as the GTE integer variant used by the submap camera path.
-  - Display-width clamp (G4/CD-04): the 384→368 GPU-model clamp, documented with the two-distinct-368s note.
-  - TPage rate-00 mapping (G11/CD-05): rate 00 → B+F/2 (reference; three consumers source-verified; occurs in shipped UI highlight backgrounds).
-  - XA predictor continuity (X6/CD-07): the static never-reset predictor (reference) default; reset-per-file behind a knob.
-  - SPU sweep volume (S7/CD-06): the reference gap (full volume, in-source TODO) vs the plausible layer-1 envelope — policy + knob; default per CD-06.
-  - SPU voice-allocation policy (S3): the dynamic allocation chain (matching retrigger → bound-gated priority steal (bound 20 from `initSpu`, 8 after `initSound`) → round-robin → finished/unused fallback).
-  - Blend selection (G10): exact hardware equations in the OT-replay presentation; the B+F/4 decomposition (blend + 0.25 scale, the documented ~1/255 per-channel rounding delta) in the modern presentation.
-  - Divergence documentation: each policy carries its evidence (row + confidence), the selected default, the rationale (reference-fidelity default per A13), and the closure evidence (register pointer).
-- **Dependencies.** `psxrt`.
-- **Primary rows.** G3, G4, G6, G8 (presentation policy), G10, G11, G12, G13 (presentation policy), T2, T4, S2, S3, S7, X1 (format policy), X4, X6, X7.
-
-### 3.3 `psxrt-import` — asset conversion/import (TD-05)
-
-- **Responsibility.** Original formats → engine-ready representations, at unpack time (A6): the ISO9660 in-place reader (CL-AST-01: 4 discs, 2352-byte sectors, Form2, disc-4 master directory merge), the transform registry (per-node, failure → node skipped not fatal), and the transforms: MRG container (CL-AST-02), BPE decompression, DEFF container, CTMD→TMD conversion (CL-AST-04/05: on-disk run-length semantics, the CTMD-authoritative rule), TIM (CL-AST-06, incl. PXL sheets and MCQ strips), the ANIM family (CL-AST-07), the submap PXL transform, MDEC frame decode (CL-AST-09: the VLC/IDCT; the 10-sectors/frame demux structure), SSSQ/SSHD parsing (CL-AUD-10: the 16-channel music vs 24-channel SFX split), XA extraction (X1), the XA→Opus transcode (CL-AST-10: 80/63 Catmull-Rom 37800→48000, 128 kbps, pre-skip 312, the original-rate-37800 header), and the `files/` cache framework (CL-AST-03: VERSION=5, per-node incremental skip, determinism/ordering constraints, the CRC-mirror patch cache). The **script-patch pipeline is an exception**: the Fate toolchain it uses belongs to `severedchains-sdk` (user-fixed role); the pipeline *orchestration* (the 353-entry `scripts.csv` walk, the CRC32 gate over the `#include` closure, one-time backup, restore-on-removal — CL-SCR-10/CL-MOD-08) is implemented here as a transform that calls the SDK toolchain through a small trait, keeping the dependency direction clean (TD-05/TD-16).
-- **Boundary (modules).** `iso`, `mrg`, `bpe`, `deff`, `tmd`, `tim`, `anim`, `mdec`, `sssq`, `xa`, `cache`, `patch` (orchestration only), `pipeline`.
-- **Dependencies.** `psxrt` (Bpp, the XA decoder for the transcode). No `severedchains-sdk` (the patch transform is injected).
-- **Ownership/threading.** Unpack runs on the startup unpack thread; leaf transforms may run on a worker pool (rayon, TD-17) — all output is written to the cache tree by the pipeline owner; cache writes are ownership-ordered (one writer per node), mirroring the reference's per-node incremental model.
-- **Primary rows.** CL-AST-01..12 (the formats + cache), X1 (extraction), X4/X7 (transcode-side), the script-patch *results* contract (CL-SCR-10/CL-MOD-08 — the toolchain semantics themselves are SDK, TD-13).
-
-### 3.4 `severedchains-sdk` — engine-level modding/scripting/plugin framework (TD-07)
-
-- **Responsibility.** The framework surface that mods and the game share — user-fixed role: **SDK, registries, events, Fate VM/toolchain, i18n, mod loading**, plus the cross-cutting framework primitives the research shows are framework-level (the Tag model + wire codec — used by saves, config, presets, `modData`; the config *entry* framework — typed/registry-registered entries, the `.dcnf` codec, the three locations, the `.dpre` preset format, `ConfigCollection` semantics). Contents:
-  - **Registries** (CL-MOD-04): `RegistryId` (two-part grammar `[a-z][a-z0-9_-]*`, ≤255 chars, the mod component of the *entry* id is the only enforced one), `Registry<T>` (21 instances), the one-shot Register window (the only mutability event; no add/remove events), the per-boot entry re-creation semantics, delegates (pre-registration-valid, latch-cached) with the stale-entry hazard documented.
-  - **Events** (CL-MOD-05/06): the exact-class dispatch bus (TypeId-keyed; no supertype fan-out), five priority levels with stable order, per-handler error isolation (handlers return `Result`; non-critical → log + 7 s overlay toast + remaining handlers run; the critical set — exactly the 21 Register events + `AddRegistryEvent` + `RegisterAtlasTexturesEvent` → rethrown to the crash path), cancellation (the engine enforces cancellation for exactly the 7 take/give/clone behaviors, and *honors* the documented-but-unenforced `Pre*`-level-up/`AdditionUnlockEvent` cancellations — CL-MOD-06's faithful choice), the 113-event-class surface re-created as the documented family set (10 families).
-  - **Fate VM + toolchain** (CL-SCR-01..13; TD-13): the VM (108-slot fixed pool, 0–8 reserved, round-robin allocation with the per-frame upper-bound reset, the 63-slot dual int/float storage with mode bits and the documented slot conventions, the FlowControl model, fork/consume/deallocate with the destructor gate, `framesPerTick` pacing, the 1024-entry native table global-first + per-state override reinstall at transition, the 592-slot catalog registration, the 4 built-in op bodies — `RAND` draws the *injected* gameplay stream (R5: `X × simpleRand() >>> 16`), the error paths (unknown opcode → error, null function → stall = PAUSE_AND_REWIND, the paramCount > 10 guard, the OOB catch-and-warn), the 9-point `ScriptLifecycleEvent` surface, script-object binding); the toolchain (decompiler, translator, assembler, patcher, meta — round-trip fidelity as the foundational gate, the documented hazard set, strip semantics, call-index substitution, table-length pinning); the C-01 per-opcode choice is CD-08 (VM = runtime table semantics; toolchain = recompiler table semantics; the discrepancy preserved, not silently resolved).
-  - **i18n** (CL-MOD-07): the four-level per-key precedence (OVERRIDE > LANGUAGE_COUNTRY > LANGUAGE > FALLBACK) with key-itself fallback, the three sources (per-mod in-package, the working-dir `lang/` override tree with the ignored filename prefix, programmatic maps), `String.formatted`-equivalent templates with malformed-template key fallback, live re-translation on `lod_core:language` change without a reboot.
-  - **Mod loading** (CL-MOD-01/02/03): discovery semantics (the `./mods/` scan, the semver gate over the game version, required mods `lod` + `lod_core` with the hard-failure surface, failure recording), the re-entrant 12-step `bootMods` rebuild (framework reset → load → listener discovery → `AddRegistryEvent` → the 8 registry windows → input bindings → i18n → failure toasts), `bootRegistries` (the 13 remaining windows), the campaign-scoped reboots (the 13 documented call sites are *game* call sites — CL-MOD-02), the per-campaign `enabled_mods`/`known_mods` binding codec (u16 count + NUL-terminated ASCII, the `lod-core`→`lod_core` read alias).
-  - **Tag + config framework** (CL-SAV-10..15): the 10-type Tag model with the wire encodings (LEB127 varint, varint+UTF-8 string, u24+ASCII RegistryId, the MapTag nondeterministic order), the `.dcnf` codec (defaults written, skip-unknown-id, wrong-location discard, clear-then-load, the missing-file silent clear, the corrupt-file swallowed warning, the 100 KiB write buffer), the built-in byte codecs (bool/int/float/string/enum/colour/campaign-name), the `.dpre` preset format (FORMAT_VERSION 1 with legacy acceptance, schema-validated load with per-entry skips + notification, atomic temp+move writes), the `ConfigCollection` semantics (explicit values + default fallback, revision counter, `setConfig` = put + onChange + event-after-hook, the advisory mod locks, the preset-identity `refreshPreset`).
-- **Boundary (modules).** `registry`, `event`, `i18n`, `mod` (container/manager/package), `fate` (`vm`, `toolchain`, `binary`, `meta`), `tag`, `config`.
-- **Dependencies.** None of the PSX crates; no `severedchains`. External (provisional, TD-24): `serde`/`serde_json` for *dev-time and mod-package manifest* serialization only — never for the save/config wire formats (those are hand-rolled per the documented byte layouts — TD-15); `thiserror` for the error types.
-- **Ownership/threading.** Framework data (registries, event listeners, i18n tables, the VM) is main-thread-owned (the delivery model is main-thread — cross/01 §5.4); the mod manager holds the package tree (disk) + the in-memory registry content.
-- **Primary rows.** CL-SCR-01..13, CL-MOD-01..07 (the framework halves), CL-SAV-10..15 (framework; content entries are game), the R5 op-body semantics (the generator injection is game-owned, TD-13).
-
-### 3.5 `severedchains` — core engine runtime (TD-06)
-
-- **Responsibility.** The frame loop, the state machine, and the engine services — user-fixed role. Contents:
-  - **Service construction** (CL-ENG-08): an explicit `ServiceBuilder` that constructs the fixed service set in the documented order (MODS → EVENTS → REGISTRIES → SCRIPTS → SEQUENCER → CONFIG → SAVES → PLATFORM → RENDERER → FONTS, then the PSX models and the audio threads — cross/01 §2.1 step 2), replacing the static-initializer idiom (L1) while preserving the *order* (the contract). Everything the first rendered frame might touch is initialized before the render loop starts (the reference's verified pattern, cross/01 §2.1).
-  - **Frame driver** (CL-ENG-01..03; §6.2 below): the decompiled 21-phase `gameLoop` order (platform/02 §3), the per-context rate structure (CL-ENG-02), the frame-locked pacing with tick-skip and speed 1..16 (CL-ENG-03), the one-frame input edges (CL-ENG-01), the frame-start task queue (cross/01 §5.3 item 6).
-  - **Engine state machine** (CL-ENG-04/05/06): single instance, queued transitions applied at frame top (menu-stack reset, `previousEngineState`, the forced `vsyncMode = 2`, destroy-before-init, the per-state native-table reinstall, `EngineStateChangeEvent`), the end-of-frame teardown fixed point (same onDraw, after the render pass; marked objects may render once more), the per-state render mode (only SUBMAP and TITLE use the LEGACY H-division pseudo-perspective).
-  - **Input** (CL-ENG-07): the two-tier model (semantic actions over physical activations), per-state action sets, deadzones, rebinds, the rumble lerp, the `scriptInputActionPressed/Held` bridge surface.
-  - **Rendering service**: the presentation-mode machinery (the three reference modes: 0 = GPU-model/OT-replay PSX-compatible, 1/2 = modern pools), the OT replay pass (the engine walks the ordering table z-descending and issues draws in command order — the engine-logic realization of the G5/G6 contract), the modern 2D/3D pools with the LIFO/FIFO equal-depth tie-breaks (layer 4, Q-71), the post pass (layer-4 CRT family — feature, not fidelity), the scissor stack, the display-swap + one-frame latency (G13), the LEGACY H-split projection, the async→VRAM hand under the VRAM lock (the canonical cross-thread write, cross/01 §2.2).
-  - **Audio service** (CL-AUD-01/10; §6.6): the device hosting (cpal, TD-11), the two real-time threads (music ≥ 120 Hz min-pace; SFX 60 Hz with the 3× catch-up skip), the volume/routing domains (the dual 8/15-bit main volume, the 7-bit sequence volume, per-voice chains, the pan tables, the dual reverb networks — S8), the SPU edge-word protocol host (S2: accumulate/snapshot/zero at the tick's first sample slot), the `XaPlayer` contract (CL-AUD-08: the staged 0–4 API, the 10 ms ticks, 8 buffers, ≥ 40 ms guard, drop-on-full backpressure, the playerVolume SFX×MASTER scaling), the device-watch reinit (2 s poll).
-  - **Resource loading** (CL-AST-11): the async pool (rayon, TD-17), the **null-on-failure** contract (absent asset → completed-with-null, never a torn state), the `scriptWaitForFilesToLoad` wait primitive (the VM returns PAUSE_AND_REWIND while loads are pending — the primitive is engine; the op dispatch is SDK), the VRAM upload on dirty at frame start.
-  - **Error model + shutdown** (CL-ENG-09/12; §6.7): the layered error classes (gameplay crash → recovery save; recoverable infrastructure; the critical-event set), the documented shutdown order, the crash-recovery save path (the observable surface: a save exists at the last savable state).
-  - **Save/config hosting** (CL-SAV-05/06/07): the save manager (the 11-magic dispatch is *game* — the readers live in `severedchains-game`; the runtime hosts the load-path *ordering* — config → registry boot → `createGameState` → state data → `modData` event → campaign hook → `GameLoadedEvent` → menu unload), `lastSavableEngineState` (set only by the WMap/SMap states), the campaign directory model.
-- **Boundary (modules).** `builder`, `frame` (driver, pacing, input edges), `state` (machine, transitions, teardown), `input`, `render` (modes, OT replay, pools, post, VRAM service), `audio` (threads, SPU host, XaPlayer, routing), `load` (pool, wait primitive), `save` (ordering, campaign model), `error`.
-- **Dependencies.** `psxrt`, `psxrt-compat`, `psxrt-import`, `severedchains-sdk`. External (provisional): `wgpu`/`winit`/`naga` (TD-10), `cpal` (TD-11), `gilrs` (TD-12), `rayon` (TD-17), `thiserror`/`anyhow` (TD-18), `tracing` (TD-19).
-- **Ownership/threading.** The frame-loop thread (the main thread; "Hardware" in the reference) owns all frame-bound state. The audio threads own their sample pipelines and communicate via SPSC queues + the control words (the narrow locked surface of cross/01 §5.4, realized as std `Mutex`/atomics over exactly those surfaces — L7). The unpack thread and the async pool are startup/I/O only.
-- **Primary rows.** CL-ENG-01..13, CL-AUD-01, CL-AUD-07 (routing), CL-AUD-08 (hosting), CL-AUD-09, CL-AST-11 (hosting), the G-row *presentation* obligations (G3, G8, G13 via the render service), the S2 host protocol, the CL-MOD-12 J-table contracts it hosts.
-
-### 3.6 `severedchains-game` — LoD implementation (TD-08)
-
-- **Responsibility.** The LoD-specific game — user-fixed role: retail content, engine states, battle, persistence, first-party mods. Contents:
-  - **The `GameModule`** (the static first-party integration; TD-08): implements the SDK's module trait — registers the three first-party mods (`lod_core` 127 entries, `lod` 1110, `turn_order` 1 — the 1238-entry census, CL-MOD-10), the 88 config entries (80/7/1 split), the 70 input actions (41/29), the engine states (title, credits, submap, world_map, battle, final_fmv, game_over — registry-registered per CL-MOD-10, including title/credits as *mod* entries), the 63 spells / 9 elements / 17 stat types / 9 character templates / 512 encounters / 148 equipment / 54 items / 37 goods / 41 shops / 35 additions / 10 battle actions / 44 DEFFs / 2 bent types / 4 level-up actions / 1 campaign type.
-  - **The states** (I6–I9 of the roadmap): the `GameState52c` (the documented layout, offsets 00–4e3, cross/01 §4.1 — a compile-time layout assertion set) + the segment-class globals (cross/01 §4.2 inventory), title (the 11-case loading machine, the 5-option menu, the FMV-0 takeover as a render-callback takeover that queues TITLE — CL-ENG-13), submap (the 18-value machine, the 8-stage media pipeline, the collision/transition geometry, movement + the 144 native script functions, the encounter system with the float accumulator @ 800c6ae8, `mapTransition` dispatch, the integer-precision camera (T4), the savepoint MRG directory, the legacy 0x3256 migrator), world map (the path-graph navigation over the 256-location geography, the `wmapFlags` gating, the int accumulator, special travel — Coolon/Wingly/Queen Fury/Barrier Stations as pseudo-cut-999 transitions), battle (the 28-stage load machine, the turn system, the formula surface, the additions, the status ailments, dragoons, the post-battle report — the "engine is the law, the script is the courtroom" boundary, CL-GLP-01), credits/game_over (the 640×240 MCQ game-over screen, the submap reset to cut 675 on defeat), Dabas (the dememulated machine island, CL-GLP-08).
-  - **Persistence** (CL-SAV-01..09): the 11-magic readers (RETAIL + V1–V10, each version understanding itself; no V_n→V_{n+1} converter), the RETAIL 0x6E4 layout (the struct at file offset 0x1FC; the 0x19C/0x1E8/0x2E9 inventory fields), the V10 writer (self-describing MapTag, the 512×512 PNG atlas, `engineStateData`, `modData`, the config tail), the migrators (WMAP 0x3156 / SMAP 0x3256, the V8 `SaveMigrator`), the memcard model (0x20000, 16×0x80 directory, 15×0x720 slots, 7 product codes, the timestamp-ordered re-serialization — Q-80 open), the crash-recovery save (CL-ENG-12), the savable-state model (WMap/SMap only; the 5-field WMap path Tag; the SMap 4-field + `primaryPartyBackup` + 60.0f unstuck budget).
-  - **Gameplay rule sets** (M9): the M9 retail-vs-reference tables are the row-level authority (CL-GLP-01..17); every documented retail bug/quirk is preserved (A13/CL-GLP-16); the RQ7 spectrum is the placement contract (title/wmap: zero scripts; Dabas: the machine island; submap: script as policy layer; battle: engine law + script courtroom; inventory/characters: native + data-driven, script-thin edge).
-  - **Audio content** (CL-AUD-02..06, CL-AUD-10): the BGM sequencer (the per-sample renderer over the parsed SSSQ — the behavioral mirror, CL-AUD-07; BGM sample-accurate at BPM), the SFX sequencer (the decompiled facade over the SPU model; the SFX event grammar; the 8.0 ms/tick at the 60/480 default — Q-74 documented; the 0xa0 note-on family; the documented gaps), the per-cut music tables (submap 8×8, battle 32-entry ROM tables), the sound content (the SSHD banks).
-  - **RNG wiring** (CL-GLP-02; CD-02): the three generator families as owned instances — `GameplayRng` (LCG16 ×9+0x3711, seed 3 @ 8004dd44, the low-12-bit vsync guard), `PresentationRng` (LCG15 ×0x41c64e6d+0x3039, initial 0x24040001, re-seeded at submap entry per the CD-02 decision), `BattleRng` (the `java.util.Random`-family 48-bit LCG; process-initialized; `scriptSetMtSeed` = `setSeed(seed ^ 0x75bd924)`, fn 849) — plus the separate per-battle turn-order jitter RNG (seeded from `timestamp_a0`, layer 4 GH#2481) and the per-instance submap snow RNG (P0 verification: five instances total, not three).
-- **Boundary (modules).** `module` (GameModule + the three first-party mod definitions), `state` (`title`, `submap`, `wmap`, `battle`, `credits`, `game_over`, `dabas`), `state_data` (the `GameState52c` layout + globals + the reverse-engineering map), `persistence` (the 11 readers, the V10 writer, the migrators, the memcard model), `content` (the retail catalogs), `characters`, `inventory`, `shops`, `progression`, `audio`, `rng`.
-- **Dependencies.** `severedchains`, `severedchains-sdk` (and transitively `psxrt` where state code names PSX model types — e.g., the GTE camera program).
-- **Ownership/threading.** Main-thread-only (all game state; the async load *callbacks* that write VRAM go through the runtime's locked hand — cross/01 §5.4 hazard 1).
-- **Primary rows.** CL-GLP-01..17, CL-SAV-01..09 (content + readers/writer), CL-AUD-02..06/10, the CL-ENG-02 write-site census (the per-context rates live here as state behavior), the R1–R5/R3/R4 *consumer* sides, the CL-MOD-10 content entries, the CL-AST-12 runtime-consumer side.
-
-### 3.7 `scus94491` — binary (TD-09, proposed)
-
-Process entry: argument parsing (clap, TD-21: `--assets`, `--mods`, `--config`, `--saves`, dev flags), the boot-chain orchestration (cross/01 §2.1: updater skip (L12) → service construction → the unpack thread ∥ main init handoff (`INIT_LOCK` analog) → platform + `bootMods` → global config → audio init → renderer init → the render loop → the transition gate → ROM init (`gameInit` + `preload` as *game-provided* boot steps) → SFX thread start → the render-callback swap → FMV 0 → TITLE), the shutdown order (CL-ENG-09), the top-level catch (crash-recovery path, CL-ENG-12). The dev features (debugger, frame-advance, dev seed override, the updater) are feature-gated here. **Proposed name**; alternatives in TD-09.
-
-## 4. Dependency graph (investigated, not assumed)
-
-The user's starting hypothesis was *game → sdk + runtime; runtime → sdk + psxrt + psxrt-compat + psxrt-import*. Investigation (against the M8-01 dual SC/SCDK deployment, the M8-02 registry/event ownership, the M3 VM placement, and the A5/A6/A7 obligations) confirms the hypothesis **with two refinements**:
-
-```
-scus94491 (bin) ─┬─────────────▶ severedchains-game
-                 └─────────────▶ severedchains ─┬─▶ severedchains-sdk
-                                                ├─▶ psxrt-import ─▶ psxrt
-                                                ├─▶ psxrt-compat ─▶ psxrt
-                                                └─▶ (external: wgpu, cpal, gilrs, rayon, ...)
-severedchains-game ─▶ severedchains ─▶ severedchains-sdk (standalone; no PSX deps)
+psxrt-import ──► psxrt                      (I1b onward: TIM + transcode consume clut + xa_adpcm)
+psxrt-compat ─► psxrt                      (a policy parameterizes a runtime model)
+severedchains ────────────► psxrt, psxrt-import, psxrt-compat
+severedchains-game ───────► severedchains + the three above
+severedchains-sdk ────────► whatever it needs to host scripts, registries, i18n and config
+scus94491 (bin) ──────────► everything
 ```
 
-Refinement 1 — **`psxrt-import` also depends on `psxrt`** (the transcode and the Bpp upload path need the platform codecs); the hypothesis did not name this edge. Refinement 2 — **`severedchains-sdk` depends on no other project crate** (the user hypothesis was silent on sdk's edges). This is what avoids the one real cycle risk: the SDK defines the shared contracts (`EngineState`, `GameModule`, the registry/event/i18n/mod/Tag/config frameworks, the Fate surface) that the runtime *implements and hosts*; if the runtime's public API were the source of those contract types, the SDK would have to depend on the runtime while the runtime hosts the SDK's services — a cycle. Placing the contracts in the SDK (the user-fixed "SDK" role) makes every edge one-directional:
+Any further crate added later joins this graph by *stating its edges*, not by inheriting a slot. A crate that cannot name who consumes it and why the boundary is a crate rather than a module is the case ADR-001 rejects.
 
-| Edge | Justification (research-grounded) |
-|---|---|
-| bin → game, bin → runtime | The process hosts both; the game provides the `GameModule` (static first-party integration — TD-08) |
-| game → runtime | States call runtime services (frame, input, render, audio, load, save ordering); the runtime cannot know game states (they are registry content — A5) |
-| game → sdk | Content registration (1238 entries), event handlers, native script functions, i18n, first-party mod definitions, the Tag/config *content* |
-| runtime → sdk | The runtime *hosts* the registry/event/i18n/mod-manager/VM services and implements the SDK contract traits (the construction order MODS → EVENTS → REGISTRIES — cross/01 §2.1 step 2) |
-| runtime → psxrt(-import/-compat) | The render/audio/load services consume the PSX models, the compatibility policies, and the format codecs (runtime asset loading of TMD/TIM/ANIM/SSSQ — cross/01 §3 services table) |
-| import → psxrt | The XA→Opus transcode decodes via the XA codec; the Bpp conversions use the codec |
-| compat → psxrt | Policies select/parameterize the models |
+**Rules.**
 
-No cycle exists. The SDK's independence is the load-bearing property (it must be able to compile/patch scripts and host registries without the engine — the M8-03 debugger's live-stepping coupling to the recompiler `Translator` is the precedent for the toolchain standing alone).
+1. **`psxrt` never depends on `psxrt-compat`.** A `psxrt` subsystem ships a modern default. Compatibility behavior enters `psxrt` as *internal* behavior (the CD-03 camera program, the CD-05 rate-00 mapping), or is selected by a caller above.
+2. **The default direction is `psxrt-import → psxrt`, and it is a default, not an absolute.** The earlier rule — import must never depend on psxrt — is retired. Both surfaces of CLUT and ADPCM live in `psxrt` for representation reasons; `psxrt-import` consumes them. That is the first legitimate use of the edge, and the reason the rule is now stated this way.
+3. **Test-only exceptions are named in the manifest.** The planned one: `psxrt-compat`'s test build may read `psxrt-import`'s test utilities. Test-only, not a permanent crate dependency, and it must say so at the point of use.
+4. **Module visibility does not substitute for dependency direction.** A `pub(crate)` type still crosses a boundary if a trait signature exposes it.
+5. **A new public trait may not smuggle a hardware identity through its name or its API surface** (ADR-008, carried forward).
+6. **Workspace members are enumerated, not globbed.** `members = [...]` is spelled out; `crates/*` is not used. This is a *hygiene* rule — an unexpected crate should not appear silently — and it is **not** a cap on the member count. What is prohibited is an empty placeholder directory and a module "to be created later"; a crate with a real responsibility and a stated dependency direction is added by the milestone that needs it. `unsafe_code = forbid` and edition 2024 apply workspace-wide, whatever the member count.
+7. **No repository-level Rust dependency on Java sources** (ADR-009). Findings are transcribed into `PSX-Behavior Map` headers.
+8. **`unsafe_code = forbid`** at the workspace level, applied to all three crates, with a per-file override only where a documented need exists. The reference's `SeekableByteChannel` + `map16` read pattern is replaced by `read_at` into aligned scratch buffers — **plain safe Rust, no `mmap`, no `unsafe`** (ADR-012).
+9. **Edition 2024.** A single `Cargo.lock` at the workspace root.
+10. **Default members** are the three libraries. `cargo test` without a `--workspace` flag must not build backends that are not being worked on, and CI must not become slower than the work that was actually done.
 
-## 5. Runtime execution architecture
+## 6. Naming and module-boundary rules (ADR-002, ADR-003 — revises TD-23)
 
-### 5.1 Process lifecycle (CL-ENG-08; cross/01 §2.1)
+### 6.1 What may be named after the original
 
-**Proposed** mapping of the 14-step boot chain to Rust ownership (the *order* is the contract — L1):
+| Allowed | Example | Why |
+| --- | --- | --- |
+| register semantics | `TPage`, `Texel`, `CmdBuf` | these are the actual PSX/GPU concepts; the name carries information a coined name would lose |
+| hardware-derived data layouts | `Bgr555`, `XaAdpcm`, `Ssd` | the name names the format, not the emulator |
+| deterministic replay primitives | `Lcg15`, `Lcg16` | the algorithm **is** the identifier; `Lcg` is explicitly allowed |
+| module-qualified subsystem names | `gpu::DrawCommand`, `spu::VoiceModel`, `audio::XaTransport` | the module already provides the namespace |
 
-1. *Updater swap* — feature-gated (L12); no-op by default. 2. *Service construction* — the `ServiceBuilder` (ordered, explicit fields; no statics). 3. *Update check* — feature-gated; async; never blocks (the `UPDATER_LOCK` analog is a `std::sync` handshake). 4. *Unpack thread* — sets the loading-screen render callback **before** the renderer init (the reference's verified cross-thread registration, safe because read only at onDraw time); runs the `psxrt-import` pipeline (ISO → transforms → `files/` VERSION=5 → the script-patch walk); signals unpack-complete under the init gate. 5. *Platform + mods* — platform init (window/gamepads), `findMods`, `bootMods(all)` (the 12-step re-entrant rebuild — SDK). 6. *Global config* — **after** `bootMods` (entries must be registered first — CL-SAV-12). 7. *Audio* — the audio service init (device + context; the BGM/XaPlayer sources registered; the device-watch scheduler) → SPU init (the SPU's source registered). 8. *Renderer + GPU* — window; shader families; the GPU model init (VRAM textures, display mesh, 320×240). 9. *Render loop starts* — the music thread starts (120 Hz); the SFX thread does **not** exist yet (intro silence is by design — cross/01 §2.1 step 9). 10. *Transition gate* — `cinematicFinished && !unpacking && updateCheckDone → transitionToGame()` under the init gate. 11. *ROM entry* — `gameInit()` + `preload()` as game-provided boot steps (the ordering-table configuration (bits 14, zShift 0, size 0x4000, zMax 0x3ffe), draw offsets, `InitGeom` + projection 640, `initSound`, `vsyncMode = 2`, `loadSystemFont` (font.tim → VRAM (832, 424) + 32-entry CLUT), `SCRIPTS.clear()`, `loadShadow`, `initFmvs`; `preload`: the menu sounds, `resizeDisplay(320, 240)`, the async DRGN0/6669 MRG load with the vramLock VRAM upload, textZ = 13). 12. *SFX thread start*. 13. *Frame-callback swap* — `gameLoop` becomes the per-frame callback; window close → the shutdown chain. 14. *FMV 0 → TITLE* — the opening MDEC (`STR/DEMOH.IKI`) as a render-callback takeover that queues TITLE (not an engine state — CL-ENG-13).
+### 6.2 What must not
 
-Shutdown (CL-ENG-09): close callbacks in registration order (game handler: stop sound → SFX thread stops; audio service stop → device destroyed; debugger exit — no-op unless started) → async pool shutdown → platform stop → loop exit → config save → service destruction chain (shaders/objs/textures → audio → renderer → platform). **Proposed**: the final step is an explicit clean process exit (the reference's "JVM exits" is `Inferred` — cross/01 §2.6; the Rust equivalent is deterministic).
+- A `psx_` prefix where the module namespace already says it. `gpu::DrawCommand`, **not** `psx::gpu::PsxDrawCommand`. A module named for a hardware unit is permitted (§1.2 fixes `gpu`/`gte`/`spu` as internal module names); a *type* named for one is not, unless the name is register vocabulary (`TPage`, `Texel`, `CmdBuf`).
+- A public `GpuKind::PsxSoftware` discriminant. A project-specific enum value is the second half of the name. **`Native`, not `Hardware`.** `Hardware` implies the crate models hardware; it does not, and it must not want to.
+- An emulator-framework surface. **No `Platform`, no `Backend` trait, no `Clock`, no `Memory`, no `Components`, no `GamePak`** (the Dig-Dabas names — Dig-Dabas is a reference for *understanding* the original, not the Rust API target).
+- An internal helper promoted to public because it was convenient to test.
+- A Java identifier transliterated into Rust. Transliteration does not satisfy the naming policy; the policy requires a name grounded in observed responsibility.
+- A placeholder name (`Todo`, `Unused`, `Dummy`, `Stub`, `Placeholder`, `Unknown`) for a module that does not exist yet.
 
-### 5.2 Frame driver (CL-ENG-01; platform/02 §3)
+### 6.3 Three word orders, chosen deliberately and by layer
 
-**Proposed**: the frame driver executes the decompiled 21-phase order **exactly** (A9 — the visual-comparison contract), each phase bound to its service call:
+| Pattern | Example | Use |
+| --- | --- | --- |
+| `domain::capability` | `gpu`, `gpu::clut`, `gte`, `spu`, `audio` | the default |
+| `format::kind` | `container::bpe`, `fmv::mdec` | an import-layer decoder, where the format identity is the information |
+| `role::capability` | the `psxrt-compat` policy modules | where the module is a policy, not a mechanism |
 
-| # | Phase (decompiled) | Rust binding |
-|---|---|---|
-| 0 | `endFrame()` — display swap at frame start (the frame renders into the *other* buffer; `syncFrame`/`swapDisplayBuffer` lambdas) | `gpu.end_frame()` (swap + the mode-change reinit frame) |
-| 1 | `GPU.startFrame()` — dirty VRAM → texture; ordering-table resize | `gpu.start_frame()` |
-| 2 | timestamp — `timestamp_a0 += vsyncMode` if `advancesTime()` | `game_state.advance_time(vsync_mode)` |
-| 3 | pacing — `hz = 60 / max(1, vsyncMode) × speedMultiplier`; `setFpsLimit` + `setInputTickRate` | `pacer.set_rate(hz)` (frame-locked; tick-skip on slowness; speed 1..16; CL-ENG-02/03) |
-| 4 | `loadQueuedOverlay()` — the queued transition (frame-top; CL-ENG-04) | `state_machine.apply_queued()` (menu-stack reset, `previous`, forced `vsyncMode = 2`, destroy/init/readSave, native-table reinstall, `EngineStateChangeEvent`) |
-| 5 | `renderUi()` | `game.render_ui()` |
-| 6 | `currentEngineState.tick()` — gameplay **before scripts** | `state.tick(ctx)` (base: the four movement-axis actions → analogue magnitude/angle) |
-| 7 | `EVENTS.postEvent(RENDER_EVENT)` — the one shared static instance (handlers side-effect-only — CL-MOD-06) | `events.post(&mut render_event)` |
-| 8 | `loadAndRenderMenus()` | `game.load_and_render_menus()` |
-| 9 | `uploadRenderables()` | `game.upload_renderables()` |
-| 10 | `SCRIPTS.tick()` — the VM frame (every `framesPerTick`: 1 normal, 2 submap exploration) | `scripts.tick()` |
-| 11 | `postScriptTick(ticked)` | `state.post_script_tick(ticked)` |
-| 12 | `tickAndRenderTransitionIntoBattle()` — SBtld timing (`vsyncMode = 1` during the transition) | `game.tick_battle_transition()` |
-| 13 | `handleFullScreenEffects()` — fades | `game.tick_fullscreen_effects()` |
-| 14 | `startQueuedSounds()` — SPU key-on queued voices (the edge-word consumer point) | `audio.start_queued_sounds()` (SPU tick sees the accumulated words — S2) |
-| 15 | `handleTextboxAndText()` + `renderTextboxes()` (scroll speeds ÷ `tickMultiplier`) | `game.tick_textboxes()` |
-| 16 | `overlayTick()` — after everything else is rendered | `state.overlay_tick()` |
-| 17 | `FUN_80020ed8()` — submap transition tracking (`_800bd7b0` = 2/9/−4/3; game var 67; `_800bd7ac`) | `game.track_submap_transition()` |
-| 18 | `tickCount_800bb0fc++` | `frame_counter += 1` |
-| 19 | `GPU.endFrame()` — z-queue render (highest z down) + display present + flip | `gpu.end_frame_render()` |
-| 20 | `DISCORD.tick()` — layer-4 (feature-gated, L12) | feature-gated; no-op by default |
+A name must say **what it does**, not **which emulator component it imitates**. `Blitter` (what it does) over a hardware-unit imitation; `Native` (what this build runs) over `Hardware` (what this build pretends to be).
 
-The ordering guarantees (cross/01 §5.3) are enforced structurally: input before present, present before tick, tick before clear (the one-frame input edges — cleared after the frame); transition before any other phase (phase 4); `state.tick` → `SCRIPTS.tick` → `postScriptTick`; SPU queued sounds and textboxes after scripts; overlay tick last; `GPU.endFrame` after overlay tick; `tickCount` increment at 18. The per-frame *wrapping* (task flush, resize, pre, stale-ref purge, the render pipeline, bookkeeping — the reference's `RenderEngine` structure, rendering/01) is the driver's outer structure (L — mechanism free; the *contents* of the pipeline are the render service's job, §3.5).
+### 6.4 Module-name conflict rule (four steps, mandatory before implementing a module)
 
-### 5.3 Threads and clock domains (cross/01 §5.1–5.2)
+1. **Name the input.** What data enters, in what representation?
+2. **Name the output.** What leaves, and who consumes it?
+3. **Does it own hardware state?** If yes, it is a runtime module, not a codec.
+4. **Can a test construct it without a running engine?** If no, the boundary is in the wrong place.
 
-**Proposed** Rust thread model (the reference's 8 threads; the mechanism is free — L3 — the *contract* is the thread inventory's requirement classes):
+Then: check the name against the *other* crate's planned module list. A collision means the boundary is wrong — **not** that a prefix is needed. Adding `import_` to fix `import::tim` against `psxrt`'s colour-decode surface is the wrong fix; it hides a layer-ownership error behind a naming convention.
 
-| Thread (Rust) | Reference analog | Contract |
-|---|---|---|
-| main ("hardware") | main/"Hardware" | **Single owner** of the frame loop and all frame-bound state (A3); input tick → render tick (swap + onDraw → the 21 phases) |
-| music | OPEN_AL | Real-time BGM synthesis (per-sample sequencer over SSSQ; sample-accurate at BPM — CL-AUD-02); the XaPlayer ticks (10 ms, 8 buffers, ≥ 40 ms guard); SPU sample consumption; device watch (2 s). Communicates with main **only** via queues and control words (A5 in cross/01 §5.2) |
-| sfx | SFX | 60 tps SPU tick (735 stereo samples/tick at 44.1 kHz — S1); the game sequencer facade (8.0 ms SFX ticks — CL-AUD-02); the edge-word protocol (S2). Per-tick error isolation (the reference's per-tick `Throwable` catch — the Rust analog: the tick returns a `Result`, logged, thread never dies) |
-| unpack | unpack thread | Startup only; the `psxrt-import` pipeline; the init-gate handoff |
-| pool (rayon) | Async pool | On-demand I/O/transforms; **async completions touching VRAM take the VRAM lock** (the canonical hand — cross/01 §2.2); null-on-failure (CL-AST-11) |
-| (none) | JavaFX | Debugger only (feature-gated; L8); the pause/frame-advance flags become a dev-mode channel |
-| (none) | Discord | Feature-gated (L12) |
+**Worked example.** The CLUT codec exists at two layers. Resolution: `psxrt::gpu::clut` (the representation and codec, I1b) with `psxrt::gpu` (the runtime, I5a). Not two `tim` modules, and not `tim::clut` plus `gpu::clut`. `Tim` is a file format; its header carries a CLUT; a CLUT is not a file format.
 
-The 10 clock domains (cross/01 §5.2) are preserved: the 60 Hz game-time unit; frame pacing (software, no vsync, tick-skip — CL-ENG-03); the SPU 60 tps; the music ≥ 120 Hz min-pace; the SFX 8.0 ms ticks; BGM sample-accurate at BPM; Opus 10 ms ticks; FMV 15 fps / 2× CD sector cadence driven by render ticks; Dabas machine clocking (T0 = frame tick); speed multiplier (1..16 scaling both real rate and the virtual counter). Consequence preserved: under sustained slowness the game runs slower than nominal while audio keeps real time.
+### 6.5 Identifier provenance
 
-**Lock inventory (the narrow locked surfaces, cross/01 §5.4 — L7):** (1) the VRAM store (all writes, incl. async, under it; the main-thread upload at frame start); (2) the SPU model (tick + all control methods — the reference's `synchronized(Spu.class)`; the `setPlayerVolume` float stays unlocked — audit F-02); (3) the audio-thread control (the reference's `synchronized(this)` + per-source monitors → a single audio-control mutex + per-source guards); (4) the event-listener list (the reference's listeners lock — list mutation during dispatch). **Eliminated by ownership** (hazards that vanish in Rust, with the contract intact): the active-mod statics (per-dispatch-context attribution — L6), the `Properties` config store (owned by the config framework — L5), the `statusText` single-writer (owned by the unpack pipeline, published by value), the debug flags (owned by the dev feature), the `loadingMonsterModels` counter (a `std::sync::atomic::AtomicUsize` — a cross-thread counter, not a lock, as in the reference), the `Config` store (read-mostly, main-owned). The XA static predictor (X6/CD-07) is **kept as static-style process state by design** (the policy decision records the divergence).
+Two distinct kinds of comment, and they must not be merged:
 
-### 5.4 State ownership and the shared surface (cross/01 §4)
+| Section | Contains | Where |
+| --- | --- | --- |
+| `PSX-Behavior Map` | original behavior and reference-implementation facts: file, revision, commit, function, line | the module doc header |
+| `REMAP.md` | one line per **original identifier** that survives into a comment | three places, deliberately |
 
-**Proposed** ownership table (the A1/A2 obligations realized structurally):
+The three places, because a single table cannot answer three different questions:
 
-| State | Owner | Lifetime | Notes |
-|---|---|---|---|
-| `GameState52c` (800babc8) + campaign | main; owned by the save manager | campaign | Created at new game; reloaded at save load; the serializers walk it (CL-SAV-02); the layout is the documented 00–4e3 field map with compile-time assertions (A2) |
-| Segment-class globals (cross/01 §4.2 inventory) | main | process/campaign | Each in its owning service/state (timing globals → frame driver; submap/battle/wmap globals → their states; the encounter accumulator 800c6ae8 → a typed split (float in submap, int in wmap — the same address, different types, documented) |
-| Script states (108 slots) + the native table (8004e29c) | main; owned by the SDK VM | process | The 1024-entry table is reinstalled per-state at transition (CL-ENG-04); `doNothingScript` @ 8004f650 is the null default |
-| Battle state (8006e398) + entities | main; owned by the battle state | battle | The 256-slot asset pool + combat vars 1–20; `CombatantStruct[10]`; the write-back contract (CL-GLP-10) |
-| Dabas machine | main; owned by the Dabas island | session | The mirrored memory map (virtual = 0x2000000 + ROM offset); the 0x260-byte save tail (CL-GLP-08) |
-| VRAM (1024×512) | render service; **locked** (the one true shared resource) | process | All writes under the lock (async included); main-thread upload at frame start (G14) |
-| `files/` cache | import pipeline | machine | VERSION=5; per-node incremental (CL-AST-03) |
-| Resource objects (meshes, textures) | render service pools | scene/persistent | The frame-bound deletion protocol (CL-ENG-05): mark at transition, delete at the same-onDraw end-of-frame fixed point; `persistent` survives (shadow parts, UI) |
-| Save data / campaigns / memcards | save manager (game) | disk | The load-path ordering (CL-SAV-06) |
-| Config (GLOBAL/CAMPAIGN/SAVE) | config framework (SDK) + content (game) | disk | Read-mostly; explicit set + event (invariant 7) |
-| RNG instances (5 — CL-GLP-02 + P0 census) | main; owned by the game (injected into the VM for `RAND`) | process/battle | Stream order = call order (A3); the seed-source decision (CD-02) |
-| Registry content / event listeners / i18n tables | SDK framework; main-thread | process/boot | One-shot windows (CL-MOD-04); per-boot entry re-creation |
-| Audio sample buffers / device | audio service | process | Real-time threads; the narrow locked control surface (§5.3) |
+| Location | Answers |
+| --- | --- |
+| `crates/psxrt/src/REMAP.md` | where a subsystem's original names live in the runtime |
+| `crates/psxrt-import/src/REMAP.md` | where a format's original names live in the import layer |
+| `research/game/*/REMAP.md` | where a state's original names live in the game module |
 
-The nine invariants (§1.3) map 1:1 onto this table (invariant 8: "the globals as the shared surface" = this table is the contract; the reverse-engineering map per state keeps the original identifiers — the AGENTS.md source-traceability rule).
+Scope note, so this is not mistaken for a runtime-wide map: the existing `crates/psxrt/src/REMAP.md` covers ten entries across `fixedpoint.rs`, `bpp.rs`, `blend.rs`, `timing.rs`, and the rng modules. That is a map of the code that exists. `rsin`/`rcos` move to `math::trig`; the map entry moves with them and the old location keeps a pointer.
 
-### 5.5 Asset loading (CL-AST-11; cross/01 §3)
+Three rules hold wherever the map lives:
+1. A comment citing an original identifier without a corresponding map entry is a gate failure.
+2. A map entry citing a `research/` document that does not exist is a gate failure.
+3. A reference-only name whose provenance is unknown must say so. **`rsin`/`rcos` are marked as reference-implementation names, with `Unknown` status for original-MIPS provenance** — the repository does not establish whether they are the game's own labels or decompiler labels. `Rsin`/`Rcos` as Rust fn names would be transliteration and are not permitted.
 
-**Proposed**: the load contract is **null-on-failure** (absent asset → a completed load with `None`; never a torn state) — the reference's Q-43-closed contract. The pool is rayon (TD-17); loads are per-node against the `files/` tree; the runtime load API returns a handle resolved at completion; the script-side wait (`scriptWaitForFilesToLoad` @ 0x80017564) is an engine primitive returning the PAUSE_AND_REWIND flow control while pending (the VM consumes it — the op is SDK, the mechanism is runtime). Async completions that write VRAM take the VRAM lock (the canonical hand — `preload`'s DRGN0/6669 upload is the documented instance).
+`scripts/audit_file_endings.py` is extended to scan comments for placeholder and transliterated-identifier patterns (planning/05 §8).
 
-### 5.6 Audio execution (CL-AUD-01/08; cross/01 §3)
+## 7. Execution model
 
-**Proposed**: three pipelines on two threads (the hosting is L — free; the contracts are fixed): **music** (the per-sample BGM renderer over the parsed SSSQ on the music thread — the behavioral mirror, CL-AUD-07: timing and output are **not** claimed sample-identical to retail; BGM sample-accurate at the SSSQ BPM tempo — CL-AUD-02), **SFX** (the decompiled facade + the SPU model on the sfx thread; the edge-word protocol S2 — accumulate/snapshot/zero at the tick's first sample slot, ≤ 1/60 s quantization; the dynamic voice allocation S3), **XA/Opus** (the `XaPlayer` on the music thread — the staged 0–4 API, 10 ms ticks, 8 buffers, ≥ 40 ms guard, pre-queue 4, one 480-sample frame per tick, the SFX×MASTER scaling, drop-on-full backpressure — CL-AUD-08; plus the main-thread FMV path: the 15 fps demux loop with native-rate XA decode — X4). Volume routing (CL-AUD-07): LODXA under the SFX knob, FMV under the FMV knob, BGM under the MUSIC knob; the dual-domain 8/15-bit main volume; the 7-bit sequence volume; the pan tables; the dual reverb networks (S8). The SFX sequencer *content* (the grammar, the banks) is game; the SPU model is `psxrt`; the edge-word protocol is `psxrt-compat` policy + runtime hosting.
+### 7.1 Three clocks, one of which is not a clock
 
-### 5.7 Error model and shutdown (CL-ENG-12; CL-MOD-05; L4)
+The I0 record distinguished host wall time from a virtual game clock and deliberately left the host clock out of `psxrt`. That conclusion holds, with the reasoning corrected:
 
-**Proposed** (TD-18): the reference's exception-based flow (L4) becomes a `Result`-based model with the same **error classes** as contract: (a) *gameplay crash* — any unhandled error in gameplay (the Rust panic, caught at the frame boundary via `catch_unwind`) → if a campaign is active and `create_crash_save` (default true): load all saves, unique "Crash Recovery N" name, submap position restored from the live collision globals (mirroring SMap's own save path), `lastSavableEngineState` reconstructed, save written → crash log + mod census + `CRASHLOG-<ts>.log` copy → process exit(1); (b) *recoverable infrastructure* — unpack failure = stuck loading screen (non-fatal); audio device loss = park + retry loop; (c) *mod failure* — recorded + title toast (no pre-UI hard failure except missing required mods — CL-MOD-01); (d) *critical event handler error* — the critical set (21 Register + `AddRegistryEvent` + `RegisterAtlasTexturesEvent`) rethrown to the crash path (CL-MOD-05); non-critical → log + 7 s overlay toast + remaining handlers run. The observable recovery surface is the contract; the mechanism (panic vs Throwable) is free (L4).
+- **The reference's game clock is empty.** `GameClock.tick()` and `sync()` are empty methods (verified at I0 preflight). So the honest description is *"a cadence contract with one non-observed write to `currentTime`"* — and **four** distinct things that must stay separate:
+  1. **VSync / display cadence** — a display concept, no host timer implied;
+  2. **sim tick** — the frame-loop iteration count;
+  3. **scheduling** — countdown counters (`SoundSource28.tick()`, `XaPlayer.tick()`, `VoiceCounter`, the SFX-sequencer wait counters), which are tick-gated, not time-gated;
+  4. **the host sleep** — a pacing mechanism living in the driver or the platform layer, **not** inside `clock`.
+- **`clock` keeps `tick()` and `sync()` and nothing else.** A phase-0 `endFrame()` *is* the display-swap step (platform/02 §3), so the 21 phase hooks do not belong in `psxrt`; they are the game's frame driver. The `Clock.sleep(Long.MAX_VALUE)` idiom is a host-clock sleep and does not move either.
+- **`frame_count` semantics are preserved** — 60 Hz, halved at 640-wide, and the 4× write in the FMV demux loop (the `for (; b != 4; frame_count.inc())` shape).
+- **The GTE does not consume `frame_count` or `tickCount` directly.** No reference module exists for a Rust `gte` module to mirror, so this is a boundary fact, not a policy to choose. What *is* preserved is the **cache-invalidation trigger `PSDCNT & 3 == 3`, derived from the frame counter**, and it is named for its function: the "matrix-cache invalidation" section.
 
-## 6. SDK / runtime / game boundaries (the ten boundary questions)
+### 7.2 Frame pipeline (the layer split)
 
-1. **How do game systems access engine services?** Through an explicit service context passed to state init/tick — the runtime's `EngineServices` struct (frame pacing, input, render, audio, load, save ordering, RNG injection, the native-table handle). No statics (L1); no global service access from game code. The context is constructed per-frame (cheap: a fat pointer) and handed to `state.tick(&ctx)`; async callbacks carry the narrow locked handles they need (VRAM, SPU).
-2. **How does the runtime invoke game behavior?** Through the SDK contract traits the game implements: `EngineState` (`init`, `tick`, `post_script_tick`, `overlay_tick`, `render`, `destroy`, `advances_time`, `write_save_data`/`read_save_data`, the render mode) and `GameModule` (the first-party mod/content registration). The runtime never names game types; game states are *registry content* (the `engineStateTypes` registry — CL-MOD-10: even title/credits are mod-registered).
-3. **Which SDK contracts exist?** `Registry<T>` + `RegistryId` + the window/delegate model; the event bus (exact-class, priority, isolation, cancellation, the critical set); `i18n` (the 4-level precedence, live re-translation); the mod manager (discovery, the semver gate, `bootMods`/`bootRegistries`, the campaign binding); the Fate surface (`ScriptHost` — the VM's native-dispatch + var/flag/storage access + lifecycle events; the toolchain library); `Tag` (the 10-type model + codec); the config framework (entries, `.dcnf`/`.dpre`, `ConfigCollection`); `EngineState` + `GameModule` (the two integration contracts).
-4. **How do scripts interact with engine/game state?** The VM (SDK) addresses: `var[]` = `scriptData_08` (the documented indices — 25 `vsyncMode`, 40/41 Dabas hand-off (retail), 42 forced turn, 43 battle entry, 45[242/243] retail tutorial/counter, 51 ally count, 63 party-flag backup, 67 submap transition mode, 125 shop id), `stor[63]` dual int/float, the flag spaces (bits 16–27 script range; the cancelable `ScriptFlags1/2ChangedEvent`/`ReadGlobalFlagsEvent` interception), `scriptReadRegistryEntryVar` (registry entries implementing the script-readable surface), and the 1024-entry native table (533 distinct functions; global-first + per-state override, reinstalled at every transition — CL-SCR-07). The game provides the `ScriptGameAccess` implementation over its state; the runtime provides the frame-tick scheduling and the `scriptWaitForFilesToLoad` mechanism; the 4 built-in op bodies (R5) consume the injected gameplay RNG.
-5. **Which registries/events are shared across the three layers?** All 21 registries and the 113-event-class surface are SDK framework; *content* is game (1238 entries) with engine state types contributed by first-party mods (CL-MOD-10). The event bus is shared: the engine posts the per-frame events (`RenderEvent` phase 7, `InputPressed/ReleasedEvent`, `EngineStateChangeEvent`), the game posts the gameplay events (the M8-02 family table: `EnemyRewardsEvent`, `MonsterStatsEvent`, `ShopSellPriceEvent`/`ShopContentsEvent`, `DabasRewardsEvent`, `RepeatItemReturnEvent`, `PartyFlagsChangeEvent`, `GiveGoodsEvent`, `LevelUp*` Pre/Post, `AdditionUnlockEvent`, the 9-point `ScriptLifecycleEvent`), and mods observe/mutate within the isolation + cancellation contract.
-6. **How do first-party content, states, and mods integrate?** The `GameModule` (statically linked, TD-08) instantiates the three first-party mod definitions (`lod_core`, `lod`, `turn_order` — SDK `ModDef` implementations) and their 1238 registry entries in the documented boot windows (the 8 `bootMods` + 13 `bootRegistries`); the per-campaign enabled-mod sets, the required-only memcard boot, and the new-game/title reboots are the 13 documented call sites (CL-MOD-02) — in the game states, calling the SDK mod manager. Saves store registry entry ids (A5) — the ids are the stable external representation (the AGENTS.md compatibility-exception list: serialized keys, registry identifiers, script-facing names are never renamed).
-7. **How are external mods and plugins handled?** **Proposed (TD-16)**: two tiers. (a) *Data mods* — a drop-in package under `./mods/<mod-id>/` (a manifest with id/version/required/enabled-by-default, `lang/` i18n overrides, asset files applied through the import pipeline's replacement mechanism — the reference's one Chester-texture precedent, the `replacements/` model, modding/03 §3; script patches through the pipeline). Loaded by the mod manager at `bootMods` with the documented discovery/semver/failure semantics. (b) *Code mods* — first-party only at initial release: statically linked as `ModDef` implementations. A dynamic code-mod ABI (a dlopen-style boundary) is a **deferred decision** — recorded here, not designed (it would need the compatibility-exception list and an ABI stability policy; the reference has no such boundary — mods are same-process classes — so there is no reference contract to preserve, only an ecosystem expectation).
-8. **How are dependency cycles prevented?** The one-directional graph of §4 (contracts in the SDK; the SDK depends on nothing project-side; the runtime implements the contracts; the game depends on both; the bin wires them). Enforced at the workspace level (a dependency-lint test in the bin crate's `tests/` asserting the edge set — **Proposed**).
-9. **How is dev tooling excluded from runtime-only builds?** Feature flags (TD-02/TD-09): `dev-tools`/`updater`/`discord` off by default; the SDK is never dev-gated (it runs in release builds — user decision); the debugger is a dev feature of the bin (the reference's debugger is JavaFX-on-a-thread with no engine-state/save dependency — L8/CL-MOD-11 — so its Rust equivalent can be a separate dev subsystem communicating via the pause/frame-advance channel).
-10. **How are compatibility-critical operations testable without a GPU/audio device?** The render and audio services sit behind traits with **Noop implementations** (the reference has a `NoopApi` analog — rendering/01) — the headless test harness (I3, planning/05) drives the full frame contract with a null presentation; the PSX models are pure (unit-testable bit-exactly); the VM is pure given an RNG injection; the save/config codecs are pure byte I/O.
+Re-derived 2026-11-15 from `Scus94491BpeSegment.gameLoop()` (`:138–175`) rather than carried from the earlier draft, which had two errors in this table. Verified order:
 
-## 7. Cross-crate interface catalog (planning-level signatures; **Proposed**)
+| # | Call | Owner | Notes |
+| --- | --- | --- | --- |
+| 1 | `endFrame()` | engine | runs **first**, not last. In-source reason: "the frame isn't actually ending when this callback completes… we can just do that stuff before we actually start rendering anything" (resize jank). This is the frame-boundary teardown point |
+| 2 | `GPU.startFrame()` | `psxrt::gpu` | the frame marker; the VRAM store becomes readable by draw commands |
+| 3 | `timestamp_a0 += vsyncMode` | `clock` | gated on `advancesTime()`. `vsyncMode` is 1 or 2 — the 60 Hz / halved cadence, and the *only* place the halving is applied |
+| 4 | `hz = 60 / frames * speedMultiplier`; `window().setFpsLimit(hz)`; `PLATFORM.setInputTickRate(hz)` | engine / platform | **host-clock pacing lives here**, in the window and platform layer. This is the evidence for keeping the pacer out of `psxrt` |
+| 5 | `loadQueuedOverlay()` | engine | the queued overlay/state change |
+| 6 | `renderUi()` | engine | |
+| 7 | `state.tick()` | game | the gameplay tick |
+| 8 | `EVENTS.postEvent(RENDER_EVENT)` | sdk | the render hook |
+| 9 | `loadAndRenderMenus()`; `uploadRenderables()` | game | the `uploadRenderables` call is marked in-source as temporary, pending the controls move |
+| 10 | `SCRIPTS.tick()` → `state.postScriptTick(...)` | sdk + game | |
+| 11 | `tickAndRenderTransitionIntoBattle()`; `handleFullScreenEffects()` | game | |
+| — | the audio and FMV ticks | `audio` | **not in `gameLoop`.** SFX/XA ticks are driven from `AudioThread`, a separate thread; see §7.3 |
 
-Signatures are sketches for review — the exact shapes are design detail, not contract (the contracts are the CL rows). Naming follows the AGENTS.md semantic-naming policy (no placeholder identifiers; the reverse-engineering map keeps the original identifiers in docs/comments).
+Two corrections against the earlier draft of this table, both recorded because both were believed for a milestone:
 
-```rust
-// severedchains-sdk
-pub struct RegistryId(/* two-part: mod + entry; [a-z][a-z0-9_-]*, ≤255 */);
-pub trait Registry<T: RegistryEntry> { /* register (window-only), get, get_delegate, list */ }
-pub trait RegistryEntry: 'static + Send { fn id(&self) -> RegistryId; }
-pub struct EventManager; // exact-class dispatch, 5 priorities, isolation, the critical set
-pub trait Event: 'static + Send {} // TypeId-keyed; no supertype fan-out
-pub enum HandlerError { NonCritical, /* critical set rethrown */ }
-pub struct I18n; // 4-level precedence, key-itself fallback, live re-translation
-pub struct ModManager; // discovery, semver gate, boot_mods(12-step), boot_registries(13 windows)
-pub trait ModDef { fn id(&self) -> &str; fn version(&self) -> Version; fn required(&self) -> bool;
-                   fn register(&self, ctx: &mut ModBootContext); } // the 12-step rebuild calls this
-pub trait EngineState { fn init(&mut self, ctx: &mut StateContext); fn tick(&mut self, ctx: &mut TickContext);
-                        fn post_script_tick(&mut self, ctx: &mut TickContext, ticked: bool);
-                        fn overlay_tick(&mut self, ctx: &mut TickContext);
-                        fn render(&mut self, ctx: &mut RenderContext);
-                        fn destroy(&mut self, ctx: &mut StateContext);
-                        fn advances_time(&self) -> bool;
-                        fn write_save_data(&self, ctx: &SaveContext) -> Option<Tag>;
-                        fn read_save_data(&mut self, tag: &Tag, ctx: &SaveContext);
-                        fn render_mode(&self) -> RenderMode; } // SUBMAP/TITLE → legacy (CL-ENG-06)
-pub trait GameModule { fn register_first_party_mods(&self, ctx: &mut ModBootContext);
-                       fn rom_init(&self, ctx: &mut RomInitContext); } // gameInit + preload (cross/01 §2.2)
-pub enum Tag { Bool, Int, Float, Str, RegId, Map, List, /* the 10 documented types */ }
-pub struct ConfigCollection; /* entries, .dcnf/.dpre, the 3 locations, the event-after-hook */
-pub struct FateVm; /* 108 slots, the 63-slot dual storage, pacing, the 1024-entry table, the 9 lifecycle points */
-pub trait ScriptHost { fn native(&self, index: u16, args: &[ScriptValue]) -> FlowControl;
-                       fn var(&self, i: usize) -> i32; fn set_var(&mut self, i: usize, v: i32);
-                       /* the flag surface with the 2 cancelable interception events */
-                       fn rng_draw(&mut self) -> u16; } // the RAND op body (R5) consumes this
-pub mod fate_toolchain { pub fn decompile(...); pub fn assemble(...); pub fn apply_patch(...); /* round-trip gate */ }
+- **"frame-start task flush" does not exist.** There is no task-queue drain in `gameLoop`. The nearest thing is `updateVramTexture()`, and it is called per object from `BattleEntity27c:772` — a texture refresh, not a frame-start step. A design built on a frame-start flush would have been built on nothing.
+- **`uploadDirtyVramTextures` is not an identifier in the reference.** The real one is `Gpu.updateVramTexture()` (`Gpu.java:116`), and the lock is a Java `synchronized(vramLock)` monitor, not an acquired lock. Naming a Rust hook after a mistranscribed identifier guarantees the two trees drift.
 
-// severedchains
-pub struct Engine { /* the builder output: frame driver, state machine, services */ }
-pub struct ServiceBuilder; /* the ordered construction (cross/01 §2.1 step 2) */
-pub struct FrameDriver; /* the 21-phase order; the per-context rates; the frame-locked pacing */
-pub struct EngineServices; /* the per-frame context (§6.1) */
-pub trait RenderBackend { /* the 3 presentation modes; OT replay; the modern pools; the Noop impl for tests */ }
-pub trait AudioBackend { /* the device hosting; the 2 threads; the Noop impl for tests */ }
-pub trait InputBackend { /* the 2-tier model; winit+gilrs impl */ }
-pub struct LoadPool; /* rayon; null-on-failure; the wait primitive */
+Threading contract: game logic is single-threaded; the frame contract never requires a `Gpu` reference to cross a thread. **Async asset loading must not write raw VRAM bytes directly — this is a requirement.** It may produce decoded assets, and it may upload through the explicit transfer surface (`gpu::upload_to_rect` / `gpu::copy_vram_to_vram`, the Rust counterparts of §3's `uploadData15` / `copyVramToVram`) under the VRAM lock, at a point the engine names.
 
-// severedchains-game
-pub struct Game; /* the GameModule impl; the 3 first-party ModDefs; the states; persistence; content */
-pub struct GameState52c { /* the documented 00–4e3 layout; compile-time offset assertions (A2) */ }
-```
+### 7.3 Audio stack (four layers, one device owner)
 
-## 8. Extensibility model (synthesis)
+| Layer | Crate | Content |
+| --- | --- | --- |
+| hardware model | `psxrt` | the SPU model (the ADSR state machine, the voice ADPCM, pitch, the reverb network), the pure XA codec |
+| runtime / service | `psxrt` | the transport contract and the player semantics |
+| policy | `psxrt-compat` | predictor reset, envelope-vs-gap sweep, voice allocation — **plus the two SFX-side model layers and their replay fixtures** |
+| device backend | `severedchains` (I5b) | `cpal`, the device-hosting implementation |
 
-- **Content**: registry-driven (21 registries; one-shot windows; delegate resolution; the 1238-entry census as the first-party baseline — adding/removing content is a mod operation, never an engine change; saves store ids — A5).
-- **Behavior**: event-driven (113-event-class surface; exact-class; the isolation + cancellation contract; the critical set) + the RQ7 spectrum (each gameplay behavior placed with evidence — CL-GLP-01).
-- **Scripts**: the unpack-time patch pipeline (353 entries; the CRC gate; the assembly patch language) + the 9-point lifecycle events + the flag/var surface + the native table (mods register natives through the catalog slots — the 592-slot census).
-- **Persistence**: versioned (11 magics loadable; V10 writer; the migrators; the mod forward-compatibility policy — survives additions, degrades on removed content, fails on removed characters/stat types — CL-SAV-04) + config presets (`.dpre`; the vanilla = 12 retail overrides; the speedrunner = 5).
-- **External**: data-mod packages (TD-16); the deferred code-mod ABI (recorded, not designed); the i18n override tree.
-- **Compatibility exceptions** (AGENTS.md naming policy): the exported registry ids, serialized keys/field names, the script-facing names, the binary format signatures (the 11 magics, the MRG magic, the Tag wire format), and the PSX register names (TPage/PSDCNT/…) are never renamed; internal Rust names differ freely through explicit mappings (the reverse-engineering map per state keeps the original identifier ↔ Rust field correspondence).
+Three facts that constrain the design. (1) and (2) were re-checked against the reference on 2026-11-15; (3) is carried from `research/audio/01` + `research/psx/03` and is not re-verified here.
 
-## 9. Naming and documentation conventions in code (AGENTS.md)
+1. **The reference has no multi-backend audio API.** It has *four stacks*: a JavaFX-side player (`Audio` → `XaPlayer`/`GenericSource`), a PC-native player (`Sequencer` — the BGM), a PC-SFX player (`SoundSource28`), and the SPU side (`Spu`, `XaAdpcm`, `Voice`, `VoiceCounter`, `Sssq`). Hosted by one `AudioThread`. One device-owning implementation, one compile-time selectable backend per build. (`NativePlayer` appears in the M4 inventory as present-but-unused; treat that as research-carried, not re-verified.)
+2. **`Spu` and `XaPlayer` share almost nothing** except that both are audio: there is no `AudioPlayer` type in the reference, and no shared player abstraction between the two. So the split into *device*, *transport*, and *voice model* is not a tidy three-way: `XaPlayer` reaches from device hosting into transport, and `VoiceCounter` reads a raw sample byte directly out of `Voice`, bypassing SPU register semantics.
+3. **The two-clock rule.** Sequencer tick rates (8 ms, 16 ms, the SFX default) are a *reconstruction* — reference-specific, layer-4. The clock the game scripts were written against is the **SPU 60 tps clock**, and **SFX scheduling keys to it.** The reconstruction is therefore not optional; it must match the clock the scripts expect. **Sample-accurate scheduling is a `psxrt` runtime capability.** `psxrt-compat` decides *which clock a given reference layer uses*.
 
-The semantic-naming policy binds all implementation work: every identifier is named for its demonstrable responsibility; no decompiler artifacts (`FUN_*`, `Struct1`, `_80001234`, `field_10`, `unk_*`) in production code; uncertain symbols get a narrowly descriptive name + documented uncertainty + a register entry where material; the original identifiers survive in (a) the per-state reverse-engineering map module, (b) source-reference comments, (c) the compatibility-exception list. The PSX address/offset convention binds all human-readable annotations (eight-digit lowercase addresses — `800c6ae8 - encounter accumulator`; zero-padded lowercase offsets — `0a - Field description`; the exceptions clause for typed bit masks and cited byte layouts). The layout assertions (A2) document the offsets as data (a build-time test), never as field names.
+`XaPlayer` is **not** reproduced as a `psxrt` public type. Its semantics are preserved; the player state is owned where the state machine lives. **A player type in `psxrt` is explicitly out of scope** — the reference has no such type either (§7.3 fact 2), so this costs nothing in fidelity. Transport state lives in `audio::device` (the five states: `open` / `active` / `buffered` / `started` / `paused`) with the clock-domain, buffer, and volume semantics that state must carry.
 
-## 10. What this document deliberately does not decide
+### 7.4 FMV stack
 
-- The TD items (toolchain, dependencies, graphics/audio/input backends, the VM representation, the error model, the mod package format, the binary name) — `planning/02`, each **Proposed** pending approval.
-- The CD items (the 10 compatibility decision dispositions — G6, R4/Q-70, T2, G4, G11, S7, X6, C-01, Q-74, Q-80) — `planning/03`, each with its evidence requirements and register pointer.
-- The milestone sequence, gates, and row coverage — `planning/04`/`planning/06`.
-- Any production code, crate creation, or dependency installation — requires explicit approval after P0.
+| Layer | Crate | Content |
+| --- | --- | --- |
+| format decoder | `psxrt-import` (I1b) | MDEC frame decode, the 10-sectors/frame demux, `Ssd` |
+| player state machine | `severedchains` + `severedchains-game` (I3, then I6) | `VideoPlayer`, `Fmv`, the `FmvRuntime`, the video/audio thread skeleton, the state machine, the player semantics |
+| audio policy | `psxrt-compat` | the predictor, the clock domains |
+| device backend | `severedchains` (I5b) | `cpal` |
+
+The 15 fps / sector-quad frame clock lives with the player, not in `clock`. FMV audio is **a third clock domain**, not a mode of the BGM clock. The reference comment "No attempt is made to stay in sync with the video stream" is a fact to write down. **The FMV plumbing stays in the first game vertical slice (I6)** — that is why I5 precedes I6.
+
+The FMV demux loop does four things, and the split is not one-to-one: it reads **30 bytes** of header per frame (not 24 — four separate audio portions plus four channel values), it decodes the audio (including the silent-A/D special case), it copies raw MDEC bitstream into the command buffer, and it issues the MDEC decode. The two audio halves and the two video halves use **one shared 1760-byte buffer**, the only two `CmdBuf` users, which is legal only because playback is strictly sequential (FMV, then battle, never overlapping). **`CmdBuf` is therefore owned linear scratch, not a reusable pool, and the 0x80000-word requirement is a documented allocation fact, not an arbitrary choice.**
+
+## 8. What this document deliberately does not decide
+
+The TD items (`planning/02`, TD-25 … TD-32 are the new/changed ones), the CD dispositions (`planning/03`), the milestone gates (`planning/04`), and the test strategy (`planning/05`).

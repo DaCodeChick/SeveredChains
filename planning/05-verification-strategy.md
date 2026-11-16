@@ -111,6 +111,29 @@ page-word encoders (`MathHelper.makeTpage` and `Graphics.GetTPage`), documented 
 write-site census (I6–I9); CD-02's seed source (the I6 wiring, the I10 `A` evidence); and the §8.2
 naming scanner, which stays manual until something enforces it. None of the four is asset-blocked.
 
+**A fifth, added 2026-11-15: the citation rebuilder (no milestone owns it yet).** Roughly 1 350
+citations in this corpus point at a *file and line* in one of the reference repositories, and
+nothing in the workspace can tell whether one still resolves — `psxrt-compat`'s ledger test checks
+that cited `research/` paths exist and deliberately ignores reference-repository paths, so that a
+reference checkout cannot become a build dependency (TD-25). That is the right dependency rule and
+the wrong verification rule: a pointer that stops pointing is worse than no pointer, because it
+still reads like evidence. The fix is a **citation rebuilder** that resolves those citations against
+a reference checkout supplied through an environment variable, and **skips itself when that variable
+is unset** — so the default `make check` stays dependency-free and the check is opt-in for anyone
+who has the repos. See `planning/07` §8 for the drift that prompted it and for what it must report.
+
+**Update, same day: the rebuilder exists** as `scripts/citation_audit.py`, and the corpus has been
+run through it against `d47ac8637`: **925 of 1 330 citations are byte-identical to the reference, 154
+are open** (58 unresolvable file names, 22 changed blocks, 56 blank-line contexts, 18 range or
+formatting items) and every one is itemised in `research/citation-exceptions.md` with what it needs.
+Nothing was auto-rewritten: `--apply` was tried and reverted, because a second pass invents more
+relocations than it resolves. See `planning/07` §8b for the measurement and the reasoning. The tool is
+**opt-in by design** — `make citations` runs it, `make check` does not, and with no reference checkout
+present it exits 0 having done nothing, so TD-25 holds either way. What remains open is not the tool
+but the discipline: a milestone that quotes a reference line number runs the audit at the revision it
+names, and `citation-exceptions.md` is where an unresolved pointer is declared rather than quietly
+trusted.
+
 **Claim ceiling.** Nothing in I0 is `asset-validated` or `format-corroborated`. The seven fixtures
 are `source-verified` derivations; the two identity checks that lean on a JDK (the 48-bit
 generator's identity with `java.util.Random`, and `Math`/`StrictMath` agreement across the whole

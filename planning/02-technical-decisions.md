@@ -14,15 +14,31 @@ Toolchain note (P0 preflight, verified): rustc/cargo 1.100.0 stable (aarch64-app
 - **Compatibility consequences.** None (L-freedom).
 - **Confidence / status.** High. Proposed. Depends on nothing.
 
-## TD-02 — Workspace shape: 6 fixed crates + 1 binary, no 8th
+## Revision, 2026-11-15
+
+The architecture revision described in `planning/01` changes two of these records, confirms one, and leaves the rest standing. It does not reopen them on new evidence about the *technology*; it corrects where the technology is *placed*.
+
+| Record | Status after the revision | What changed |
+| --- | --- | --- |
+| **TD-02** workspace shape | **revised** | "no 8th crate" was a crate budget, and a crate budget is not a dependency rule. Replaced below by a responsibility test. The engine / SDK / game / executable crates survive. |
+| **TD-03** `psxrt` = the mechanical platform primitives | **confirmed unchanged** | TD-03 already proposed one crate holding `gpu`, `gte`, `spu`, `xa`, `bpp`, `blend`, `fixedpoint`, `rng`, `timing` as modules. The revision restores that position; the first draft's separate-crate reading was the departure from TD-03, not its continuation. Only a placement detail moves: `xa` folds under `spu`, `bpp`/`clut` under `gpu`, `fixedpoint` under `math`, and `unsafe_code = forbid` still holds workspace-wide. |
+| **TD-22** GTE precision | **revised, unchanged in substance** | the three precisions are compile-time configuration inside `psxrt::gte`. The mandatory integer submap camera program stays, and it is built in `psxrt`, not only exposed as a knob in `psxrt-compat` (CD-03). |
+| TD-01, TD-04 … TD-21, TD-23, TD-24 | **unchanged** | where a record names `sc-gpu`/`sc-gte`/`sc-spu` as crates, or a `psx_`-prefixed module path, read it against `planning/01` §4–§6. The decision itself is not withdrawn. |
+
+Two rules the 2026-11-14 set did not have, added because the I0 code showed the need:
+
+- **TD-25 — no dependency on reference source at build or test time.** The reference repositories are inputs to *understanding*, never to the build. Findings are transcribed into a `PSX-Behavior Map` header with file, revision, commit, function and line; nothing resolves a sibling checkout path, and no `make check` step shells out to a generator whose output is not committed. I0 shipped compliant, so this records and generalizes an existing property rather than changing one.
+- **TD-26 — a compatibility policy module may not double as a data-format header.** I0's `psxrt-compat/src/predictor.rs` held five XA format constants beside a policy enum, and `rate_00.rs` held a flag-word decoder beside a policy note. Both are relocated per `planning/03` §5: a policy selects, a representation represents, and one file doing both cannot be tested for either.
+
+## TD-02 — Workspace shape: enumerated crates, each justified by a responsibility
 
 - **Problem.** The crate layout; whether test-harness/tooling code gets its own crates.
 - **Research basis.** The six fixed names (user decision); A6 (the import pipeline), A7 (saves), A5 (modding) shape the splits; mission constraint: avoid artificial scaffolding milestones.
-- **Options.** (a) Exactly 6 crates, tests co-located, the binary inside `severedchains`; (b) 6 + a dedicated binary crate; (c) 6 + separate `testkit`/`golden` crates.
-- **Trade-off.** (a) is impossible: the binary must link the game (which depends on the runtime) — a `severedchains`-internal binary would create the runtime→game edge and a cycle. (c) adds crates with no production behavior (scaffolding). (b) gives the process entry its own home with feature-gated dev tooling.
-- **Proposal.** **(b)**: the seven-crate layout of planning/01 §2; in-crate `tests/` + `#[cfg(test)]` for all test code; golden fixtures under per-crate `testdata/` (planning/05 §9); a dependency-lint test (planning/01 §6.8) in the binary crate.
-- **Compatibility consequences.** None directly; the crate boundaries *are* the cycle-prevention design (planning/01 §4).
-- **Confidence / status.** High. Proposed.
+- **Options.** (a) exactly the six names fixed at P0 and nothing more, ever; (b) those six plus a binary crate, with the count frozen at seven; (c) a per-responsibility test — a crate exists when it has a stated responsibility and stated dependency edges, and the module-vs-crate question is answered per subsystem.
+- **Trade-off.** (a) and (b) are the same error wearing different clothes: they let the *number* of crates answer a question only a dependency graph can answer. A frozen count silently forbids the crate a real problem later needs **and** silently permits the empty scaffolding crate it should forbid — a count is satisfied by either. (c) costs one sentence of justification per crate, which is the price of the check that actually catches a bad boundary. The (a)/(b) family also had a concrete failure mode: the binary-inside-a-library variant creates the runtime→game edge and a cycle.
+- **Proposal.** **(c)**, applied as: the `psxrt` family is three crates (`psxrt`, `psxrt-import`, `psxrt-compat`); the engine, SDK, game and executable crates of the 2026-11-14 set remain in scope; in-crate `tests/` + `#[cfg(test)]` for test code; golden fixtures under per-crate `testdata/` (planning/05 §9); a dependency-lint test in the binary crate. Per-hardware-unit crate splitting (`sc-gpu`/`sc-gte`/`sc-spu`, and the `severedchains-sdk` + four-PSX-crates variant) is retired: GPU, GTE and SPU are internal modules of `psxrt`. **Adding a crate later requires naming its responsibility and its dependency edges; it does not require reopening this record.**
+- **Why the count wording is withdrawn rather than kept.** "6 crates, no 8th" and the revision's first draft ("three crates only") were both in the tree at once, and they contradicted each other: `planning/04` I5b placed the wgpu and cpal backends in the engine crate while `planning/04` §1 rule 1 said only three crates exist. Recorded here so the contradiction is visible if the count phrasing reappears.
+- **Confidence / status.** High. Revised 2026-11-15, pending user approval.
 
 ## TD-03 — `psxrt`: the mechanical PSX platform primitives
 
@@ -249,7 +265,7 @@ Toolchain note (P0 preflight, verified): rustc/cargo 1.100.0 stable (aarch64-app
 | ID | Decision (one line) | Confidence | Blocks |
 |---|---|---|---|
 | TD-01 | Edition 2024; MSRV 1.100.0 | High | I0 |
-| TD-02 | 6 fixed crates + binary; no 8th | High | I0 |
+| TD-02 | enumerated crates, each justified by a responsibility; no per-hardware-unit splitting | High | I0 → revised 2026-11-15 |
 | TD-03 | `psxrt` = mechanical PSX primitives | High | I0 |
 | TD-04 | `psxrt-compat` = policy + divergence docs | High | I0 |
 | TD-05 | `psxrt-import` = pipeline + formats; toolchain injected | High | I1 |

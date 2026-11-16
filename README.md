@@ -23,6 +23,7 @@ make check             # the same, plus the file-ending audit — this is the mi
 make test-prepare      # data only
 make check-fixtures    # verify the data without copying anything
 make clippy            # lints over library and test code
+make citations         # re-check research-code citations (opt-in; needs the reference repos)
 ```
 
 A bare `cargo test --workspace` also passes: no test needs a file at run time that a fixture
@@ -160,3 +161,10 @@ never inherited from a filename.
 - `crates/psxrt-compat/tests/policy_ledger.rs` embeds the two research documents its ledger cites
   (`research/cross/02-compatibility-checklist.md` and `research/04-unresolved-questions.md`) and
   fails if a citation stops resolving, so a policy cannot quietly outlive its evidence.
+- Line-number citations in `research/` name a reference revision. **925 of 1 330 were verified
+  byte-identical against the reference at `d47ac8637` on 2026-11-15; 154 are open** and itemised in
+  `research/citation-exceptions.md` — check there before trusting a quoted line. `make citations`
+  re-runs that check (add `SEVERED_CHAINS_REPOS=/path/to/parent`), and it is deliberately **not** part
+  of `make check`: with no reference checkout configured it exits 0 having done nothing, so a reference
+  checkout can never become a build or test dependency (TD-25). Its `--apply` mode rewrites relocated
+  pointers and is **not trusted** — see the register §3.
