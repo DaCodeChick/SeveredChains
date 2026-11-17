@@ -1,6 +1,6 @@
 [package]
 name = "severedchains-game"
-description = "Legend of Dragoon-specific knowledge: which container names count offsets in sectors, the toolchain's cache-index convention, and the patch-orchestration workflow. Nothing reusable lives here."
+description = "Legend of Dragoon: Severed Chains game engine"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -1,4 +1,4 @@
-//! The asset-pipeline conventions this game's toolchain happens to use.
+//! The asset-pipeline conventions this engine's toolchain happens to use.
 //!
 //! These are not formats and they are not reusable facilities. A cache index and a
 //! `scripts.csv` walk are things *this* pipeline does; another project building a PSX game would
