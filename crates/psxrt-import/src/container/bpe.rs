@@ -139,15 +139,10 @@ fn decode_bpe(payload: &[u8]) -> Result<Vec<u8>, ImportError> {
     // Offset 0 is the length of the *output*, not of the input. Read it as unsigned: the reference
     // reads it as a Java int, so a value with the top bit set is negative there and the allocation
     // throws. Widening keeps that case visible as a number instead of as a sign.
-    let declared = read_u32_le(payload, 0).ok_or(ImportError::Truncated {
-        needed: 4,
-        available: payload.len(),
-    })?;
+    let declared = read_u32_le(payload, 0).ok_or(ImportError::Truncated(4, payload.len()))?;
 
     if declared as usize > MAX_DECOMPRESSED_BYTES {
-        return Err(ImportError::ImplausibleSize {
-            declared: u64::from(declared),
-        });
+        return Err(ImportError::ImplausibleSize(u64::from(declared)));
     }
     let declared = declared as usize;
 
@@ -158,10 +153,8 @@ fn decode_bpe(payload: &[u8]) -> Result<Vec<u8>, ImportError> {
     // The first block count sits at 0x08, past the header. A stream with no blocks is legal and
     // means "nothing to expand"; the count of zero is what ends the loop.
     let mut cursor = HEADER_BYTES;
-    let mut block_bytes = read_u32_le(payload, cursor).ok_or(ImportError::Truncated {
-        needed: cursor + 4,
-        available: payload.len(),
-    })?;
+    let mut block_bytes =
+        read_u32_le(payload, cursor).ok_or(ImportError::Truncated(cursor + 4, payload.len()))?;
     cursor += 4;
 
     while block_bytes != 0 {
@@ -183,19 +176,16 @@ fn decode_bpe(payload: &[u8]) -> Result<Vec<u8>, ImportError> {
 
         while remaining > 0 {
             unwind.clear();
-            let coded = *payload.get(cursor).ok_or(ImportError::Truncated {
-                needed: cursor + 1,
-                available: payload.len(),
-            })?;
+            let coded = *payload
+                .get(cursor)
+                .ok_or(ImportError::Truncated(cursor + 1, payload.len()))?;
             cursor += 1;
             unwind.push(coded);
 
             while let Some(symbol) = unwind.pop() {
                 expansions += 1;
                 if expansions > EXPANSION_BUDGET {
-                    return Err(ImportError::NonTerminatingDictionary {
-                        budget: EXPANSION_BUDGET,
-                    });
+                    return Err(ImportError::NonTerminatingDictionary(EXPANSION_BUDGET));
                 }
 
                 if dictionary.is_literal(symbol) {
@@ -222,10 +212,8 @@ fn decode_bpe(payload: &[u8]) -> Result<Vec<u8>, ImportError> {
         // belongs to the payload, so a producer that leaves it out desynchronises every block
         // after the first — which is why the round-trip test compares whole payloads.
         cursor = align_up(cursor);
-        block_bytes = read_u32_le(payload, cursor).ok_or(ImportError::Truncated {
-            needed: cursor + 4,
-            available: payload.len(),
-        })?;
+        block_bytes = read_u32_le(payload, cursor)
+            .ok_or(ImportError::Truncated(cursor + 4, payload.len()))?;
         cursor += 4;
     }
 
@@ -280,10 +268,7 @@ impl Dictionary {
             let header = payload
                 .get(*cursor)
                 .copied()
-                .ok_or(ImportError::Truncated {
-                    needed: *cursor + 1,
-                    available: payload.len(),
-                })?;
+                .ok_or(ImportError::Truncated(*cursor + 1, payload.len()))?;
             *cursor += 1;
 
             // A header of 0x80 or more is not a count. It moves `key` forward by
@@ -306,16 +291,13 @@ impl Dictionary {
                     // Only reachable through a header that overshoots: a large skip, or a count
                     // started near the top of the table. The reference indexes out of its 256-byte
                     // array here and dies with an ArrayIndexOutOfBoundsException.
-                    return Err(ImportError::MalformedDictionary { key });
+                    return Err(ImportError::MalformedDictionary(key));
                 }
 
                 let left = payload
                     .get(*cursor)
                     .copied()
-                    .ok_or(ImportError::Truncated {
-                        needed: *cursor + 1,
-                        available: payload.len(),
-                    })?;
+                    .ok_or(ImportError::Truncated(*cursor + 1, payload.len()))?;
                 *cursor += 1;
                 self.left[key] = left;
 
@@ -326,10 +308,7 @@ impl Dictionary {
                     let right = payload
                         .get(*cursor)
                         .copied()
-                        .ok_or(ImportError::Truncated {
-                            needed: *cursor + 1,
-                            available: payload.len(),
-                        })?;
+                        .ok_or(ImportError::Truncated(*cursor + 1, payload.len()))?;
                     *cursor += 1;
                     self.right[key] = right;
                 }
@@ -416,9 +395,7 @@ mod tests {
         payload.extend_from_slice(&[0x42, 0x50, 0x45, 0x1a, 0x00, 0x00, 0x00, 0x00]);
         assert!(matches!(
             decode(&payload),
-            Err(ImportError::ImplausibleSize {
-                declared: 4_294_967_295
-            })
+            Err(ImportError::ImplausibleSize(4_294_967_295))
         ));
     }
 
@@ -451,7 +428,7 @@ mod tests {
         payload.extend(0..=0xffu8);
         assert!(matches!(
             decode(&payload),
-            Err(ImportError::MalformedDictionary { key }) if key == DICTIONARY_SLOTS
+            Err(ImportError::MalformedDictionary(key)) if key == DICTIONARY_SLOTS
         ));
     }
 
@@ -479,7 +456,7 @@ mod tests {
         payload.push(0x90);
         assert!(matches!(
             decode(&payload),
-            Err(ImportError::NonTerminatingDictionary { .. })
+            Err(ImportError::NonTerminatingDictionary(..))
         ));
     }
 
@@ -513,10 +490,7 @@ mod tests {
         let payload = [0x04, 0x00, 0x00, 0x00, 0x42, 0x50, 0x45, 0x1a, 0x04, 0x00];
         assert!(matches!(
             decode(&payload),
-            Err(ImportError::Truncated {
-                needed: 12,
-                available: 10
-            })
+            Err(ImportError::Truncated(12, 10))
         ));
     }
 

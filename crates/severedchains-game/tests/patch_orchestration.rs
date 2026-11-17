@@ -9,14 +9,15 @@
 //! # The two shapes a test can have
 //!
 //! The gate only measures an entry that already has a cached counterpart. With nothing cached every
-//! entry is new and is applied without being hashed — which is what the reference does, and is the
-//! right default. So a test about *re-running* needs a settled tree to start from, and gets it from
+//! entry is new and is applied without being hashed, which is the right default: a
+//! first run has nothing to compare against, and hashing an entry nobody has touched yet only
+//! costs a read. So a test about *re-running* needs a settled tree to start from, and gets it from
 //! [`fixture`]; a test about the *first* run uses [`fixture_unpatched`].
 //!
 //! The fixture is small on purpose — one diff, one replacement, one dependency that both of them
 //! `#include`. Three hundred and fifty-three entries exercise the same branches.
 
-use psxrt_import::patch::{
+use severedchains_game::tooling::patch::{
     self, DiskWorkspace, MemWorkspace, PatchList, PatchType, RecordingToolchain, Root, Workspace,
 };
 

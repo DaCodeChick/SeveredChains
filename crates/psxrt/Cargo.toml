@@ -1,6 +1,6 @@
 [package]
 name = "psxrt"
-description = "Backend-agnostic PSX platform/runtime mechanisms: fixed-point math, random streams, pixel formats, blend arithmetic, frame timing."
+description = "Backend-agnostic PSX platform/runtime mechanisms: fixed-point trigonometry, random streams, pixel bit-depth sampling, blend arithmetic, frame timing. Corresponds to modules math::trig, rng, gpu::pixel, blend, timing."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -1,7 +1,7 @@
-//! Adversarial input: arbitrary bytes fed to every reader in `psxrt-import`.
+//! Adversarial input: arbitrary bytes fed to every reader in this crate.
 //!
-//! The round-trip files (`bpe_round_trip.rs`, `mrg_round_trip.rs`, `index_round_trip.rs`) start
-//! from well-formed data and damage it in named ways. That proves a reader notices the specific
+//! The round-trip files (`bpe_round_trip.rs`, `mrg_round_trip.rs`) start from
+//! well-formed data and damage it in named ways. That proves a reader notices the specific
 //! damages somebody thought of. It does not prove the reader is safe against bytes nobody thought
 //! of, which is the actual situation for a tool whose input is a disc image somebody else burned.
 //!
@@ -13,10 +13,9 @@
 //!   can still be wrong. Out-of-range slicing is a panic in Rust, so an unchecked slice inside a
 //!   decoder is exactly what this file hunts for.
 //! * **No silent short read.** Where a read succeeds it must hand back the amount of data the
-//!   record asked for, and where a pointer walk succeeds it must land where the data says. The
-//!   reference's own slice step checks nothing, so a shorter answer is the realistic way a port
-//!   goes wrong quietly: it does not crash, it hands the next layer a plausible-looking buffer
-//!   that is missing its tail.
+//!   record asked for. The unpacker's own slice step checks nothing, so a shorter answer is the
+//!   realistic way a port goes wrong quietly: it does not crash, it hands the next layer a
+//!   plausible-looking buffer that is missing its tail.
 //!
 //! A failure here means one of two things and they need different responses: a panic is a defect in
 //! the reader, a wrong length or wrong owner is a defect in the *model* of the format. Neither may
@@ -30,19 +29,20 @@
 //! `bpe_round_trip.rs`. Use this file to find a case worth promoting to one, not as a substitute
 //! for having one.
 //!
-//! The oracle in `arbitrary_index_text_terminates_and_agrees` walks the pointer graph with a
-//! visited set while `Index::resolve` uses a bounded counter, on purpose: a property test that
-//! reimplements the mechanism under test passes forever whatever it says. Each of the two
-//! properties above was checked for falsifiability by removing the guard it protects and
-//! confirming this file fails; see `planning/05` §2.1 for the three mutations and what they
-//! surfaced.
+//! The same argument, applied to the cache index's pointer walk, is why that fuzz lives in
+//! `severedchains-game/tests/adversarial_index.rs` and carries its own independent oracle: a
+//! property test that reimplements the mechanism under test passes forever whatever it says. Each
+//! property here was checked for falsifiability by removing the guard it protects and confirming
+//! this file fails; see `planning/05` §2.1 for the three mutations and what they surfaced.
 
 use proptest::collection::vec;
 use proptest::prelude::*;
-use psxrt_compat::container::bpe as write;
-use psxrt_import::cache::Index;
+mod support;
+
 use psxrt_import::container::bpe::{self, Codec};
 use psxrt_import::container::mrg::{OffsetScale, Table};
+
+use support::bpe_writer as write;
 
 /// The container magic, for tables that need to get past the "is this a container" check.
 const MAGIC: u32 = 0x1a47_524d;
@@ -145,45 +145,10 @@ fn table_is_total(table: &[u8], store: &[u8], sectors: bool) {
             // and the file it names is silently dropped.
             Err(error) => {
                 assert!(
-                    !matches!(error, psxrt_import::ImportError::NoSuchEntry { .. }),
+                    !matches!(error, psxrt_import::ImportError::NoSuchEntry(..)),
                     "entry {index} exists but was reported as no such entry"
                 );
             }
-        }
-    }
-}
-
-/// Walk a pointer chain with a visited set.
-///
-/// Deliberately a *different mechanism* from `Index::resolve`, which decides "cycle" by running
-/// out of iterations. The two agree only if that bound is exactly right, so comparing them tests
-/// the bound itself: too small and real chains get reported as cycles, too large and a cyclic
-/// index hangs instead of answering. A test that reimplemented the same bound would prove nothing.
-///
-/// `Err(())` means the chain revisited a slot, which is a cycle and must be *reported* by the
-/// reader rather than answered with no data.
-fn walk(target_of: &[Option<usize>], start: usize) -> Result<Option<usize>, ()> {
-    let Some(mut current) = target_of[start] else {
-        return Ok(None);
-    };
-    if current == start {
-        return Ok(None);
-    }
-
-    let mut seen = vec![false; target_of.len()];
-    loop {
-        if seen[current] {
-            return Err(());
-        }
-        seen[current] = true;
-
-        match target_of[current] {
-            // The chain ran out into a slot with no line: no owner, and not damage either, since
-            // gaps are legal in this format.
-            None => return Ok(None),
-            // A slot naming itself owns its own bytes, so it is the answer.
-            Some(next) if next == current => return Ok(Some(current)),
-            Some(next) => current = next,
         }
     }
 }
@@ -287,81 +252,5 @@ proptest! {
 
         let store: Vec<u8> = (0..store_len).map(|i| (i % 251) as u8).collect();
         table_is_total(&table, &store, sectors);
-    }
-}
-
-// Arbitrary index text into the cache reader.
-//
-// `Index::resolve` walks pointer chains, so its failure mode is a chain that never ends rather
-// than a bad slice. The reference walks with `while (map.get(real) != real)` and no limit, so a
-// generated index containing a cycle is the input that would hang a faithful port. Termination is
-// asserted by running the walk, and the answer is compared against `walk`, which uses a different
-// cycle-detection mechanism.
-proptest! {
-    #![proptest_config(ProptestConfig::with_cases(4096))]
-
-    #[test]
-    fn arbitrary_index_text_terminates_and_agrees(
-        lines in vec((any::<usize>(), any::<usize>(), any::<usize>(), any::<bool>()), 0..12),
-    ) {
-        const SLOTS: usize = 40;
-
-        let mut text = String::new();
-        let mut pairs: Vec<(usize, Option<usize>)> = Vec::new();
-        for (slot, target, size, blank) in &lines {
-            // `;` is the separator, not `:`. `FileMap.addFile` emits `name=target;size\n`, so a
-            // generator using `:` produces genuinely malformed lines and the reader was right to
-            // refuse them — which is exactly what it did when this file first used a colon.
-            text.push_str(&format!(
-                "{}={};{}\n",
-                slot % SLOTS,
-                if *blank { String::new() } else { (target % SLOTS).to_string() },
-                size % 300,
-            ));
-            pairs.push((slot % SLOTS, if *blank { None } else { Some(target % SLOTS) }));
-        }
-
-        let index = Index::parse(&text)
-            .map_err(|error| TestCaseError::fail(format!("{text}\nrefused: {error}")))?;
-
-        // A later line naming the same slot replaces the earlier one, so the graph is assembled
-        // from the text rather than assumed from the generated list.
-        let mut target_of = vec![None; SLOTS];
-        for (slot, target) in &pairs {
-            target_of[*slot] = *target;
-        }
-
-        for slot in 0..SLOTS {
-            let expected = walk(&target_of, slot);
-            let got = index.resolve(slot);
-
-            match expected {
-                Err(()) => {
-                    // A cycle has to be *reported*. Returning `None` would also terminate, but it
-                    // would terminate by quietly producing no data for a file that has bytes, and
-                    // that is the silent-wrong-answer failure this file exists to catch.
-                    prop_assert!(
-                        got.is_err(),
-                        "slot {slot} sits in a cycle but resolve() returned {got:?}\n{text}"
-                    );
-                }
-                Ok(want) => {
-                    let got = got.map_err(|error| {
-                        TestCaseError::fail(format!(
-                            "slot {slot} is acyclic but resolve() failed: {error}\n{text}"
-                        ))
-                    })?;
-                    prop_assert_eq!(
-                        got, want,
-                        "slot {} resolved differently than an independent walk\n{}",
-                        slot, text
-                    );
-                    if let Some(owner) = want {
-                        prop_assert!(owner < SLOTS, "owner {owner} is outside the index");
-                        prop_assert_ne!(owner, slot, "a slot may not be its own owner");
-                    }
-                }
-            }
-        }
     }
 }

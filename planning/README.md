@@ -17,7 +17,12 @@ framework half; `04` was rewritten as 14 milestones (I0 done, then I1a/I1b, I2, 
 I6–I9, I10a/I10b); and `07-i0-refactor-specification.md` is new — the source audit of the I0 tree
 plus the move table that `04` depends on. A second revision the same day narrowed `03` further:
 `psxrt-compat` is a reverse-conversion toolchain and all eight of its I0 modules are retired, not
-redistributed within the crate. **§1 and §3 below describe the P0 set as delivered and are kept as
+redistributed within the crate. **A third revision, 2026-11-16, then removed the crate itself:** its
+three writers survive as `tests/support/` oracle modules, the cache reader and the patch
+orchestrator moved to a new `severedchains-game` crate, and the four unbuilt reverse-conversion
+modules are recorded as *unplaced* rather than assigned to a successor. `02` TD-04 and `04` §2 carry
+that change; `01` §4/§5 state the current graph.
+**§1 and §3 below describe the P0 set as delivered and are kept as
 the record**; where a row there states a factual claim about crate count, module names, or where a
 compatibility switch lives, `01` §1–§5, `02` TD-02/TD-04/TD-27/TD-28 and `03` §3 (revised) now
 govern. Most important: **there is no workspace crate-count limit.** §3 row 11 ("the six fixed
@@ -57,10 +62,10 @@ The P0 deliverable set was self-audited against the 12-point checklist (planning
 | 1 | Every CD has its owning crate + blocking milestone | **PASS** | planning/03: 10/10 CD records carry `**Owning crate**` + `**Blocks**`; planning/06 §9 is the single view |
 | 2 | Every TD's dependency state is honored in the roadmap | **PASS** | planning/02's "Depends on TD-NN" chain is a subset of the roadmap's milestone prerequisites (TD-04→TD-03; TD-05→TD-03; TD-10..24 are I5+ provisions the roadmap does not assume before their milestone) |
 | 3 | Every planning/06 row maps to a real milestone + test layer | **PASS** | 135/135 mapped (planning/06 §10 accounting; the two FO non-port rows (T5, X5) map as documented non-ports — D) |
-| 4 | Crate boundary rules hold in the interface catalog | **PASS** | planning/01 §4 refinements: `severedchains-sdk` depends on no other project crate (the cycle-prevention property); `psxrt-import` depends on `psxrt` (+ the injected `ScriptPatchToolchain` trait, no SDK edge); `psxrt-compat` depends on `psxrt` only |
+| 4 | Crate boundary rules hold in the interface catalog | **PASS** *(as checked at P0; the third clause is void — `psxrt-compat` was retired 2026-11-16, and `psxrt-import` has no `psxrt` dependency at all)* | planning/01 §4 refinements: `severedchains-sdk` depends on no other project crate (the cycle-prevention property); `psxrt-import` depends on `psxrt` (+ the injected `ScriptPatchToolchain` trait, no SDK edge); `psxrt-compat` depends on `psxrt` only |
 | 5 | No `asset-validated` claims in the planning set | **PASS** | Grep-verified: every occurrence is a negation, the I10 pass procedure, or a claim-class reference |
 | 6 | No production code in the P0 tree | **PASS** | The P0 tree delta is `planning/*` + the documented in-place corrections (AGENTS.md, the research corpus) — no `.rs`, no `Cargo.toml`, no workspace |
-| 7 | Naming policy respected in the module sketches | **PASS** | The proposed module names are semantic (`fixedpoint`, `rng`, `bpp`, `blend`, `timing`, `builder`, `frame`, `state`, `registry`, `event`, `fate`, …); no placeholder-pattern names appear in the planning set |
+| 7 | Naming policy respected in the module sketches | **PASS** | The proposed module names are semantic (`fixedpoint`, `rng`, `bpp`, `blend`, `timing`, `builder`, `frame`, `state`, `registry`, `event`, `fate`, …); no placeholder-pattern names appear in the planning set. *(Two later changed: `fixedpoint` → `math::trig`, `bpp` → `gpu::pixel`. Both were renamed for failing the same test this check was about — a name that does not say what the module does.)*
 | 8 | File endings + English-only over the new documents | **PASS after correction** | **Finding:** all seven planning documents were missing their final newline (01–04 as committed at `f67d268`; 05–06 and this README as authored — the README's own violation was caught by the project-wide audit run after the per-document check). Corrected in place (single trailing LF each; no content change — see §2 hygiene entry); the project-wide audit then passed clean (71 text files, 0 violations). English-only: verified |
 | 9 | The P-02/R-01 boundary not crossed | **PASS** | No I0–I9 test takes retail bytes as input (planning/05 §1.4, §7); `testdata/` is source-derived only; the asset pass runs only on user-provided assets (I10, P4); the no-proprietary-bytes content scan is a standing audit (planning/05 §8.5) |
 | 10 | The reference-divergences explicitly flagged | **PASS** | CD-06 flagged in planning/03 (the design-status line), planning/04 (I5 scope), planning/05 §1.1/§6, planning/06 §9 (the "Decided by proposal — the deliberate divergence" row); the 8 keep-the-reference CDs carry their divergence notes in planning/03's cross-cutting note 1 |

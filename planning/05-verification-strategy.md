@@ -41,9 +41,11 @@ Two properties, one per failure mode worth catching here:
    The audit that establishes this has to strip test modules to be meaningful. An unfiltered grep over `crates/*/src` finds ~60 `unwrap`-shaped matches, nearly all of them either inside `#[cfg(test)]` or `unwrap_or`/`unwrap_or_default` — which are not panics at all. A checker written for this purpose must parse the test-module boundary and must not treat `unwrap_or` as a violation, or it will report noise and get switched off.
 2. **No silent short read.** The reference's own slice step checks nothing, so handing the next layer a plausible buffer with its tail missing is the realistic quiet porting error — it does not crash, it corrupts downstream. Asserted where the answer is falsifiable: a BPE decode must match its declared length, a window must match the entry's length, a pointer walk must land where the data says.
 
-**The oracle must differ mechanistically from the code under test** (§2's rule, applied). `arbitrary_index_text_terminates_and_agrees` does not reimplement `Index::resolve`'s bounded counter — it uses a visited set, and the reader uses a bound of `slots.len()` iterations. Those agree only if the bound is exactly right, so the comparison tests the bound itself: one too small and real chains get reported as cycles, too large and a cyclic index hangs. A property test that reimplemented the same bound would pass forever and prove nothing.
+**The oracle must differ mechanistically from the code under test** (§2's rule, applied). `arbitrary_index_text_terminates_and_agrees` — in `crates/severedchains-game/tests/adversarial_index.rs` since 2026-11-16, having been cut in `psxrt-import` — does not reimplement `Index::resolve`'s bounded counter: it decides "cycle" with a visited set, while the reader decides it by running out of iterations. Those agree only if the bound is exactly right, so the comparison tests the bound itself: one too small and real chains get reported as cycles, too large and a cyclic index hangs. A property test that reimplemented the same bound would pass forever and prove nothing.
 
-**A guard that cannot fail is not a guard, so each property was mutation-tested before being trusted.** Three mutations, one per property, each applied to production source and each caught: dropping BPE's per-symbol length guard (caught, and also caught deterministically by two named `bpe_round_trip` tests); replacing MRG `payload_of`'s bounds-checked `store.get` with a clamped slice (caught — the short read surfaced as "entry asked for 3 712 069 356 bytes and was handed 0"); and turning `resolve`'s `Err(IndexCycle)` into `Ok(None)` (caught — "slot 11 sits in a cycle but resolve() returned `Ok(None)`"). The first mutation was caught on one run and *missed* on another, because the fuzz reaching that state is seed-dependent. That is the reason the layer states it is a second net and names the file where the same behaviour is pinned by hand: a property that depends on the generator finding the case is coverage, not a contract.
+The file states its own oracle relationship in its module header, and names `tests/index_round_trip.rs` as the place the contract is pinned by hand. That is deliberate: a property over generated pointer graphs is coverage, not a contract.
+
+**A guard that cannot fail is not a guard, so each property was mutation-tested before being trusted.** Three mutations, one per property, each applied to production source and each caught: dropping BPE's per-symbol length guard (caught, and also caught deterministically by two named `bpe_round_trip` tests); replacing MRG `payload_of`'s bounds-checked `store.get` with a clamped slice (caught — the short read surfaced as "entry asked for 3 712 069 356 bytes and was handed 0"); and turning `resolve`'s cycle error into `Ok(None)` (caught — "slot 11 sits in a cycle but resolve() returned `Ok(None)`"). The first mutation was caught on one run and *missed* on another, because the fuzz reaching that state is seed-dependent. That is the reason the layer states it is a second net and names the file where the same behaviour is pinned by hand: a property that depends on the generator finding the case is coverage, not a contract.
 
 `.proptest-regressions` files **are** committed in this workspace — `crates/psxrt/tests/properties.proptest-regressions` predates I1a and carries real shrinking seeds. The seeds this layer produced during mutation testing were deleted rather than committed, and the distinction is the one worth keeping: a regression file records a seed that failed against *correct* code, whereas those seeds were found against deliberately-broken code. Committing them would file synthetic failures under a heading that means "real defect, re-run this first", and the next reader to trust the file would be misled by it. A regression file earns its place by outliving the bug that produced it.
 
@@ -82,7 +84,7 @@ Each milestone's gate (planning/04) is defined as: **(a)** the `cargo test` suit
 | Milestone | Load-bearing suites | The "proof of gate" artifact |
 |---|---|---|
 | I0 | The RNG golden (3 parameterizations × 10k); the `rsin`/`rcos` grid; the Bpp exhaustive pair; the 4 blend equations exhaustive; the timing unit table | The golden manifest v1 (the committed derivation) || I1a | The container/codec round trips (BPE encode∘decode, MRG table∘writer, cache index write∘parse) over the `psxrt-compat` oracles; the patch-orchestration idempotence and restore; the dependency-direction guard; the round-trip inventory | The round-trip report: every decoder either paired with an independently-written oracle or carrying a declared reason |
-| I1b | The ISO conformance suite over the synthetic 4-disc image; the content decoders each against their `psxrt-compat` writer; the pipeline determinism (the `files/` tree byte-stable across thread counts) | The fixture manifest v1 (no proprietary bytes — asserted by a content scan) |
+| I1b | The ISO conformance suite over the synthetic 4-disc image; the content decoders each against an independent writer (placement open per `planning/01` §4 — *not* `psxrt-compat`, which is retired); the pipeline determinism (the `files/` tree byte-stable across thread counts) | The fixture manifest v1 (no proprietary bytes — asserted by a content scan) |
 | I2 | The D-row contract suites (the 21-registry window; the 113-event-class dispatch matrix; the i18n 4-level matrix; the 12-step boot; the Tag 10-type round-trip; the config `.dcnf`/`.dpre` byte matrix) | The framework vertical slice (the synthetic first-party mod booted) |
 | I3 | The 21-phase trace; the lifecycle suite (boot 14 steps + shutdown order); the teardown fixed point; the rate table; the error 4-class matrix; the edge-word protocol | The headless harness v1 (the reusable asset) |
 | I4 | The VM conformance (allocation/pacing/storage/lifecycle/dispatch/ops/errors); the round-trip fidelity property (the hazard set + 100 random scripts); the meta alignment; the C-01 dual-table documentation | The round-trip gate report (the property pass + the hazard-set regression list) |
@@ -116,7 +118,9 @@ divisors.
 **Audits (gate item d).** Naming scan: no placeholder-pattern identifier in the new code — the only
 grep hit is the English word "undefined" inside a doc comment. Dependency allow-list: no runtime
 dependency anywhere (`psxrt` none; `psxrt-compat` → `psxrt`; `proptest` is a dev-dependency in
-both), so TD-04's std-only side holds. No proprietary bytes: the seven fixture files under
+both), so TD-04's std-only side holds. *[2026-11-16: `psxrt-compat` no longer exists, and the
+workspace now has **no cross-crate `dev-dependency` at all** — `psxrt-import` depends on nothing but
+`thiserror`, and `severedchains-game` on `psxrt-import`.]* No proprietary bytes: the seven fixture files under
 `crates/psxrt/testdata/` are machine-generated and manifest-registered, and the inventory test
 fails on an unregistered file — that is §8.5 enforced at crate level, in both directions.
 
@@ -160,19 +164,41 @@ trusted.
 **Built at I1a, with one deliberate divergence on (6).** Both guards exist; the description above is
 how they stood as sketches at P0.
 
-**(6)** is `crates/psxrt-import/tests/dependency_direction.rs`, 5 cases. It walks every crate
-manifest and every `.rs` file under every crate's `src/`, so a violation cannot hide in a submodule
-nobody thought to grep, and it fails on: a production dependency on `psxrt-compat`; a
+**(6)** was `crates/psxrt-import/tests/dependency_direction.rs`, 5 cases. It walked every crate
+manifest and every `.rs` file under every crate's `src/`, so a violation could not hide in a
+submodule nobody thought to grep, and it failed on: a production dependency on `psxrt-compat`; a
 dev-dependency on it taken by any crate other than `psxrt-import`; any `psxrt_compat::` path
 expression anywhere in the workspace; and `psxrt-compat` reaching back into `psxrt-import`, in
-manifest or in source. The divergence is the doc-comment clause. This sketch asked the guard to fail
-on a *mention* in prose as well as in code; the shipped guard drops comment lines. The reason is
-that prose legitimately names the neighbouring crate — `psxrt-compat`'s BPE writer explains itself
-by reference to the decoder it is tested against — and a fence that flags correct prose gets an
-allow-attribute within a week. Staleness is the real hazard behind the strict rule, and it was
-handled at the source: three doc comments in `psxrt` did claim that policy lived in `psxrt-compat`
-modules that no longer exist, and all three were corrected at I1a. A stale doc comment is now a
-review problem with no mechanical backstop, and that is a known gap rather than a settled design.
+manifest or in source.
+
+It was replaced on 2026-11-16 by two `tests/architecture.rs` files, 8 and 6 cases, when
+`psxrt-compat` was retired. Keeping it would have left a guard whose whole subject had been
+deleted, and its first rule — "nothing may depend on `psxrt-compat`" — had already stopped being
+the interesting one. What the replacements check is the *direction*, which survives the crate:
+`psxrt` may not depend on a toolchain or import crate, no crate may reach up into
+`severedchains-game`, an oracle may not import the crate it arbitrates, and no game filename may
+appear as a literal in a reusable crate.
+
+Two things were learned doing it, and both belong in this document rather than only in the code.
+
+*The guard was blind on its first pass.* The initial version recognised a dependency by matching
+table *keys*, and passed the whole suite while missing
+`[dependencies.reader] package = "psxrt-import"` — the form that names the crate in a value. Both
+direction rules were affected. Probing with the plain `psxrt-import = { path = ... }` form did fire
+them, so the only way to have noticed was to test the parser rather than the graph, which is what
+five of the fourteen cases now do: six spellings of a forbidden edge must be caught, and four
+shapes that are not edges — a dev-only dependency, a `[features]` list, a package's own `name`
+key, an unrelated crate — must not be flagged. The second half matters as much as the first; a
+fence with false positives collects `#[allow]` attributes.
+
+*One of the two rules cannot be exercised end to end, and says so.* A `psxrt-import →
+severedchains-game` edge would be a package cycle, because `severedchains-game` already depends on
+`psxrt-import`, so cargo refuses to build it rather than letting the test observe it. The rule is
+a fence against a future graph in which that dependency has been cut. That makes the detector tests
+the only evidence it works, which is the reason they exist.
+
+The comment-line clause carried over unchanged. Prose legitimately names neighbouring crates, and
+a fence that flags correct prose gets silenced within a week.
 
 **(7)** is `crates/psxrt-import/tests/round_trip_inventory.rs`, 3 cases. It treats the decoder→
 writer pairings as data, fails if a declared pairing stops being driven by a test, fails if a new
@@ -205,6 +231,33 @@ reported. Production `crates/*/src` outside `#[cfg(test)]` now has zero panic si
 asserts, how its oracle was kept independent of the reader, and the three mutations used to prove
 it can fail.
 
+**Re-measured at the close of the 2026-11-16 restructure.** The numbers above are the I1a record
+and are left as written; these are the current ones, from a full worktree run rather than by
+arithmetic on the delta. **211 tests over 23 result lines, 19 of them carrying** (the extra three
+lines are doc-test targets carrying no tests), no failures. `cargo clippy --workspace
+--all-targets --all-features` — zero warnings. File-ending audit — 142 text files, no violations.
+
+Three things changed in kind rather than in count, and they are the parts worth re-checking by
+hand rather than by a green line.
+
+*Zero panic sites still holds, and now covers `severedchains-game`.* The same audit was re-run over
+all three crates: the only `unwrap`-shaped matches outside `#[cfg(test)]` are eight `unwrap_or` /
+`unwrap_or(None)` calls, which do not panic. The `patch.rs` code that moved across the crate
+boundary brought no new panic site with it.
+
+*The adversarial layer split rather than shrank.* `adversarial_input.rs` went 7 → 11 cases and
+stayed in `psxrt-import`; `adversarial_index.rs` is new in `severedchains-game` with 6 cases, of
+which one is the pointer-graph property formerly held in the container file. Both files name the
+suite where their behaviour is pinned by hand, so neither is read as the only net.
+
+*`cargo fmt` was run, and five of its results were reverted.* The workspace is therefore **not**
+wholly rustfmt-clean: five pre-existing `psxrt` files (`blend.rs`, `rng/random48.rs`,
+`blend_exhaustive.rs`, `golden_trig.rs`, `timing_matrix.rs`) keep the hand-wrapped layout they had
+at I1a. Formatting them was a side effect of a workspace-wide `cargo fmt --all`, carried no
+semantic change, and was reverted so that the diff shows the restructure and nothing else. Every
+file the restructure created or edited is rustfmt-clean; there is no fmt gate, and adding one would
+have to deal with those five deliberately rather than by sweeping them.
+
 **What the milestone actually contains, against what was specified.** Three modules were cut before
 any code was written against them — `space.rs`, `container/iso.rs`, `pipeline.rs` — because all
 three need real disc bytes to be verifiable and `space.rs` additionally specified a 63-bit file key
@@ -212,10 +265,15 @@ the reference does not use. The cut is recorded in `planning/04` §I1a with its 
 taken. What was built is the container/codec layer, the cache index pair, the patch orchestrator,
 and the two guards.
 
-**The oracle rule (§3) held where it could.** Three writers exist in `psxrt-compat` — the MRG
-writer, the BPE encoder, the cache index writer — 5 unit tests between them, each written from the format description
-rather than from the reader's control flow, which is the only condition under which a round trip can
-contradict anybody. The BPE encoder is larger than its input; it is not a compressor and it is not
+**The oracle rule (§3) held where it could.** Three writers existed in `psxrt-compat` — the MRG
+writer, the BPE encoder, the cache index writer — 5 unit tests between them, each written from the
+format description rather than from the reader's control flow, which is the only condition under
+which a round trip can contradict anybody. *[2026-11-16: all three survive, outside the crate. They
+are `psxrt-import/tests/support/bpe_writer.rs`, `mrg_writer.rs` and
+`severedchains-game/tests/support/index_writer.rs`, plus a fourth independent oracle — a
+visited-set pointer walk in `severedchains-game/tests/adversarial_index.rs` — deliberately a
+different mechanism from the reader's bounded iteration count. The rule outlived the crate that held
+its examples; `tests/architecture.rs` now checks it directly.]* The BPE encoder is larger than its input; it is not a compressor and it is not
 tested as one. Where a divergence exists it is written down and pinned by a test rather than
 harmonised: the reference's index writer omits an entry with no bytes, `Index::text()` writes
 `name=;0`, and a test asserts that the two spellings are different and mean the same thing.

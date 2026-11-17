@@ -1,12 +1,13 @@
-//! Round trip for the BPE codec: `psxrt-compat` writes a payload, `psxrt-import` reads it back.
+//! Round trip for the BPE codec: an encoder writes a payload, the decoder reads it back.
 //!
-//! # Why this crosses a crate boundary
+//! # Why the writer is not allowed to know the reader exists
 //!
-//! The encoder is a test oracle, not a shipping writer — see its module header. Its whole job is to
-//! be an independent witness that the decoder is right, and that only holds while the two are
-//! written against the format rather than against each other. `psxrt-import` depends on
-//! `psxrt-compat` under `[dev-dependencies]` and never in production; a `dev-dependency` cycle back
-//! the other way is rejected by the build, so the encoder cannot quietly start calling the decoder.
+//! The encoder is a test oracle, not a shipping writer — see `support/bpe_writer.rs`. Its whole job
+//! is to be an independent witness that the decoder is right, and that only holds while the two are
+//! written against the format rather than against each other. Independence is not a property of
+//! where a file sits, so it is not claimed that way: `tests/architecture.rs` fails the build if a
+//! module under `tests/support/` grows a `use` path into `src/`, which is the only arrangement in
+//! which a green round trip says something a self-agreement could not.
 //!
 //! # What a green run here does *not* prove
 //!
@@ -23,14 +24,16 @@
 
 use proptest::collection::vec;
 use proptest::prelude::*;
-use psxrt_compat::container::bpe;
+mod support;
+
 use psxrt_import::ImportError;
 use psxrt_import::container::bpe as codec;
+use support::{bpe_writer, mrg_writer};
 
 /// A payload that decodes back to what went in, and a marker that says so.
 #[track_caller]
 fn assert_round_trips(data: &[u8], rules: &[(u8, u8)]) {
-    let payload = bpe::encode(data, rules).expect("encoder refused a legal input");
+    let payload = bpe_writer::encode(data, rules).expect("encoder refused a legal input");
 
     assert_eq!(
         codec::codec_for(payload.bytes()),
@@ -83,7 +86,7 @@ fn every_block_boundary_round_trips() {
 #[test]
 fn a_payload_spanning_blocks_pads_on_the_absolute_offset() {
     let data = vec![0x5au8; 0x801];
-    let payload = bpe::encode(&data, &[]).unwrap();
+    let payload = bpe_writer::encode(&data, &[]).unwrap();
     let bytes = payload.bytes();
 
     // First block: 4 count + 258 dictionary + 0x800 coded, starting at offset 8. The padding that
@@ -111,7 +114,7 @@ fn a_payload_spanning_blocks_pads_on_the_absolute_offset() {
 #[test]
 fn a_rule_that_applies_is_actually_applied() {
     let data = b"ABABABABABABABABABABABABABABABAB".to_vec();
-    let payload = bpe::encode(&data, &[(b'A', b'B')]).unwrap();
+    let payload = bpe_writer::encode(&data, &[(b'A', b'B')]).unwrap();
 
     assert_eq!(
         payload.rules().len(),
@@ -121,7 +124,7 @@ fn a_rule_that_applies_is_actually_applied() {
 
     // 32 bytes down to 16 coded bytes, plus the dictionary. If the rule had been skipped the
     // payload would be 32 bytes of data instead of 16.
-    let literal = bpe::encode(&data, &[]).unwrap();
+    let literal = bpe_writer::encode(&data, &[]).unwrap();
     assert!(
         payload.bytes().len() < literal.bytes().len(),
         "encoded {:#?} is not smaller than literal",
@@ -176,7 +179,7 @@ fn substitution_across_block_boundaries_round_trips() {
 #[test]
 fn a_wrong_declared_length_is_refused_in_both_directions() {
     let data = vec![0x42u8; 0x900];
-    let payload = bpe::encode(&data, &[]).unwrap();
+    let payload = bpe_writer::encode(&data, &[]).unwrap();
     let bytes = payload.bytes();
 
     for tamper in [0x00u32, 1, 0x1000_0000, 0xffff_ffff] {
@@ -220,7 +223,7 @@ fn an_unmarked_payload_is_returned_verbatim() {
 /// data.
 #[test]
 fn a_container_header_is_not_a_codec_header() {
-    let container = psxrt_compat::container::mrg::write(&[(0, 0)]);
+    let container = mrg_writer::write(&[(0, 0)]);
     assert_eq!(
         codec::codec_for(&container),
         codec::Codec::Passthrough,
@@ -241,7 +244,7 @@ fn a_literal_0x7f_does_not_collide_with_the_run_count_byte() {
     data.extend_from_slice(&[0x10, 0x11, 0x10, 0x11]);
 
     let payload =
-        bpe::encode(&data, &[(0x10, 0x11)]).expect("0x7f is the count byte, not a symbol");
+        bpe_writer::encode(&data, &[(0x10, 0x11)]).expect("0x7f is the count byte, not a symbol");
     assert_eq!(payload.rules().len(), 1, "the rule was silently dropped");
     assert_eq!(codec::decode(payload.bytes()).unwrap(), data);
 }
@@ -250,7 +253,7 @@ fn a_literal_0x7f_does_not_collide_with_the_run_count_byte() {
 // Decoder-side guards, written against the format rather than against the encoder
 // ---------------------------------------------------------------------------
 
-// These three cannot be produced by `psxrt-compat`, which is why they are hand-assembled here. A
+// These three cannot be produced by the writer oracle, which is why they are hand-assembled here. A
 // round trip cannot reach them: the encoder is built so that it does not emit circular or overlong
 // dictionaries. They are tested anyway because the inputs are not hypothetical — a cache directory
 // is a plain text file anybody can edit, and a corrupt image produces arbitrary bytes. A reader
@@ -269,7 +272,7 @@ fn a_dictionary_that_overruns_its_table_is_refused() {
 
     assert!(matches!(
         codec::decode(&payload),
-        Err(ImportError::MalformedDictionary { key: 257 })
+        Err(ImportError::MalformedDictionary(257))
     ));
 }
 
@@ -304,7 +307,7 @@ fn an_implausible_declared_length_is_refused() {
 
     assert!(matches!(
         codec::decode(&payload),
-        Err(ImportError::ImplausibleSize { .. })
+        Err(ImportError::ImplausibleSize(..))
     ));
 }
 
@@ -320,7 +323,7 @@ fn a_circular_dictionary_terminates_as_an_error() {
     let payload = one_block(16, &[0x80], &swapped_dictionary());
     assert!(matches!(
         codec::decode(&payload),
-        Err(ImportError::NonTerminatingDictionary { .. })
+        Err(ImportError::NonTerminatingDictionary(..))
     ));
 }
 
@@ -343,7 +346,7 @@ fn length_that_does_not_match_the_header_is_refused() {
     short.extend_from_slice(b"abc");
     assert!(matches!(
         codec::decode(&short),
-        Err(ImportError::Truncated { .. })
+        Err(ImportError::Truncated(..))
     ));
 
     // Case two: four coded bytes against two declared. The third has nowhere to go.
@@ -432,7 +435,7 @@ proptest! {
         data in vec(any::<u8>(), 0..2500),
         rules in vec((any::<u8>(), any::<u8>()), 0..6),
     ) {
-        let payload = bpe::encode(&data, &rules).unwrap();
+        let payload = bpe_writer::encode(&data, &rules).unwrap();
         prop_assert_eq!(codec::codec_for(payload.bytes()), codec::Codec::Bpe);
         prop_assert_eq!(codec::decode(payload.bytes())?, data);
     }

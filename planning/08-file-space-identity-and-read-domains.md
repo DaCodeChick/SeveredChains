@@ -215,8 +215,11 @@ With no key, those have no subject. The honest equivalents, all writable without
 3. **Container round-trip** — build an MRG, read it, write it, compare bytes; same for the `mrg`
    index and for BPE streams (`decode → encode → compare`). **Done at I1a**, and it crosses the
    crate boundary rather than sitting inside one module: `tests/mrg_round_trip.rs`,
-   `tests/index_round_trip.rs` and `tests/bpe_round_trip.rs` each drive the `psxrt-compat` writer
-   against the `psxrt-import` reader. Item 3 is the only one of the five that I1a could finish, and
+   `tests/index_round_trip.rs` and `tests/bpe_round_trip.rs` each drive an independent writer
+   against the reader. *(Written against `psxrt-compat`; on 2026-11-16 the writers became
+   `tests/support/` oracle modules, so the round trips no longer cross a crate boundary. The
+   independence requirement this item was about is unchanged and is now checked directly, by
+   `tests/architecture.rs`: an oracle may not import the crate whose reader it arbitrates.)* Item 3 is the only one of the five that I1a could finish, and
    it is the only one it finished.
 4. **Alias window is explicit** — one test that asserts an `Alias` *can* read past the logical
    payload and that a `Slice` cannot, so the difference is pinned by a test rather than by a
@@ -272,8 +275,11 @@ Built, tested and passing on 2026-11-16:
 - `psxrt-import::patch` — patch orchestration. Not a file-space consumer; it addresses files by
   path within four named trees and never needed a key, which is the strongest evidence this
   document has that D-1 is right.
-- `psxrt-compat::container` — MRG writer, BPE encoder, `mrg` index writer, as test oracles. The
-  round trips cross the crate boundary; three of them also carry a property test.
+- The MRG writer, the BPE encoder and the `mrg` index writer, as test oracles — `tests/support/`
+  modules since 2026-11-16, in `psxrt-import` and `severedchains-game` respectively. They were
+  `psxrt-compat::container` when this document was written, and the round trips used to cross a
+  crate boundary; three of them also carry a property test. What did not change is that no oracle
+  imports the crate it arbitrates.
 
 Not built, moved to I1b by owner decision on 2026-11-16:
 

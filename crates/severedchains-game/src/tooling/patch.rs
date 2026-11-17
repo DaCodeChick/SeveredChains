@@ -12,18 +12,17 @@
 //!
 //! # No paired writer
 //!
-//! [`PatchList::parse`] has no counterpart in `psxrt-compat`, and none is planned. That is a fact
-//! about the artifact rather than a shortfall in effort. `patches/scripts.csv` is authored by hand
-//! and checked into the reference repository; it is the *input* to the patch phase, not an
-//! intermediate format the toolchain decodes and re-encodes on its way somewhere else, and no
-//! part of this project generates one. A writer here would have no caller, which is the standard
-//! the I0 policy scaffold was deleted for.
+//! [`PatchList::parse`] has no writer counterpart anywhere in the workspace, and none is planned.
+//! That is a fact about the artifact rather than a shortfall in effort. `patches/scripts.csv` is
+//! authored by hand and checked in; it is the *input* to the patch phase, not an intermediate
+//! format something decodes and re-encodes on its way somewhere else, and no part of this project
+//! generates one. A writer here would have no caller.
 //!
 //! The reader is not therefore untested, and it is not tested against fixtures derived from
-//! itself: `tests/patch_orchestration.rs` runs 21 cases against hand-written patch lists, two of
+//! itself: `tests/patch_orchestration.rs` runs its cases against hand-written patch lists, two of
 //! which exist specifically to be wrong — a quoted field holding an embedded comma, and a
 //! two-column row that must be read in the legacy shape. What is verified is the read contract,
-//! including the reference's choice to discard an entire list on one malformed row.
+//! including the choice to discard an entire list on one malformed row.
 //!
 //! # The mechanism, in one paragraph
 //!
@@ -39,17 +38,17 @@
 //! tree; tampering with a cache file re-applies everything whose closure reads it, and
 //! re-application starts from the backup rather than from the current, already-patched bytes.
 //!
-//! # Two ways this is not a transcription of the reference
+//! # Two deliberate departures
 //!
-//! **Order.** The reference keys its patch map with a `HashMap` and iterates `.values()`, so its
-//! application order is whatever that hash table yields. This iterates in file order. Order only
+//! **Order.** The original keys its patch map with a hash map and iterates its values, so its
+//! application order is whatever that table yields. This iterates in file order. Order only
 //! matters when two entries name the same source file, and a patch set that does that is already
 //! broken — but "whatever the hash table felt like" is not a thing a Rust reader should
 //! reproduce for fidelity's sake. Duplicate sources collapse to the last row, which is what
 //! `Map.put` does.
 //!
-//! **The filesystem.** The reference calls `java.nio.file` directly. Here the four trees sit
-//! behind [`Workspace`] so the whole orchestrator can be tested against
+//! **The filesystem.** The original reaches into the host filesystem directly. Here the four trees
+//! sit behind [`Workspace`] so the whole orchestrator can be tested against
 //! [`MemWorkspace`](Workspace::list), which is the answer to the hazard recorded at
 //! `planning/04` §A: an orchestrator that can only be exercised with a real unpacked tree never
 //! gets exercised.
@@ -57,7 +56,38 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
-use crate::error::ImportError;
+use thiserror::Error;
+
+/// What can go wrong while walking and applying a patch set.
+///
+/// Owned here rather than carried in from `psxrt-import`: these are failures of a *workflow* — a
+/// file that is not where the patch said it would be, an include that leads nowhere — and not
+/// failures of a decoder. Reporting them through the container error type would force a reader of
+/// `PatchError` to ask which subsystem they came from.
+///
+/// The payload forms are tuples, and the positions mean something:
+///
+/// * [`PatchError::ConfigName`] is `(the patch body's name)`.
+/// * [`PatchError::IncludeFailed`] is `(the file whose text contained the directive, the target as
+///   it was written)`. The first is needed because an include resolves against `libs/` and
+///   `scripts/` inside whichever tree is being hashed, so "not in either" is a fact about that tree.
+/// * [`PatchError::MissingSource`] is `(the tree-relative name, not a resolved path)` — both trees
+///   that could have held it are named by [`Root`], and working out which one is lying is the
+///   reader's job.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum PatchError {
+    /// A patch body whose name has no extension, so its `.config.csv` sibling cannot be named.
+    #[error("patch body {0} has no extension, so its .config.csv cannot be named")]
+    ConfigName(String),
+
+    /// An `#include` that names nothing.
+    #[error("could not resolve include {1} (asked for by {0})")]
+    IncludeFailed(String, String),
+
+    /// A file the patch phase needed and could not find.
+    #[error("no file at {0}")]
+    MissingSource(String),
+}
 
 /// Which of the four trees a path is relative to.
 ///
@@ -465,7 +495,7 @@ pub trait Toolchain {
     /// The [`Job`] deliberately does not borrow a [`Workspace`]. A toolchain that could reach the
     /// tree could also *change* it, and then nothing about the orchestrator's guarantees would
     /// hold: the backup is supposed to be written once, by the orchestrator, from pristine bytes.
-    fn apply(&mut self, job: Job<'_>) -> Result<Vec<u8>, ImportError>;
+    fn apply(&mut self, job: Job<'_>) -> Result<Vec<u8>, PatchError>;
 }
 
 /// A toolchain that changes nothing and remembers being asked.
@@ -492,7 +522,7 @@ impl RecordingToolchain {
 }
 
 impl Toolchain for RecordingToolchain {
-    fn apply(&mut self, job: Job<'_>) -> Result<Vec<u8>, ImportError> {
+    fn apply(&mut self, job: Job<'_>) -> Result<Vec<u8>, PatchError> {
         match job {
             Job::Diff {
                 source, original, ..
@@ -552,12 +582,10 @@ type CrcMap = BTreeMap<String, Option<u32>>;
 ///
 /// A name with no dot has no sibling — the reference throws there too. Reported rather than
 /// swallowed, for the same reason.
-fn config_name(patch: &str) -> Result<String, ImportError> {
+fn config_name(patch: &str) -> Result<String, PatchError> {
     let stem = patch
         .rfind('.')
-        .ok_or_else(|| ImportError::PatchConfigName {
-            text: patch.to_string(),
-        })?;
+        .ok_or_else(|| PatchError::ConfigName(patch.to_string()))?;
     Ok(format!("{}.config.csv", &patch[..stem]))
 }
 
@@ -574,7 +602,7 @@ pub fn closure_for(
     ws: &impl Workspace,
     root: Root,
     entry: &ScriptPatch,
-) -> Result<CrcMap, ImportError> {
+) -> Result<CrcMap, PatchError> {
     let mut map = CrcMap::new();
     // Named before the first visit: `visit` wants `&mut map`, so the second name has to be
     // computed before the borrow that the first one opens.
@@ -584,12 +612,7 @@ pub fn closure_for(
     Ok(map)
 }
 
-fn visit(
-    ws: &impl Workspace,
-    root: Root,
-    path: &str,
-    seen: &mut CrcMap,
-) -> Result<(), ImportError> {
+fn visit(ws: &impl Workspace, root: Root, path: &str, seen: &mut CrcMap) -> Result<(), PatchError> {
     if seen.contains_key(path) {
         return Ok(());
     }
@@ -606,10 +629,10 @@ fn visit(
     let text = String::from_utf8_lossy(&bytes);
     for include in includes(&text) {
         let Some(resolved) = resolve_include(ws, root, include) else {
-            return Err(ImportError::IncludeFailed {
-                from: path.to_string(),
-                text: include.to_string(),
-            });
+            return Err(PatchError::IncludeFailed(
+                path.to_string(),
+                include.to_string(),
+            ));
         };
         visit(ws, root, &resolved, seen)?;
     }
@@ -760,7 +783,7 @@ const LIST: &str = "scripts.csv";
 pub fn apply(
     ws: &mut impl Workspace,
     toolchain: &mut impl Toolchain,
-) -> Result<Outcome, ImportError> {
+) -> Result<Outcome, PatchError> {
     let mut outcome = Outcome::default();
 
     let (fresh, warning) = load_list(ws, Root::Patches);
@@ -836,7 +859,7 @@ fn apply_one(
     ws: &mut impl Workspace,
     toolchain: &mut impl Toolchain,
     patch: &ScriptPatch,
-) -> Result<(), ImportError> {
+) -> Result<(), PatchError> {
     let source = patch.source.as_str();
 
     // The backup is written once, ever. This is what makes a re-run a *rebuild* rather than a
@@ -848,9 +871,7 @@ fn apply_one(
         && (patch.kind != PatchType::Replacement || ws.exists(Root::Files, source));
     if backup_needed {
         if !ws.exists(Root::Files, source) {
-            return Err(ImportError::MissingSource {
-                text: source.to_string(),
-            });
+            return Err(PatchError::MissingSource(source.to_string()));
         }
         ws.copy((Root::Files, source), (Root::Backups, source));
     }
@@ -863,14 +884,10 @@ fn apply_one(
             // absent: a diff whose source was never there, which the reference answers with
             // `NoSuchFileException` and which is reported, not papered over.
             let Some(original) = ws.read(Root::Backups, source) else {
-                return Err(ImportError::MissingSource {
-                    text: source.to_string(),
-                });
+                return Err(PatchError::MissingSource(source.to_string()));
             };
             let Some(body) = ws.read(Root::Patches, &patch.patch) else {
-                return Err(ImportError::MissingSource {
-                    text: patch.patch.clone(),
-                });
+                return Err(PatchError::MissingSource(patch.patch.clone()));
             };
             let rebuilt = toolchain.apply(Job::Diff {
                 source,
@@ -882,9 +899,7 @@ fn apply_one(
         }
         PatchType::Replacement => {
             let Some(body) = ws.read(Root::Patches, &patch.patch) else {
-                return Err(ImportError::MissingSource {
-                    text: patch.patch.clone(),
-                });
+                return Err(PatchError::MissingSource(patch.patch.clone()));
             };
             let rebuilt = toolchain.apply(Job::Replacement {
                 source,
@@ -909,13 +924,11 @@ fn patch_config(ws: &impl Workspace, patch: &ScriptPatch) -> Vec<u8> {
 }
 
 /// Revert one source file to its backup.
-fn restore_one(ws: &mut impl Workspace, entry: &ScriptPatch) -> Result<(), ImportError> {
+fn restore_one(ws: &mut impl Workspace, entry: &ScriptPatch) -> Result<(), PatchError> {
     let source = entry.source.as_str();
 
     if !ws.exists(Root::Backups, source) {
-        return Err(ImportError::MissingSource {
-            text: format!("backup of {source}"),
-        });
+        return Err(PatchError::MissingSource(format!("backup of {source}")));
     }
 
     ws.restore((Root::Backups, source), (Root::Files, source));

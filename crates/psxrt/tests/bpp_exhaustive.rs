@@ -22,7 +22,7 @@
 //! position from the texel width rather than from `index_shift` — so that a change on either
 //! side has to disagree with something written down.
 
-use psxrt::{Bpp, Texel};
+use psxrt::Bpp;
 
 /// Width, in texels, of the synthetic line the round-trip sweeps walk.
 const LINE_TEXELS: u32 = 4096;
@@ -237,15 +237,25 @@ fn the_four_depth_parameters_describe_one_packing() {
         );
 
         let Some((per_word, texel_bits)) = packed_layout(depth) else {
-            assert_eq!(divisor, 1, "{depth:?}: a direct depth is one texel per word");
+            assert_eq!(
+                divisor, 1,
+                "{depth:?}: a direct depth is one texel per word"
+            );
             assert_eq!(shift, 0, "{depth:?}: nothing to shift");
-            assert_eq!(index_mask, 0, "{depth:?}: the word is a colour, not an index");
+            assert_eq!(
+                index_mask, 0,
+                "{depth:?}: the word is a colour, not an index"
+            );
             assert!(!depth.is_paletted());
             continue;
         };
 
         assert_eq!(per_word, divisor, "{depth:?}");
-        assert_eq!(divisor * texel_bits, 16, "{depth:?}: a packed depth fills its word");
+        assert_eq!(
+            divisor * texel_bits,
+            16,
+            "{depth:?}: a packed depth fills its word"
+        );
         assert_eq!(
             index_mask,
             (1 << texel_bits) - 1,
@@ -329,35 +339,4 @@ fn depth_codes_round_trip_and_there_is_no_fifth_depth() {
     assert_eq!(Bpp::Bits15.width_divisor(), Bpp::Bits24.width_divisor());
     assert_eq!(Bpp::Bits15.index_mask(), Bpp::Bits24.index_mask());
     assert_ne!(Bpp::Bits15.code(), Bpp::Bits24.code());
-}
-
-/// A resolved texel keeps the word it came from, so two slots of one word stay distinguishable
-/// as values. Cheap to state, and it is the difference between a caller being able to see the
-/// other packed texel or not.
-#[test]
-fn a_paletted_texel_carries_its_word_alongside_its_index() {
-    let mut distinguishing = 0_usize;
-    for depth in [Bpp::Bits4, Bpp::Bits8] {
-        for word in all_words() {
-            let first = depth.index_in_word(word, 0).unwrap();
-            let second = depth.index_in_word(word, 1).unwrap();
-            let keep = Texel::Paletted { index: first, word };
-            match keep {
-                Texel::Paletted { index, word: carried } => {
-                    assert_eq!(index, first);
-                    assert_eq!(carried, word);
-                }
-                Texel::Direct(_) => unreachable!("both of these depths are paletted"),
-            }
-            if first != second {
-                distinguishing += 1;
-                assert_ne!(
-                    keep,
-                    Texel::Paletted { index: second, word },
-                    "{depth:?} in word {word:#06x}: the two slots differ but compare equal"
-                );
-            }
-        }
-    }
-    assert!(distinguishing > 60_000, "{distinguishing} words had differing slots");
 }

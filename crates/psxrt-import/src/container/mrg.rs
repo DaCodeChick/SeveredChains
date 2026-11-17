@@ -21,10 +21,12 @@
 //! # Two scales for the offset field
 //!
 //! The same word means two different things depending on which file the table came from. For most
-//! files it is a byte offset into the container. For the files named by [`SECTOR_ALIGNED_NAMES`] it
-//! is a *sector number*, and the byte offset is that value times 0x800. Nothing inside the table
-//! says which is in force — the scale is a property of the containing file, so choosing it is the
-//! caller's job, and getting it wrong shifts every entry in the table by a factor of 2048.
+//! files it is a byte offset into the container. For the seven sector-aligned containers this game
+//! ships, it is a *sector number*, and the byte offset is that value times 0x800. Nothing inside the
+//! table says which is in force: the scale is a property of the containing *file*, and a container
+//! has no name. Choosing it is therefore the caller's job — see [`OffsetScale`], which is taken as a
+//! parameter and not inferred, and which is why getting it wrong is at least a mistake somebody can
+//! see in a call site rather than a fact buried in a parser.
 //!
 //! # Two ways an entry can share
 //!
@@ -50,23 +52,12 @@ pub const MAGIC: u32 = 0x1a47_524d;
 /// Bytes in a sector, for the containers that count in sectors.
 pub const SECTOR_BYTES: usize = 0x800;
 
-/// The file names whose tables count offsets in sectors rather than bytes.
-///
-/// This is a closed, named set rather than a rule about names, and it has to stay that way: it is
-/// matched against a single path segment, not a full path, and it decides how every entry in the
-/// table is read. A file outside this set that happened to be sector-numbered would be read as
-/// byte-offsets, and every entry would land 2048 times too early.
-pub const SECTOR_ALIGNED_NAMES: [&str; 7] = [
-    "DRGN.BIN",
-    "DRGN0.BIN",
-    "DRGN1.BIN",
-    "DRGN21.BIN",
-    "DRGN22.BIN",
-    "DRGN23.BIN",
-    "DRGN24.BIN",
-];
-
 /// How to read the offset word of a table.
+///
+/// Chosen by the caller. A table carries no field saying which scale is in force, and the only
+/// thing that could imply one — the name of the file it came out of — is not a property of the
+/// format. `severedchains-game::container::mrg` holds the list of names that need
+/// [`OffsetScale::Sectors`] and hands the answer in here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum OffsetScale {
     /// The offset word is a byte offset.
@@ -74,21 +65,6 @@ pub enum OffsetScale {
     Bytes,
     /// The offset word is a sector number; multiply by [`SECTOR_BYTES`].
     Sectors,
-}
-
-impl OffsetScale {
-    /// The scale that applies to a container called `name`.
-    ///
-    /// `name` is one path segment with no separators — the equivalent of the reference matching
-    /// against a path *segment* rather than a full path.
-    #[must_use]
-    pub fn for_container(name: &str) -> Self {
-        if SECTOR_ALIGNED_NAMES.contains(&name) {
-            Self::Sectors
-        } else {
-            Self::Bytes
-        }
-    }
 }
 
 /// One row of the table.
@@ -144,18 +120,12 @@ impl Table {
     /// ever point at an entry that was resolved *before* it, and the answer for entry 40 can depend
     /// on entry 39. A single-pass reader gets this wrong, and gets it wrong quietly.
     pub fn parse(table: &[u8], scale: OffsetScale) -> Result<Self, ImportError> {
-        let magic = read_u32_le(table, 0).ok_or(ImportError::Truncated {
-            needed: 8,
-            available: table.len(),
-        })?;
+        let magic = read_u32_le(table, 0).ok_or(ImportError::Truncated(8, table.len()))?;
         if magic != MAGIC {
-            return Err(ImportError::UnrecognisedContainer { found: magic });
+            return Err(ImportError::UnrecognisedContainer(magic));
         }
 
-        let count = read_u32_le(table, 4).ok_or(ImportError::Truncated {
-            needed: 8,
-            available: table.len(),
-        })?;
+        let count = read_u32_le(table, 4).ok_or(ImportError::Truncated(8, table.len()))?;
 
         // Bounds before allocation. A four-byte count is attacker-shaped data, and both of these
         // checks have to happen first: the multiply so a huge count cannot wrap into a small
@@ -165,15 +135,9 @@ impl Table {
             .ok()
             .and_then(|count| count.checked_mul(8))
             .and_then(|bytes| bytes.checked_add(8))
-            .ok_or(ImportError::Truncated {
-                needed: usize::MAX,
-                available: table.len(),
-            })?;
+            .ok_or(ImportError::Truncated(usize::MAX, table.len()))?;
         if table.len() < table_bytes {
-            return Err(ImportError::Truncated {
-                needed: table_bytes,
-                available: table.len(),
-            });
+            return Err(ImportError::Truncated(table_bytes, table.len()));
         }
 
         let entries = count as usize;
@@ -197,11 +161,12 @@ impl Table {
             // start has been multiplied by 2048 while this word has not, so the comparison almost
             // always fails and duplicates go undetected.
             //
-            // That asymmetry is the reference's, and it is replicated rather than corrected. The
+            // That asymmetry is in the source this was read from, and it is replicated rather than
+            // corrected. The
             // effect is not a wrong answer — an undetected duplicate still extracts its own bytes,
             // which are the right bytes, just extracted twice — so "fixing" it would change the
             // shape of the index for sector-scaled containers with no evidence that the current
-            // shape is wrong. Correcting it needs a real DRGN container to compare against, which
+            // shape is wrong. Correcting it needs a real sector-aligned container to compare against, which
             // is a P-02 asset question and not a decision available here.
             let duplicate = (0..index).find(|&earlier| {
                 parsed[earlier].is_some_and(|earlier| earlier.start == widen(offset))
@@ -334,7 +299,7 @@ impl Table {
     /// A window of zero length yields no bytes without being checked, because nothing is read.
     pub fn payload_of<'a>(&self, store: &'a [u8], index: usize) -> Result<&'a [u8], ImportError> {
         let Some(entry) = self.entries.get(index) else {
-            return Err(ImportError::NoSuchEntry { index });
+            return Err(ImportError::NoSuchEntry(index));
         };
 
         // A sharing entry has no bytes of its own: it points at another entry's window, and the
@@ -447,7 +412,7 @@ mod tests {
     fn a_table_that_is_not_a_container_is_refused() {
         assert!(matches!(
             Table::parse(&0x1a45_5042u32.to_le_bytes(), OffsetScale::Bytes),
-            Err(ImportError::UnrecognisedContainer { found: 0x1a45_5042 })
+            Err(ImportError::UnrecognisedContainer(0x1a45_5042))
         ));
     }
 
@@ -459,10 +424,7 @@ mod tests {
         table.splice(4..8, 100u32.to_le_bytes());
         assert!(matches!(
             Table::parse(&table, OffsetScale::Bytes),
-            Err(ImportError::Truncated {
-                needed: 808,
-                available: 8
-            })
+            Err(ImportError::Truncated(808, 8))
         ));
 
         // The same trap at the other end of the range. On a 64-bit target `count * 8 + 8` still
@@ -472,7 +434,7 @@ mod tests {
         huge.splice(4..8, u32::MAX.to_le_bytes());
         assert!(matches!(
             Table::parse(&huge, OffsetScale::Bytes),
-            Err(ImportError::Truncated { .. })
+            Err(ImportError::Truncated(..))
         ));
     }
 
@@ -619,7 +581,7 @@ mod tests {
         let table = Table::parse(&table, OffsetScale::Bytes).unwrap();
         assert!(matches!(
             table.payload_of(&[0u8; 8], 1),
-            Err(ImportError::NoSuchEntry { index: 1 })
+            Err(ImportError::NoSuchEntry(1))
         ));
     }
 
@@ -637,26 +599,5 @@ mod tests {
         let table = Table::parse(&container(&[]), OffsetScale::Bytes).unwrap();
         assert!(table.is_empty());
         assert!(table.index_text().is_empty());
-    }
-
-    /// The name set is closed. A near miss reads at byte scale.
-    #[test]
-    fn only_the_named_containers_count_in_sectors() {
-        assert_eq!(
-            OffsetScale::for_container("DRGN0.BIN"),
-            OffsetScale::Sectors
-        );
-        assert_eq!(
-            OffsetScale::for_container("DRGN1.BIN"),
-            OffsetScale::Sectors
-        );
-        assert_eq!(
-            OffsetScale::for_container("DRGN24.BIN"),
-            OffsetScale::Sectors
-        );
-        // Not in the set: reads as byte offsets, correctly and deliberately.
-        assert_eq!(OffsetScale::for_container("DRGN2.BIN"), OffsetScale::Bytes);
-        assert_eq!(OffsetScale::for_container("DRGN0.BINX"), OffsetScale::Bytes);
-        assert_eq!(OffsetScale::for_container("SUBMAP"), OffsetScale::Bytes);
     }
 }

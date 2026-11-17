@@ -23,7 +23,12 @@ fn report(label: &str, mismatches: &[String]) {
     eprintln!(
         "{label}: {} mismatches, first up to 10:\n{}",
         mismatches.len(),
-        mismatches.iter().take(10).cloned().collect::<Vec<_>>().join("\n")
+        mismatches
+            .iter()
+            .take(10)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
     );
 }
 
@@ -58,7 +63,11 @@ fn lcg16_matches_oracle() {
         }
         let mut fields = line.split_whitespace();
         let state_before = hex(fields.next().expect("state field"));
-        let expected = fields.next().expect("output field").parse::<u64>().expect("u32");
+        let expected = fields
+            .next()
+            .expect("output field")
+            .parse::<u64>()
+            .expect("u32");
         let guarded = fields.next().expect("guard flag") == "1";
 
         if stream.current_state() != state_before {
@@ -82,7 +91,10 @@ fn lcg16_matches_oracle() {
         report("lcg16", &mismatches);
     }
     assert_eq!(rows, 12_000, "expected the whole fixture");
-    assert_eq!(guard_hits, 4, "the fixture injects the frame counter four times");
+    assert_eq!(
+        guard_hits, 4,
+        "the fixture injects the frame counter four times"
+    );
     assert!(mismatches.is_empty(), "lcg16 disagrees with the oracle");
 }
 
@@ -170,7 +182,10 @@ fn lcg15_matches_oracle() {
         if actual != expected {
             mismatches.push(format!("row {rows}: output {actual}, fixture {expected}"));
         }
-        assert!(actual <= 0x7fff, "row {rows}: a 15-bit draw exceeded 0x7fff");
+        assert!(
+            actual <= 0x7fff,
+            "row {rows}: a 15-bit draw exceeded 0x7fff"
+        );
         rows += 1;
     }
 
@@ -219,16 +234,25 @@ fn random48_matches_oracle() {
             }
             "f" => {
                 let actual = stream.next_f32();
-                (format!("{:x}", actual.to_bits()), (0.0..1.0).contains(&actual))
+                (
+                    format!("{:x}", actual.to_bits()),
+                    (0.0..1.0).contains(&actual),
+                )
             }
             "F" => {
                 let bound = f32::from_bits(hex(arg) as u32);
                 let actual = stream.next_f32_bounded(bound);
-                (format!("{:x}", actual.to_bits()), actual >= 0.0 && actual < bound)
+                (
+                    format!("{:x}", actual.to_bits()),
+                    actual >= 0.0 && actual < bound,
+                )
             }
             "d" => {
                 let actual = stream.next_f64();
-                (format!("{:x}", actual.to_bits()), (0.0..1.0).contains(&actual))
+                (
+                    format!("{:x}", actual.to_bits()),
+                    (0.0..1.0).contains(&actual),
+                )
             }
             other => panic!("row {rows}: unknown draw kind {other:?}"),
         };
@@ -237,7 +261,9 @@ fn random48_matches_oracle() {
             mismatches.push(format!("row {rows} ({kind}): out of range: {actual}"));
         }
         if actual != value {
-            mismatches.push(format!("row {rows} ({kind} {arg}): got {actual}, fixture {value}"));
+            mismatches.push(format!(
+                "row {rows} ({kind} {arg}): got {actual}, fixture {value}"
+            ));
         }
         rows += 1;
     }

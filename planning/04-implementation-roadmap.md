@@ -38,8 +38,8 @@ I0 ──→ I1a ──→ I1b ──→ I2 ──→ I3 ──┬──→ I4  
 5. **Module boundaries precede naming.** Before implementing a module: name its input, its output, whether it owns hardware state, whether it performs I/O, whether a test can construct it without a running engine.
 6. **A test is a conformance test only if it states the behavior it protects and the evidence it is derived from.** "Round-trip passed" is not evidence.
 7. **No compatibility policy is implemented as a production-only mechanism.** Each keeps an in-memory, no-engine test backdoor (planning/03 §8). A policy is a parameter with a named consumer, or it is not built.
-8. **No runtime crate depends on `crates/psxrt-compat`, and `psxrt-compat` is never on the boot path.** This is wider than "`psxrt` never depends on it": the engine, the SDK, the game crate and the executable are equally barred, because the failure mode being prevented is a game reading its own presentation policy out of an export toolchain. The only permitted edges are the two `dev-dependency` test hooks in `planning/01` §5, and they are recorded as exceptions where they are used.
-9. **Placement is decided by the TD-27 test, not by the word "compatibility".** Before a module is placed: *does this code produce, validate, or round-trip an original-format artifact?* Yes → `psxrt-compat`. It selects or performs how the game behaves → the subsystem that runs it, as a parameter. It records what the original did → documentation. None of these → it is not built. The five categories and their destinations are in `planning/03` §3.
+8. **No runtime crate depends on a toolchain or import crate, and neither is ever on the boot path.** This is wider than "`psxrt` never depends on it": the engine, the SDK, the game crate and the executable are equally barred, because the failure mode being prevented is a game reading its own presentation policy out of an export toolchain. `planning/01` §5's second `dev-dependency` hook — a runtime crate pulling in a writer across a crate boundary to synthesise a fixture — is **withdrawn 2026-11-16**: it bought nothing over a test-support module, and the workspace now has no cross-crate `dev-dependency` at all. The direction rule is checked from the dependency tables, including dev tables, not by name-matching.
+9. **Placement is decided by the TD-27 test, not by the word "compatibility".** Before a module is placed: *does this code produce, validate, or round-trip an original-format artifact, and does anything other than a test call it?* Reverse conversion **with a caller** → a toolchain crate, which then states its edges. Reverse conversion **with no caller** → a `tests/support/` oracle, which states what it refuses to import. Selecting or performing how the game behaves → the subsystem that runs it, as a parameter. Recording what the original did → documentation. None of these → it is not built. The five categories and their destinations are in `planning/03` §3, and that section's destinations were written against `psxrt-compat`; read them as "a toolchain crate", which since 2026-11-16 is either a real one or none.
 10. **Unresolved research items are not silent.** A module whose evidence is Blocked/Possible states that in its doc header and keeps its gate honest.
 
 ---
@@ -51,6 +51,8 @@ I0 ──→ I1a ──→ I1b ──→ I2 ──→ I3 ──┬──→ I4  
 RNG, fixed-point, bpp addressing, blend equations, timing. 72 tests, 0 warnings. Delivered in commit `93c6b1b`.
 
 Its crate layout is superseded by this revision, and so is every line of `crates/psxrt-compat/src/`. The audit and the per-file disposition are `planning/07`; the execution is the first half of I1a. Nothing from I0's `psxrt-compat` is carried forward — not the eight policy modules, not `Confidence`/`Layer`/`Availability`/`PolicyRecord`/`CompatPolicy`, not `LEDGER`, and not the crate's dependency on `psxrt`. What carries forward is the *finding*: that a divergence statement is worth keeping and a divergence statement compiled into a runtime crate is not.
+
+**Corrected 2026-11-16.** Two `psxrt` module names in the paragraph above changed with the restructure: `fixedpoint` is now `math::trig` and `bpp` is now `gpu::pixel`. `TrigonometryModel` — the one-armed enum that `planning/07` §4/F2 and §7/Q1 left open — was **deleted** in that restructure, on Q1's recommendation. The 456-entry sine-table facts stayed in the module's doc header, where a reader will find them, and did not stay as a type.
 
 ---
 
@@ -76,7 +78,7 @@ Its crate layout is superseded by this revision, and so is every line of `crates
 
 **Excluded.** Every content decoder (I1b). Runtime asset *loading* (I3 — `asset::service` consumes this crate's output). The script toolchain itself (I4). Any `unsafe`.
 
-**Scope — `psxrt-compat` is redirected in the same milestone.** Two things happen in I1a and they are one change, not two: the crate's eight policy modules and its `lib.rs` framework are deleted, and its first class-D module is added.
+**Scope — `psxrt-compat` is redirected in the same milestone, and eleven days later it is removed.** What follows is the I1a record, kept because it explains *why* the three writers existed. Read it together with the restructure note at the end of this section, which retires the crate and moves all three writers.
 
 | Module | Content | Why it is a `psxrt-compat` module |
 | --- | --- | --- |
@@ -85,7 +87,7 @@ Its crate layout is superseded by this revision, and so is every line of `crates
 
 **Two things this explicitly does not do.** It does not create a runtime policy layer, in `psxrt-compat` or anywhere else: `planning/01` §8's open question ("does I0's `TrigonometryModel` stay?") is still open, and a `psxrt::compat` module holding a cross-subsystem flag bitset was considered and **rejected** (`planning/03` §6) — a bitset of unrelated flags is the same design error as the retired `CompatPolicy`, moved one directory. And it does not move the `files/` *reader*: the reader stays in `psxrt-import::cache`, which reads a derived format; what `psxrt-compat::container` adds is the writer half, so that a decoder can be tested against a synthesised input.
 
-**Crate.** `psxrt-compat` continues to exist. Its `Cargo.toml` description changes — "Compatibility policy layer … as typed defaults with knobs" describes a crate that is being deleted, and a description is a promise to the next reader. Its `psxrt` dependency is dropped, and re-added per module only if a writer turns out to need a runtime model.
+**Crate.** `psxrt-compat` continues to exist — *as written on 2026-11-15*. Its `Cargo.toml` description changes — "Compatibility policy layer … as typed defaults with knobs" describes a crate that is being deleted, and a description is a promise to the next reader. Its `psxrt` dependency is dropped, and re-added per module only if a writer turns out to need a runtime model. It was never re-added, because no writer needed a runtime model, and the retained crate went out on 2026-11-16 with zero project dependencies and no non-test caller.
 
 **Module boundaries to fix before coding.** Both halves below travel to I1b with the modules they belong to, and are kept here so they are not lost. §A `Disk`, `Cache`, `Tree` all implement one `Space` trait but must stay separate types — an early design that made `Cache` a `BTreeMap`-backed `Space` and passed it to the pipeline made the pipeline untestable without real files. §B the streaming-decompression path (`Decompressor::new().read_to_end()`) and the two-buffer path (`decompress_slice`) are *different*: the streaming path reads 4 bytes beyond the end of the payload. That is legal inside an 0x800-byte-aligned buffer and illegal at an exact slice boundary; the reference had to special-case `disc:` reads. Whether the Rust reader replicates it or asserts it away is an I1b decision, recorded either way. What I1a settled is narrower: `container::bpe::decode` reads only inside the payload it is handed, so this is a property of the reader that will wrap it, not of the decoder.
 
@@ -94,8 +96,8 @@ Its crate layout is superseded by this revision, and so is every line of `crates
 **Dependencies.**
 - `thiserror` (workspace) — the domain error enum lives here, not in `psxrt` (TD-25).
 - `rayon` and `log` become I1b's, not I1a's. They were scoped in for the pipeline and the "skip and continue" sink; with the pipeline moved out, `psxrt-import` has exactly one runtime dependency, `thiserror`. **`rayon` not `rust-gpu`** still holds whenever it lands — the crate named in the earliest draft does not exist (TD-17).
-- No `opus`, no `wgpu`, no `cpal`, no `image`. No `psxrt` dependency is required by any I1a module, and `psxrt-compat` now has no project dependency at all.
-- `proptest` and a dev-only `psxrt-compat` path dependency are `psxrt-import`'s test inputs. The dev-only direction is deliberate and it is guarded rather than intended: package-level dependency cycles are rejected by cargo, and `tests/dependency_direction.rs` fails the build if any runtime crate names `psxrt_compat` in a code path.
+- No `opus`, no `wgpu`, no `cpal`, no `image`. No `psxrt` dependency is required by any I1a module.
+- `proptest` and a dev-only `psxrt-compat` path dependency are `psxrt-import`'s test inputs at I1a. **The dev-dependency is gone as of 2026-11-16**, and with it the last cross-crate test dependency in the workspace: the writers are `tests/support/` modules now, so `psxrt-import`'s only dependencies are `thiserror` and `proptest`. What the guard was for survives in a stronger form — `tests/architecture.rs` reads every crate's dependency *tables*, so a smuggled runtime edge in a `[dev-dependencies]` block fails the check, which the name-matching `dependency_direction.rs` it replaced would have waved through.
 
 **Verification.** As executed. Two bullets in the first draft were written for modules that are no longer in this milestone; they are restated as I1b obligations rather than deleted, so the requirement survives the cut.
 - Per-module unit tests, each naming its contract: the sector/byte split enumerated over the trailing-digit mask; the cache version + ordering rules; BPE dictionary construction and the two ways it blows up (a truncated payload, a circular dictionary).
@@ -105,7 +107,87 @@ Its crate layout is superseded by this revision, and so is every line of `crates
 - **The round-trip inventory is a test, not a convention** (`psxrt-import/tests/round_trip_inventory.rs`, 3 cases). It reads the module list below as data and fails if a listed pairing stops being driven by a test, or if a new `decode`/`parse`/`read` entry point appears with neither a pairing nor a declared reason. The first version of it passed with its own escape hatch deleted, because it matched on function name alone and `parse` occurs in an unrelated test file; that version is not a check and was replaced. The replacement was verified by deleting a declaration and by renaming a writer out of existence, and it failed both times.
 - Property tests, as built: BPE decode∘encode over arbitrary input, MRG table∘writer over arbitrary layouts, and cache index write∘parse plus a resolve-terminates property. All bounded at 512 cases with a fixed start seed (TD-19). A sweep, not coverage — the bound is stated because the alternative is a number that means nothing.
 
-**Gate.** `cargo test --workspace` green — **193 tests, 0 failures, 17 test-bearing targets (21 result lines), no doc tests.** The count, measured rather than tallied: `psxrt` 65 across 7 suites, untouched by this milestone; `psxrt-compat` 5 unit tests; `psxrt-import` 39 unit + 84 integration — BPE 18, MRG 13, cache 7, index 10, adversarial input 7, dependency-direction 5, patch orchestration 21, round-trip inventory 3. The I0 figure of 72 is not a predecessor of the 65: 7 of those 72 were `psxrt-compat/tests/policy_ledger.rs`, deleted together with the framework they tested, so nothing that was `psxrt` still is not. The patch orchestration is idempotent (re-run → no-op) and self-healing (tampered cache → re-apply), asserted against an in-memory workspace so it runs anywhere. Every decoder has either a paired encoder exercised against it or a doc header saying why none is planned, and that is now enforced rather than asserted. No content decoder exists yet. Production `crates/*/src` outside `#[cfg(test)]` carries no explicit panic construct (`unwrap()`, `expect()`, `panic!`, `unreachable!`, `todo!`, `unimplemented!`), one having been removed during the milestone; it still indexes, and the bound-checked cases are where the risk actually lives — `planning/05` §2.1 states the claim at that precision and records the three mutations used to prove the guard can fail. `cargo clippy --workspace --all-targets` — zero warnings. The file-ending audit passes over 134 text files. Byte-stability across thread counts is **not** part of this gate — it moved to I1b with the pipeline, and a milestone cannot be gated on a subsystem it does not contain. **Plus the two architecture gates:** no `crates/psxrt-compat/src/*.rs` file that existed at I0 survives into the I1a tree, and no crate whose purpose is runtime execution lists `psxrt-compat` as a dependency. The second is checked by a test, not by review (`planning/03` §6).
+**Gate.** `cargo test --workspace` green. *The counts below are the I1a gate as it was passed on 2026-11-16 morning; the restructure note below restates them for the tree as it now stands.* **193 tests, 0 failures, 17 test-bearing targets (21 result lines), no doc tests.** The count, measured rather than tallied: `psxrt` 65 across 7 suites, untouched by this milestone; `psxrt-compat` 5 unit tests; `psxrt-import` 39 unit + 84 integration — BPE 18, MRG 13, cache 7, index 10, adversarial input 7, dependency-direction 5, patch orchestration 21, round-trip inventory 3. The I0 figure of 72 is not a predecessor of the 65: 7 of those 72 were `psxrt-compat/tests/policy_ledger.rs`, deleted together with the framework they tested, so nothing that was `psxrt` still is not. The patch orchestration is idempotent (re-run → no-op) and self-healing (tampered cache → re-apply), asserted against an in-memory workspace so it runs anywhere. Every decoder has either a paired encoder exercised against it or a doc header saying why none is planned, and that is now enforced rather than asserted. No content decoder exists yet. Production `crates/*/src` outside `#[cfg(test)]` carries no explicit panic construct (`unwrap()`, `expect()`, `panic!`, `unreachable!`, `todo!`, `unimplemented!`), one having been removed during the milestone; it still indexes, and the bound-checked cases are where the risk actually lives — `planning/05` §2.1 states the claim at that precision and records the three mutations used to prove the guard can fail. `cargo clippy --workspace --all-targets` — zero warnings. The file-ending audit passes over 134 text files. Byte-stability across thread counts is **not** part of this gate — it moved to I1b with the pipeline, and a milestone cannot be gated on a subsystem it does not contain. **Plus the two architecture gates:** no `crates/psxrt-compat/src/*.rs` file that existed at I0 survives into the I1a tree, and no crate whose purpose is runtime execution lists `psxrt-compat` as a dependency. The second is checked by a test, not by review (`planning/03` §6).
+
+---
+
+### Restructure — after I1a, same date · **executed 2026-11-16**
+
+Not a milestone. A placement pass over what I1a left, driven by the question I1a's own scope section
+raised and did not answer: whether the container writers were a product surface or test-only. They
+are test-only — no tool, no engine path and no planned command calls any of them — and that answer
+removes the reason the crate holding them exists.
+
+**What changed.**
+
+| From | To | Why |
+| --- | --- | --- |
+| `psxrt-compat/src/container/bpe.rs`, `container/mrg.rs` | `psxrt-import/tests/support/bpe_writer.rs`, `mrg_writer.rs` | test oracles, called only from `tests/`. A test helper does not need a package, a manifest or a description that promises a product surface |
+| `psxrt-compat/src/container/index.rs` | `severedchains-game/tests/support/index_writer.rs` | as above, plus: the cache index is one game's toolchain convention, not a PSX format |
+| `psxrt-import/src/cache.rs` | `severedchains-game/src/tooling/cache.rs` | the `files/` index is a derived sidecar that records which mod changed a file. Reading it is not decoding a PlayStation asset |
+| `psxrt-import/src/patch.rs` | `severedchains-game/src/tooling/patch.rs` | a game's script-patch workflow. It also mutates, which is what makes leaving it in a read-only crate actively misleading |
+| `SECTOR_ALIGNED_NAMES` inside `psxrt_import::container::mrg::for_container` | `OffsetScale`, a parameter the caller supplies; the seven names live in `severedchains-game::container::mrg` | a filename list baked into a parser is an import crate deciding game questions. `SAGA.ENV` went with the list and is marked as the one entry with no evidence behind it |
+| `psxrt/src/fixedpoint.rs` | `psxrt/src/math/trig.rs`, `TrigonometryModel` deleted | the module held one floating-point trig chain and no fixed-point type; the enum had no producer, no matcher and no test |
+| `psxrt/src/bpp.rs` | `psxrt/src/gpu/pixel.rs`, `Texel` deleted | per-pixel addressing is runtime sampling, not import. `Texel` re-expressed two existing calls and had no call site |
+| `psxrt-import/tests/dependency_direction.rs` | `psxrt-import/tests/architecture.rs`, `severedchains-game/tests/architecture.rs` | one guard for the invariant instead of one guard for a crate name |
+
+**What did not change.** No behaviour, no format, and no verification standard moved. `cache` and
+`patch` were already tested against an oracle written from the format description rather than from
+the parser; that arrangement moved with them, and `severedchains-game/tests/architecture.rs` now
+enforces it. The adversarial pointer-walk property went to the game crate with the reader it
+protects, and its oracle was rebuilt as a visited-set walk — a different mechanism from the reader's
+bounded iteration count, which is the only reason comparing the two means anything.
+
+**Test count 193 → 211, reconciled.** The baseline was re-measured in a clean worktree at
+`e7d0e32` rather than taken from this document's earlier figure, and every added and removed test
+is accounted for. Nothing that verified something is gone: both deletions are named, and both
+removed a check whose subject could not have been wrong in a way any caller could observe.
+
+Per-crate: `psxrt` 65 → 64, `psxrt-compat` 5 → crate deleted, `psxrt-import` 123 → 87,
+`severedchains-game` 0 → 60. Net +18. Where each one went:
+
+| Δ | Where |
+| --- | --- |
+| −1 | `psxrt/tests/bpp_exhaustive.rs` 9 → 8. The `Texel` agreement case, deleted with the enum: a wrapper re-expressing `index_in_word` + `bpp`, with no call site anywhere in the workspace |
+| −5, +5 | The five `psxrt-compat` writer unit tests were not deleted. They are `tests/support/` module tests now and still run, compiled into *both* `bpe_round_trip` and `mrg_round_trip` as `support::bpe_writer::tests::…` / `support::mrg_writer::tests::…` — so they are counted twice in the totals below, which is why the round-trip files appear to gain cases they did not previously have |
+| −13 | `cache` (9) and `patch` (4) lib unit tests, moved to `severedchains-game` with their subjects, unchanged |
+| −1, +1 | `container::mrg::tests::only_the_named_containers_count_in_sectors` moved to the game crate, where the names now live, and is joined there by a new `a_path_is_not_a_segment` |
+| −1 | `mrg_round_trip::only_the_named_containers_are_sector_scaled`. This is the check dropped rather than moved. It compared the parser against a filename list; the behaviour it partly covered is checked better from both ends now — `a_sector_scaled_table_is_read_at_the_right_scale` in the same file drives *both* scales and asserts they disagree, and `offset_scale` has its own name-set test in the game crate |
+| −5, +14 | `dependency_direction.rs` (5 cases) replaced by `architecture.rs` in `psxrt-import` (8) and `severedchains-game` (6). Nine of the fourteen are rules; five are tests *of the manifest parser those rules read*, which is where the extra care went and why — see `planning/05` §2 |
+| 0 | `round_trip_inventory.rs` — same three cases, rewritten to look in `tests/support/` |
+| −38, +38 | `cache_round_trip` (7), `index_round_trip` (10), `patch_orchestration` (21) moved to `severedchains-game` with the code they test |
+| +4 | `adversarial_input.rs` 7 → 11: new input-shape cases |
+| +1 | `severedchains-game/tests/adversarial_index.rs`: new property over arbitrary pointer graphs, 4 096 cases, oracle independent of the reader's mechanism |
+
+**The five detector tests exist because a guard that was never seen to fail is a guess.** The
+first version of the two `architecture.rs` files read dependency tables by matching table *keys*.
+It passed the whole suite, and it was blind: a dependency written as
+`[dependencies.reader] package = "psxrt-import"` names the crate in a *value*, and neither the
+`psxrt → psxrt-import` rule nor the `psxrt-import → severedchains-game` rule would have fired on
+it. Probing with the ordinary one-line form did fire both, so the bug was invisible unless someone
+wrote the rarer spelling — which is the spelling you reach for precisely when you want a dependency
+to read as something else. The parser now gathers crate names from a table header, from a key, and
+from a quoted value, and the five tests assert both halves: that all six spellings of a forbidden
+edge are caught, and that the four shapes which are *not* edges — a dev-only dependency, a
+`[features]` list, the package's own `name`, a different crate — are not flagged. A fence that
+also cries wolf gets an `#[allow]` within a week.
+
+One consequence worth recording: the `psxrt-import → severedchains-game` edge cannot be tested
+end to end at all, because `severedchains-game` already depends on `psxrt-import`, so adding it
+would be a package cycle and cargo refuses to build it. The rule is therefore defence against a
+future graph in which that dependency has been cut, and the detector tests are the only way to
+know it still works.
+
+**Gate, restated.** `cargo test --workspace` — 211 tests, 0 failures, over 23 test-result lines
+(20 compiled targets plus 3 doc-test targets; 19 of the 23 carry tests — `psxrt`'s lib target and
+all three doc-test targets carry none). `cargo clippy --workspace --all-targets --all-features` —
+zero warnings. File-ending audit clean over 142 text files. No crate in the workspace declares a
+cross-crate `dev-dependency`.
+
+**What this deliberately did not do.** No I1b work: no `space.rs`, no `container::iso`, no
+`pipeline`, no content decoder, no runtime, no script compiler, no hardware model. No placeholder
+crates: `severedchains` and `severedchains-sdk` stay uncreated, which is why the I1b reverse-conversion
+modules above are marked *unplaced* rather than assigned to a crate that does not exist.
 
 **Risks.** The in-place reader (no whole image materialized) is a genuinely new surface, and it is now an I1b risk — which is the honest form of it, because at I1a there was no oracle for it either way. Two things got harder with the cut, and that cost should be read plainly: the file-space identity model (risk 1) and the 4 GiB / 16 MiB boundary behaviour (risk 7) now land *after* the content decoders that consume their output, so a wrong identity model will be caught by a decoder test rather than by an infrastructure test.
 

@@ -85,10 +85,22 @@ Current `psxrt-compat` → destination, classified against the five kinds. This 
 | **A** | runtime mechanism — an ordering, a precision, a clamp, a decode, an envelope, a data structure with behaviour | `psxrt`, or the game subsystem that executes it |
 | **B** | configuration / policy selector — the enum or flag that *chooses* between mechanisms | the subsystem that consumes it, as an explicit parameter; the *choice of value* is engine configuration (L2) |
 | **C** | research evidence — the record, the confidence, the divergence note, the register pointer | documentation: the module doc header, `DIVERGENCE.md`, the `planning/06` row |
-| **D** | original-format encoding — produces an original-format artifact | `psxrt-compat` |
+| **D** | original-format encoding — produces an original-format artifact | see the correction below. Not automatically a toolchain crate, and the one that existed is retired |
 | **E** | obsolete infrastructure | retired |
 
 **Result, stated before the table so the table cannot be misread: no module is class D, and therefore no module stays in `psxrt-compat`.** Eight modules, none of which encodes, writes, validates, or round-trips an original-format artifact. Six contain a selector enum, a layout fact, and a record; two (`blend_select.rs`, the `lib.rs` framework) contain only metadata. The toolchain modules that *do* qualify as class D — TIM emission, CTMD re-encoding, the XA sector writer, disc reinjection — are unbuilt and are what the crate is for (`planning/01` §4, TD-04).
+
+**Corrected 2026-11-16, and the correction lands on this section's own reasoning.** The crate was
+deleted eleven days after this section was written. The reason is the class-D test read strictly: a
+module is class D only if *anything other than a round-trip test* consumes it, and the placement
+this section gave it — one crate for everything in class D — was too coarse, because it let a test
+helper and a product surface share a destination and a name. By the strict reading, no module in the
+workspace is class D. `container::bpe` and `container::mrg`, the two class-D modules I1a built, have
+exactly one caller each: a round trip. They are test oracles, and they are now `tests/support/`
+modules; the cache-index writer took the same route into `severedchains-game`. The four unbuilt
+modules named above stay **unplaced** until the milestone that builds one answers whether a modder or
+an export command will call it — which is the question this section's table assumed it could answer
+in advance, once, for a whole crate.
 
 | Current | What it actually contains | Class | Destination | Why |
 | --- | --- | --- | --- | --- |
@@ -157,7 +169,7 @@ This is the explicit answer to "the compatibility layer shall be a non-public co
 
 Four steps, ordered by when a consumer exists. Nothing here is a move of working code into a better directory; five of the nine files are deleted and their content is re-expressed where a reader will find it.
 
-1. **I1a — `psxrt-compat` becomes a toolchain crate, and the policy scaffold comes out in the same milestone.** `psxrt-compat::container` (the MRG/BPE writers) is added; the eight policy modules and the `lib.rs` framework are deleted; the crate's `Cargo.toml` description, which currently advertises "Compatibility policy layer … as typed defaults with knobs", is rewritten to say what the crate does; `psxrt-compat`'s dependency on `psxrt` is dropped, and re-added per module only if an encoder turns out to need a runtime model. Doing the deletion and the first real module in one step is the point: a crate that contains both a toolchain module and a retired policy scaffold is a crate whose next contributor cannot tell which one it is. `psxrt`'s three doc comments (§5, fact 2) are corrected here.
+1. **I1a — `psxrt-compat` becomes a toolchain crate, and the policy scaffold comes out in the same milestone.** *(Done 2026-11-16; the crate then went out too — `planning/04` §2.)* `psxrt-compat::container` (the MRG/BPE writers) is added; the eight policy modules and the `lib.rs` framework are deleted; the crate's `Cargo.toml` description, which currently advertises "Compatibility policy layer … as typed defaults with knobs", is rewritten to say what the crate does; `psxrt-compat`'s dependency on `psxrt` is dropped, and re-added per module only if an encoder turns out to need a runtime model. Doing the deletion and the first real module in one step is the point: a crate that contains both a toolchain module and a retired policy scaffold is a crate whose next contributor cannot tell which one it is. `psxrt`'s three doc comments (§5, fact 2) are corrected here.
 2. **I1b — the class-D modules land.** `psxrt-compat::texture` (TIM emission, including the RGBA8 → 2-bit encodings), `psxrt-compat::model` (TMD / CTMD re-encoding), `psxrt-compat::audio` (XA encode, the sector writer, SSHD / SSSQ writers) are added beside `container`, and the two §5-class-D test hooks (`psxrt-compat` testing against `psxrt-import`'s decoders; `psxrt-import` synthesising fixtures) are wired as `dev-dependencies`. The six XA constants land in `psxrt::spu::xa_adpcm` **once**, read by both directions.
 3. **I3 — the class-A representations land in `psxrt` with the modern default already in place.** `gpu::clut`, `gpu::pixel`, `spu::xa_adpcm`, `gpu` (the command vocabulary and the VRAM store), `audio::{device, transport}`. Where a class-A fact had a home in the deleted scaffold (the clamp, the extents, the flag-word decoder) it is written here from `research/cross/02` and the research doc, not copied from a file whose tests only proved the file agreed with itself. `policy_ledger.rs` is replaced here by the per-subsystem matrix fixtures plus the dependency-direction guard.
 4. **I5a — the class-A *policies* activate against their model**, each as a parameter with a named consumer and its matrix fixture (planning/05 §5.3): same-z ordering, GTE precision with the mandatory integer camera program, the sweep envelope, voice capacity, the predictor reset, the blend model. A policy that never acquires a consumer is closed as class **E**, not left as a declaration.

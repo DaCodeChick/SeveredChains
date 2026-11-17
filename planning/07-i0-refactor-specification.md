@@ -14,6 +14,19 @@ Two rules govern everything below.
 
 Together these mean the answer to "when does the I0 code get reorganised?" is: **at I1a, I1b, I3, I5a and I5b, in pieces** — not in a separate cleanup milestone, and not before the code that needs the new shape exists. The one exception runs the other way: the `psxrt-compat` policy scaffold is dismantled at **I1a**, together with the crate's first real module, because leaving a retired scaffold beside a new toolchain module makes the crate's purpose unreadable to whoever adds the third module.
 
+**Update, 2026-11-16 — read every `psxrt-compat` destination below as void.** `psxrt-compat` was
+dismantled at I1a as this document recommended, then deleted nine days later, and the reason is R3
+applied to the crate itself: *a relocation is decided by what the code is, not by which crate its
+name suggests.* The three writers that survived I1a are test oracles with no other caller, so under
+R3 they are not a toolchain product surface, and they now live as `tests/support/` modules —
+`bpe_writer` and `mrg_writer` under `psxrt-import`, `index_writer` under `severedchains-game`, which
+also took the cache reader and the patch orchestrator. The four unbuilt modules this document left
+provisional (`texture`, `model`, `audio`, `disc`) are recorded as **unplaced**, which is R3 working
+as intended rather than a deferral: none has a caller, and `disc` is still blocked on P-02/R-01.
+R1 also still holds — nothing moved because a name looked wrong, only because a consumer or its
+absence settled the question. Two destination paths in the table below were renamed the same day:
+`psxrt/src/gpu/pixel.rs` and `psxrt/src/math/trig.rs` are now real paths rather than proposals.
+
 ## 2. The I0 inventory, as committed
 
 Two crates, both real, no placeholder crates, no placeholders for future crates.
@@ -184,7 +197,10 @@ Class column per `planning/03` §3: **A** runtime mechanism, **B** selector/para
 
 Test files move with their subject, unchanged: `golden_trig.rs` with F1, `bpp_exhaustive.rs` with F4, `blend_exhaustive.rs` with F5, `timing_matrix.rs` with the clock repath, `properties.rs` splits along the same seams, `fixtures.rs` stays where the manifest is. `policy_ledger.rs` is **replaced** at I1b, not rewritten: by the matrix fixtures, and by the dependency-direction guard described in F10 and `planning/03` §6.
 
-**The dependency consequence.** `psxrt-compat` declares `psxrt` as a dependency, and exactly one file uses it: `rate_00.rs`, which imports `psxrt::BlendMode` in order to *decode a flag word into* that type. Once F5 moves the three decoders, nothing in `psxrt-compat` references `psxrt` at all — so the `Cargo.toml` edge is deleted at **I1a**, and the crate starts its toolchain life with zero project dependencies. If `psxrt-compat::texture` or `::audio` later needs `psxrt::gpu::pixel` or `psxrt::spu::xa_adpcm` in order to emit bytes correctly, the edge comes back, and it comes back as `psxrt-compat → psxrt`, which is the direction the architecture wants (planning/01 §8 question 2). Either way the crate never sits *underneath* a runtime crate — and that is the property the deleted scaffold was quietly moving it toward.
+**The dependency consequence** (true as written on 2026-11-15; **moot since** — the crate was
+deleted with its `psxrt` edge still absent, so no module ever turned out to need a runtime model,
+which is what §6 rule 2 was written to find out). `psxrt-compat` declares `psxrt` as a dependency,
+and exactly one file uses it: `rate_00.rs`, which imports `psxrt::BlendMode` in order to *decode a flag word into* that type. Once F5 moves the three decoders, nothing in `psxrt-compat` references `psxrt` at all — so the `Cargo.toml` edge is deleted at **I1a**, and the crate starts its toolchain life with zero project dependencies. If `psxrt-compat::texture` or `::audio` later needs `psxrt::gpu::pixel` or `psxrt::spu::xa_adpcm` in order to emit bytes correctly, the edge comes back, and it comes back as `psxrt-compat → psxrt`, which is the direction the architecture wants (planning/01 §8 question 2). Either way the crate never sits *underneath* a runtime crate — and that is the property the deleted scaffold was quietly moving it toward.
 
 **The rule that follows, for any later module in this crate:** do not let a toolchain crate depend on a runtime crate in order to reuse a type, and do not let a runtime crate depend on a toolchain crate in order to read a choice. Where both sides genuinely need one enum, that enum is a representation type and lives in `psxrt`, and the toolchain side names an *encoding of it*. `rate_00` is the case that proves the rule: the shared type existed only because a decoder had been parked in the wrong crate, and once the decoder moved, the dependency had nothing to justify it.
 
@@ -207,6 +223,14 @@ The baseline is **72 tests / 8 binaries / 0 clippy warnings / 7 fixtures byte-id
 Three here, plus a fourth in §8. None is answerable from the repository alone.
 
 **Q1 — `TrigonometryModel`: keep or delete?** (§4/F2). Recommendation: **delete at the I5a repath**, keep its doc comment as a header note on `math::trig`, and let the table work introduce its own seam when there are two arms to choose between. The alternative is defensible only if the owner wants the +512 / `0x3ff` facts to stay in code rather than in `research/psx/02-gte.md`.
+
+> **Closed 2026-11-16, on the recommendation, and earlier than recommended.** Deleted in the same
+> restructure that renamed the module. The +512 and `0x3ff & mask` facts stayed in the file as a doc
+> header, which is the half of the recommendation that mattered: the enum had no producer, no matcher
+> and no test, and a one-armed selector cannot be tested for choosing. `crates/psxrt/tests/properties.rs`
+> lost its `texel_pair_always_agrees` case with the `Texel` enum, which was the same failure one
+> module over — a convenience wrapper with no call site, added because the reference had a `getTexel`
+> rather than because a caller needed one.
 
 **Q2 — do the per-subsystem matrix fixtures hold one fixture per checklist *row* or one per *parameter*?** `research/cross/02` holds 135 rows (43 carried from M4-05 + 92 `CL-*`), and 16 of them are cited by the I0 ledger records (disposed in §4 and `planning/03` §5). The revision classifies the rows; it does not delete any, and `planning/06` still maps all 135. The open question is only the fixture shape at I5a/I5b. Recommendation: **one fixture per matrix, which is usually per parameter but not always** — the blend matrix and the voice-allocation matrix are the two that are genuinely one-per-mechanism, and three of the ten CDs share a mechanism. The row→fixture mapping stays in `planning/06`.
 

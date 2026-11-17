@@ -1,38 +1,52 @@
-//! The `files/` cache index, checked across the crate boundary.
+//! The `files/` cache index, checked across a written boundary.
 //!
-//! Every test here writes with `psxrt_compat::container::index` and reads with
-//! `psxrt_import::cache::Index`. That crossing is the reason the writer exists: inside
-//! `psxrt-import`, `Index::parse` and `Index::text` are two views of one understanding, and a
-//! round trip between them can only ever confirm that the author meant the same thing twice. A
-//! second, independently written writer that lands on the same bytes is a check that the
-//! understanding matches the format.
+//! Every test here writes with `tests/support/index_writer.rs` and reads with
+//! `tooling::cache::Index`. That separation is the reason the writer exists: inside `tooling::cache`
+//! `Index::parse` and `Index::text` are two views of one understanding, and a round trip between
+//! them can only ever confirm that the author meant the same thing twice. A second writer, written
+//! from the layout documented in `psxrt-import/src/container/mrg.rs` rather than from
+//! `Index::parse`'s control flow, is the check that the understanding matches the format.
+//! `tests/architecture.rs` is what keeps that independence from being a claim: it fails if the
+//! support module starts importing the crate whose behaviour it is supposed to arbitrate.
 //!
 //! The three shapes below are the whole vocabulary: an entry that owns its bytes, an entry that
 //! points at somebody else's, and a line that says nothing owns them. Everything a real MRG
 //! directory produces is some arrangement of the first two.
 
 use proptest::prelude::*;
-use psxrt_compat::container::index::{self, Entry, Owner};
-use psxrt_import::cache::{self, Index};
+
+mod support;
+
+use severedchains_game::tooling::cache::Index;
+use support::index_writer::{self, Entry, Owner};
 
 /// The cache version is compared, not parsed: any other value means the whole tree is discarded.
-/// Two crates holding that constant need a reason to hold the same one.
+/// Two places holding that constant need a reason to hold the same one.
 #[test]
-fn the_two_crates_agree_on_what_a_current_cache_is() {
+fn the_writer_and_the_reader_agree_on_what_a_current_cache_is() {
     assert_eq!(
-        index::VERSION,
-        cache::VERSION,
+        index_writer::VERSION,
+        severedchains_game::tooling::cache::VERSION,
         "a writer emitting one version while the reader rejects anything but another is a cache \
          that is thrown away on every launch"
     );
-    assert_eq!(index::INDEX_FILE, cache::INDEX_FILE);
-    assert_eq!(index::VERSION_FILE, cache::VERSION_FILE);
-    assert_eq!(index::version_file(), cache::VERSION);
+    assert_eq!(
+        index_writer::INDEX_FILE,
+        severedchains_game::tooling::cache::INDEX_FILE
+    );
+    assert_eq!(
+        index_writer::VERSION_FILE,
+        severedchains_game::tooling::cache::VERSION_FILE
+    );
+    assert_eq!(
+        index_writer::version_file(),
+        severedchains_game::tooling::cache::VERSION
+    );
 }
 
 #[test]
 fn a_plain_directory_writes_and_reads_as_twelve_bytes_of_nobody_owns_anything() {
-    let written = index::write(&[Entry::own(12), Entry::own(12), Entry::own(12)]);
+    let written = index_writer::write(&[Entry::own(12), Entry::own(12), Entry::own(12)]);
 
     assert_eq!(written, "0=0;12\n1=1;12\n2=2;12\n");
 
@@ -58,7 +72,7 @@ fn a_plain_directory_writes_and_reads_as_twelve_bytes_of_nobody_owns_anything() 
 #[test]
 fn a_pointer_written_here_resolves_there() {
     // Slot 1 reads slot 0's bytes. `Unpacker.java:615` writes exactly this when `entry.virtual()`.
-    let written = index::write(&[Entry::own(8), Entry::pointer(0)]);
+    let written = index_writer::write(&[Entry::own(8), Entry::pointer(0)]);
     assert_eq!(written, "0=0;8\n1=0;0\n");
 
     let read = Index::parse(&written).expect("parses");
@@ -78,7 +92,7 @@ fn a_pointer_written_here_resolves_there() {
 /// forbids `1` pointing at `2` which points at `0`, and `Loader` walks until an entry names itself.
 #[test]
 fn a_two_link_chain_is_written_here_and_walked_there() {
-    let written = index::write(&[Entry::own(8), Entry::pointer(2), Entry::pointer(0)]);
+    let written = index_writer::write(&[Entry::own(8), Entry::pointer(2), Entry::pointer(0)]);
 
     let read = Index::parse(&written).expect("parses");
     assert_eq!(
@@ -94,7 +108,7 @@ fn a_two_link_chain_is_written_here_and_walked_there() {
 fn a_cycle_is_written_here_and_refused_there() {
     // Slot 0 names slot 1 and slot 1 names slot 0. Nothing owns anything; the walk would visit
     // both forever.
-    let written = index::write(&[Entry::pointer(1), Entry::pointer(0)]);
+    let written = index_writer::write(&[Entry::pointer(1), Entry::pointer(0)]);
     assert_eq!(written, "0=1;0\n1=0;0\n");
 
     let read =
@@ -117,7 +131,7 @@ fn a_cycle_is_written_here_and_refused_there() {
 /// and an absent line — land in the same place.
 #[test]
 fn the_blank_form_the_reader_tolerates_has_never_been_emitted() {
-    let written = index::write(&[
+    let written = index_writer::write(&[
         Entry::own(4),
         Entry {
             owner: Owner::Nothing,
@@ -154,7 +168,7 @@ fn a_malformed_line_is_reported_with_its_line_number() {
 /// it needs a test rather than a paragraph.
 #[test]
 fn a_hole_is_spelled_differently_but_means_the_same_thing() {
-    let dense = index::write(&[Entry::own(4)]);
+    let dense = index_writer::write(&[Entry::own(4)]);
     assert_eq!(
         dense,
         Index::parse(&dense).unwrap().text(),
@@ -208,7 +222,7 @@ proptest! {
             })
             .collect();
 
-        let written = index::write(&entries);
+        let written = index_writer::write(&entries);
         let read = Index::parse(&written)
             .unwrap_or_else(|error| panic!("refused to read what the writer emitted: {error}\n{written}"));
 

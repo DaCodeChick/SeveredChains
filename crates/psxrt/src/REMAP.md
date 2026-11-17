@@ -8,7 +8,7 @@ anywhere in this crate is listed here with the Rust item that now does the work 
 document that established it.
 
 Scope note: this is one map for the whole crate rather than one per module. The reason is size —
-ten entries across three modules — not a preference for centralisation. When a module grows its own
+ten entries across three module paths — not a preference for centralisation. When a module grows its own
 map, the rule stays the same: an identifier in a comment without a line here is a gate failure, not
 a documentation gap.
 
@@ -16,15 +16,15 @@ Reference paths are relative to `~/Documents/GitHub/Severed-Chains` at the pinne
 `71ce130364ed00431d420891370d5314a4e3d4c4`. Reference names are kept here in their original
 spelling on purpose: they are what a reader greps for.
 
-## Fixed-point trig (`fixedpoint`)
+## Trigonometry (`math::trig`)
 
 | Original | Where it appears in the reference | Rust item that carries the behaviour | Established in |
 |---|---|---|---|
-| `rsin(int theta)` | `src/main/java/legend/game/Scus94491BpeSegment.java:250` | `fixedpoint::rsin` — kept because it names the operation (fixed-point sine, amplitude 4096) rather than an address or an offset, and because keeping it leaves the reference's call sites greppable from the Rust side. Whether the name is the game's own or a decompiler label is not established here | `research/psx/02-gte.md`, `research/scripting/01-fate-language.md` (the `SIN_12` op body) |
-| `rcos(int theta)` | `src/main/java/legend/game/Scus94491BpeSegment.java:256` | `fixedpoint::rcos` — same reasoning | as above |
-| `psxDegToRad(int/float)` | `src/main/java/legend/core/MathHelper.java:190,194` | `fixedpoint::psx_deg_to_rad`, with the constant `PSX_DEG_TO_RAD` pinned at its float bit pattern | `research/psx/02-gte.md` |
-| `MathHelper.sin` / `MathHelper.cos` | `src/main/java/legend/core/MathHelper.java` | `fixedpoint::sine` / `fixedpoint::cosine` (crate-private), plus `scale_to_fixed` for the `(short)` cast — the float stage the reference evaluates at single precision before narrowing | `research/psx/02-gte.md` |
-| `MathHelper.makeTpage(...)` and `Graphics.GetTPage(...)` | `src/main/java/legend/core/MathHelper.java` (used from `QuadBuilder`/`PolyBuilder`/`McqBuilder`) and the `GetTPage` port | **no Rust item.** `crates/psxrt/src/bpp.rs` documents that the reference carries two page-word encoders and that they disagree (the second page-height bit lands on the translucency bit in one and on the depth code in the other), and stops there: the crate models the depth field, not the page word. The packing itself is I5's, with the ordering table it feeds | `research/psx/01-gpu-vram-ordering.md`, `research/rendering/02-tmd-pipeline.md` |
+| `rsin(int theta)` | `src/main/java/legend/game/Scus94491BpeSegment.java:250` | `math::trig::rsin` — kept because it names the operation (fixed-point sine, amplitude 4096) rather than an address or an offset, and because keeping it leaves the reference's call sites greppable from the Rust side. Whether the name is the game's own or a decompiler label is not established here | `research/psx/02-gte.md`, `research/scripting/01-fate-language.md` (the `SIN_12` op body) |
+| `rcos(int theta)` | `src/main/java/legend/game/Scus94491BpeSegment.java:256` | `math::trig::rcos` — same reasoning | as above |
+| `psxDegToRad(int/float)` | `src/main/java/legend/core/MathHelper.java:190,194` | `math::trig::psx_deg_to_rad`, with the constant `PSX_DEG_TO_RAD` pinned at its float bit pattern | `research/psx/02-gte.md` |
+| `MathHelper.sin` / `MathHelper.cos` | `src/main/java/legend/core/MathHelper.java` | `math::trig::sine` / `math::trig::cosine` (crate-private), plus `scale_to_fixed` for the `(short)` cast — the float stage the reference evaluates at single precision before narrowing | `research/psx/02-gte.md` |
+| `MathHelper.makeTpage(...)` and `Graphics.GetTPage(...)` | `src/main/java/legend/core/MathHelper.java` (used from `QuadBuilder`/`PolyBuilder`/`McqBuilder`) and the `GetTPage` port | **no Rust item.** `crates/psxrt/src/gpu/pixel.rs` documents that the reference carries two page-word encoders and that they disagree (the second page-height bit lands on the translucency bit in one and on the depth code in the other), and stops there: the crate models the depth field, not the page word. The packing itself is I5's, with the ordering table it feeds | `research/psx/01-gpu-vram-ordering.md`, `research/rendering/02-tmd-pipeline.md` |
 
 ## Random streams (`rng`)
 
@@ -34,12 +34,12 @@ spelling on purpose: they are what a reader greps for.
 | `Random.mix32(long z)` | `src/main/java/legend/core/Random.java:8` | **not ported as a name and not reachable as behaviour**: it is a `nextInt()` override that no consumer calls. `rng::random48::Random48::next_u32_mixed` exists only because the *battle* stream's observable output depends on it when a caller asks for a 32-bit draw; the sign-extension of its argument is pinned by the golden fixture | same; the dead-code finding is the P0 correction |
 | `simpleRand()` | `src/main/java/legend/game/Scus94491BpeSegment.java:225` | `rng::lcg16::Lcg16::next_raw` (and `next_guarded` for the vsync-sourced reseed branch), exposed through `rng::RandStream` | `research/psx/02-gte.md`, `research/game/05b-battle-entities-and-formulas.md` |
 
-## Pixel formats (`bpp`)
+## Pixel addressing (`gpu::pixel`)
 
 | Original | Where it appears in the reference | Rust item that carries the behaviour | Established in |
 |---|---|---|---|
-| `Bpp` (the class, `Bpp.BITS_4` … `BITS_24`) | `src/main/java/legend/core/gpu/Bpp.java` | `bpp::Bpp` — the enum keeps the reference's word because "Bpp" is the format's own term for bits-per-pixel, and `code`/`from_code` carry the wire values | `research/assets/06-tim-texture-format.md`, `research/psx/01-gpu-vram-ordering.md` |
-| `Graphics.GetTPage`'s source address `0x8003b3f0`, the sine table address `80015c80` | cited in `bpp.rs` and `fixedpoint.rs` module headers | addresses, not identifiers: kept in the comments with their address-space classification, and neither is implemented | `research/psx/01-gpu-vram-ordering.md`, `research/psx/02-gte.md` |
+| `Bpp` (the class, `Bpp.BITS_4` … `BITS_24`) | `src/main/java/legend/core/gpu/Bpp.java` | `gpu::pixel::Bpp` — the enum keeps the reference's word because "Bpp" is the format's own term for bits-per-pixel, and `code`/`from_code` carry the wire values | `research/assets/06-tim-texture-format.md`, `research/psx/01-gpu-vram-ordering.md` |
+| `Graphics.GetTPage`'s source address `0x8003b3f0`, the sine table address `80015c80` | cited in `gpu/pixel.rs` and `math/trig.rs` module headers | addresses, not identifiers: kept in the comments with their address-space classification, and neither is implemented | `research/psx/01-gpu-vram-ordering.md`, `research/psx/02-gte.md` |
 
 ## How to check it by hand until the scanner exists
 

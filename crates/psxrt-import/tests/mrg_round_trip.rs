@@ -1,8 +1,10 @@
-//! Round trip for the MRG container: `psxrt-compat` writes a table, `psxrt-import` parses and
+//! Round trip for the MRG container: an oracle writer builds a table, `psxrt_import` parses and
 //! extracts from it.
 //!
-//! Same reasoning as `bpe_round_trip.rs` — the writer is an oracle, not a packing tool, and it is
-//! kept in another crate so that agreeing with the parser is evidence rather than a tautology.
+//! Same reasoning as `bpe_round_trip.rs` — the writer is an oracle and not a packing tool, which is
+//! why it is a module the test brings in rather than something the parser calls. Where it overlaps
+//! the parser it proves nothing, and `tests/architecture.rs` is what keeps that overlap from
+//! growing.
 //!
 //! The tests here are arranged by what they could plausibly get wrong, not by which function they
 //! call. The three things worth checking in a container reader are: that a window is cut at the
@@ -11,9 +13,13 @@
 
 use proptest::collection::vec;
 use proptest::prelude::*;
-use psxrt_compat::container::mrg as write;
+
+mod support;
+
 use psxrt_import::ImportError;
 use psxrt_import::container::mrg::{OffsetScale, SECTOR_BYTES, Table};
+
+use support::mrg_writer as write;
 
 /// Build a container: a table, then a payload region with known bytes placed at given offsets.
 ///
@@ -197,33 +203,6 @@ fn a_sector_scaled_table_is_read_at_the_right_scale() {
     );
 }
 
-/// The scale is chosen by file name, and only for a closed set of seven names. Anything outside the
-/// set is byte-scaled, including things that look close.
-#[test]
-fn only_the_named_containers_are_sector_scaled() {
-    for name in ["DRGN.BIN", "DRGN0.BIN", "DRGN24.BIN"] {
-        assert_eq!(
-            OffsetScale::for_container(name),
-            OffsetScale::Sectors,
-            "{name} is in the sector-scaled set"
-        );
-    }
-    for name in [
-        "DRGN.BINX",
-        "drgn.bin",
-        "DRGN3.BIN",
-        "DRGN25.BIN",
-        "SUBMAP/DRGN.BIN",
-        "",
-    ] {
-        assert_eq!(
-            OffsetScale::Bytes,
-            OffsetScale::for_container(name),
-            "{name} is not in the set and must read as byte offsets"
-        );
-    }
-}
-
 /// An entry whose window runs off the end is a refusal, not a short read. A short read would be the
 /// quiet version of the same bug.
 #[test]
@@ -260,10 +239,7 @@ fn a_table_claiming_more_bytes_than_exist_is_refused() {
     table.extend_from_slice(&(1u32 << 29).to_le_bytes());
     assert!(matches!(
         Table::parse(&table, OffsetScale::Bytes),
-        Err(ImportError::Truncated {
-            needed: _,
-            available: 8
-        })
+        Err(ImportError::Truncated(_, 8))
     ));
 
     // And an absurd count: eight bytes of buffer claiming four gigabytes of table.
@@ -280,7 +256,7 @@ fn a_non_container_is_named_rather_than_misread() {
     let not_a_container = vec![0u8; 16];
     assert!(matches!(
         Table::parse(&not_a_container, OffsetScale::Bytes),
-        Err(ImportError::UnrecognisedContainer { found: 0 })
+        Err(ImportError::UnrecognisedContainer(0))
     ));
     assert!(Table::parse(&[], OffsetScale::Bytes).is_err());
     assert!(Table::parse(&[0x4d, 0x52, 0x47], OffsetScale::Bytes).is_err());
@@ -341,7 +317,7 @@ proptest! {
 
         // A position past the end is a caller error, and it stays one.
         let past_end = table.payload_of(&store, entries.len());
-        let refused = matches!(past_end, Err(ImportError::NoSuchEntry { .. }));
+        let refused = matches!(past_end, Err(ImportError::NoSuchEntry(..)));
         prop_assert!(refused, "an out-of-range index returned {past_end:?}");
     }
 }

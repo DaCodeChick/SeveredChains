@@ -2,30 +2,34 @@
 //!
 //! # What this checks, in one sentence
 //!
-//! Every read entry point in `psxrt-import` either has a paired writer in `psxrt-compat` being
-//! exercised against it, or declares in its own module header that no writer is planned — and a
-//! module that does neither is a gap this test reports.
+//! Every read entry point in `psxrt-import/src` either has a paired writer under `tests/support/`
+//! being exercised against it, or declares in its own module header that no writer is planned — and
+//! a module that does neither is a gap this test reports.
 //!
 //! # Why a fence is needed for something so small
 //!
-//! "`psxrt-compat` is for exporters" is a true statement about this workspace and a quietly
-//! degradable one. The natural failure is not that someone deletes a writer; it is that someone
-//! adds a decoder, writes a test that builds its input by hand, and never asks the pairing
-//! question. Six months later the hand-built fixture and the decoder agree with each other and
-//! with nothing else, which is exactly the arrangement a round trip exists to rule out.
+//! The natural failure is not that somebody deletes a writer. It is that somebody adds a decoder,
+//! writes a test that builds its input by hand, and never asks the pairing question. Six months
+//! later the hand-built fixture and the decoder agree with each other and with nothing else, which
+//! is exactly the arrangement a round trip exists to rule out.
 //!
-//! # Why the pairing is a table and not a name match
+//! This replaced an earlier check that worked by grepping the test tree for the writer crate's name.
+//! That passed with the pairing deleted, because `parse` occurs in `index_round_trip.rs` and so does
+//! `psxrt_compat`, which "proved" that `PatchList::parse` had an oracle. Pairings are therefore
+//! stated as data below and each one is verified against the specific test file that has to exercise
+//! both sides.
 //!
-//! The first version of this file searched the test tree for any file mentioning both the reader's
-//! function name and the writer crate. It passed with the declaration deleted, because `parse`
-//! occurs in `index_round_trip.rs` and so does `psxrt_compat`, which "proved" that
-//! `PatchList::parse` had an oracle. A check that cannot fail is not a check, so the pairing is
-//! now stated as data below and each entry is verified against the one test file that has to
-//! reference both sides of it.
+//! # What the pairing is now, and what it costs
 //!
-//! That is still a weak assertion — a file can `use` a writer without exercising it — and it is
-//! presented as such. What it buys is narrow and real: deleting a writer, or deleting the test that
-//! drives one, breaks the build.
+//! Writers used to live in a separate crate, `psxrt-compat`, and that crate is gone: it had become a
+//! home for anything whose placement nobody wanted to argue about, including two writers with no
+//! caller. The writers that were used moved to `tests/support/`, which is still not `src/` and is
+//! still not allowed to import this crate — `tests/architecture.rs` checks both.
+//!
+//! The honest cost: a support module inside the same package is one `use` away from being welded to
+//! its subject, and no file-scanning test can make that physically impossible. What it can do is
+//! fail the build when the weld happens. That is the whole claim, and it is worth making plainly
+//! rather than describing as a guarantee.
 //!
 //! # The escape hatch, and why it is worded rather than attributed
 //!
@@ -35,18 +39,33 @@
 //! requires the declaration to come with a reason.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 
-/// The pairings, as data. Left: a module under `psxrt-import/src`. Right: the writer path that a
-/// test in `psxrt-import/tests` must reference *in the same file as* a call into the left module.
+/// A reader module, the oracle that arbitrates it, the test file that pairs them, and the path
+/// prefix that test uses to call the oracle.
 ///
-/// Adding a decoder here without a writer means also adding a line to the module's header
-/// explaining why; adding one with a writer means adding its pair here. Either way somebody has
-/// answered the question before the code merges.
-const PAIRINGS: &[(&str, &str)] = &[
-    ("container/bpe.rs", "psxrt_compat::container::bpe"),
-    ("container/mrg.rs", "psxrt_compat::container::mrg"),
-    ("cache.rs", "psxrt_compat::container::index"),
+/// Adding a decoder here without a writer means also adding a line to the module's header explaining
+/// why; adding one with a writer means adding its quadruple here. Either way somebody has answered
+/// the question before the code merges.
+///
+/// The oracle path is relative to `crates/psxrt-import/`, the test path to
+/// `crates/psxrt-import/tests/`.
+const PAIRINGS: &[(&str, &str, &str, &str)] = &[
+    // The call prefix is in the table because naming a writer is not the same as using it, and a
+    // `use` line on its own is exactly how a pairing gets faked.
+    (
+        "container/bpe.rs",
+        "bpe_writer",
+        "bpe_round_trip.rs",
+        "bpe_writer::",
+    ),
+    (
+        "container/mrg.rs",
+        "mrg_writer",
+        "mrg_round_trip.rs",
+        "write::",
+    ),
 ];
 
 /// The phrase a module header uses to declare that no writer is planned.
@@ -117,15 +136,16 @@ fn readers(src: &Path) -> Vec<(String, PathBuf, usize)> {
 #[test]
 fn every_decoder_either_has_an_oracle_or_declares_that_it_has_none() {
     let root = workspace_root();
-    let src = root.join("crates/psxrt-import/src");
-    let tests = collect_rust_files(&root.join("crates/psxrt-import/tests"));
+    let import = root.join("crates/psxrt-import");
+    let src = import.join("src");
+    let tests = collect_rust_files(&import.join("tests"));
     let found = readers(&src);
 
-    // The scan must find the readers that are certainly there. Without this, a rename of the
-    // prefix list or of the `pub fn` spelling switches the whole test off and reports success.
+    // The scan must find the readers that are certainly there. Without this, a rename of the prefix
+    // list or of the `pub fn` spelling switches the whole test off and reports success.
     assert!(
-        found.len() >= 4,
-        "expected at least the BPE, MRG, cache-index and patch-list readers; found {}: {:?}",
+        found.len() >= 2,
+        "expected at least the BPE and MRG readers; found {}: {:?}",
         found.len(),
         found
             .iter()
@@ -142,24 +162,38 @@ fn every_decoder_either_has_an_oracle_or_declares_that_it_has_none() {
             .to_string_lossy()
             .replace('\\', "/");
 
-        // Path separator normalisation: the pairing table is written with `/` and this file runs on
-        // machines that use either.
-        let writer = PAIRINGS
-            .iter()
-            .find(|(module, _)| *module == relative)
-            .map(|(_, writer)| *writer);
+        let pairing = PAIRINGS.iter().find(|(module, ..)| *module == relative);
 
-        match writer {
-            // Paired: one test file has to name both the reader's module and the writer's path.
-            Some(writer) => {
+        match pairing {
+            // Paired: the oracle has to exist, and one test file has to name both sides of it.
+            Some((_, oracle, test_name, call_prefix)) => {
+                let oracle_path = import
+                    .join("tests/support")
+                    .join(oracle)
+                    .with_extension("rs");
+                if !oracle_path.is_file() {
+                    unpaired.push(format!(
+                        "{relative}:{line} `{name}` is declared paired with `{oracle}`, which is \
+                         not in the tree"
+                    ));
+                    continue;
+                }
+
+                // Naming the oracle is not enough; the test has to call into it. `write` is the
+                // verb every oracle exposes, so a file that only mentions the path in prose fails.
                 let driven = tests.iter().any(|test| {
                     let text = read(test);
-                    text.contains(writer) && text.contains(&format!("::{}", name))
+                    let named = test.file_name().is_some_and(|name| name == *test_name);
+                    named
+                        && text.contains("mod support;")
+                        && text.contains(oracle)
+                        && text.contains(call_prefix)
+                        && text.contains(&format!("::{name}"))
                 });
                 if !driven {
                     unpaired.push(format!(
-                        "{relative}:{line} `{name}` is declared paired with `{writer}`, and no \
-                         test file names both"
+                        "{relative}:{line} `{name}` names `{test_name}` as the file that drives \
+                         `{oracle}`, and that file does not exercise both sides"
                     ));
                 }
             }
@@ -183,37 +217,40 @@ fn every_decoder_either_has_an_oracle_or_declares_that_it_has_none() {
     );
 }
 
-/// The pairing table has to describe the crate as it now is.
+/// The pairing table has to describe the tree as it now is.
 ///
-/// A stale entry — a writer that was renamed or deleted — would otherwise keep this file green
-/// while testing nothing, which is the precise failure the table is meant to prevent.
+/// A stale entry — a writer that was renamed or deleted — would otherwise keep this file green while
+/// testing nothing, which is the precise failure the table is meant to prevent.
 #[test]
-fn every_declared_writer_still_exists() {
-    let compat = workspace_root().join("crates/psxrt-compat/src");
+fn every_declared_oracle_still_exists() {
+    let import = workspace_root().join("crates/psxrt-import");
     let mut missing = Vec::new();
 
-    for (reader, writer) in PAIRINGS {
-        let _ = reader;
-        // `psxrt_compat::container::bpe` → `crates/psxrt-compat/src/container/bpe.rs`.
-        let path = writer
-            .trim_start_matches("psxrt_compat::")
-            .replace("::", "/");
-        if !compat.join(format!("{path}.rs")).is_file() {
-            missing.push(writer.to_string());
+    for (reader, oracle, test_name, _) in PAIRINGS {
+        let oracle_path = import
+            .join("tests/support")
+            .join(oracle)
+            .with_extension("rs");
+        if !oracle_path.is_file() {
+            missing.push(format!("{} (paired with {reader})", oracle_path.display()));
+        }
+        if !import.join("tests").join(test_name).is_file() {
+            missing.push(format!("tests/{test_name} (drives {oracle})"));
         }
     }
 
     assert!(
         missing.is_empty(),
-        "the pairing table names writers that are not in the tree: {missing:?}"
+        "the pairing table names files that are not in the tree:\n{}",
+        missing.join("\n")
     );
 }
 
 /// A declared absence has to explain itself.
 ///
-/// The declaration exists so that a legitimate "no writer for this" is recorded rather than
-/// silently omitted. Without a length floor it degenerates into a magic string pasted at the top of
-/// a file, which restores the exact gap the check was written to close.
+/// The declaration exists so that a legitimate "no writer for this" is recorded rather than silently
+/// omitted. Without a length floor it degenerates into a magic string pasted at the top of a file,
+/// which restores the exact gap the check was written to close.
 #[test]
 fn a_declared_absence_explains_itself() {
     let src = workspace_root().join("crates/psxrt-import/src");

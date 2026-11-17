@@ -24,14 +24,14 @@
 //!   `testdata/generators/`.
 
 pub mod blend;
-pub mod bpp;
-pub mod fixedpoint;
+pub mod gpu;
+pub mod math;
 pub mod rng;
 pub mod timing;
 
 pub use blend::{BlendMode, Rgb8, modulate};
-pub use bpp::{Bpp, Texel};
-pub use fixedpoint::{PSX_DEG_PER_REV, PSX_DEG_TO_RAD, TRIG_SCALE, psx_deg_to_rad, rcos, rsin};
+pub use gpu::pixel::Bpp;
+pub use math::trig::{PSX_DEG_PER_REV, PSX_DEG_TO_RAD, TRIG_SCALE, psx_deg_to_rad, rcos, rsin};
 pub use rng::{Lcg15, Lcg16, RandStream, Random48};
 pub use timing::{
     BASE_RATE_HZ, FrameCadence, GameClock, MAX_SPEED_MULTIPLIER, MIN_SPEED_MULTIPLIER,

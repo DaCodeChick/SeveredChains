@@ -236,18 +236,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "psxrt-compat"
-version = "0.1.0"
-dependencies = [
- "thiserror",
-]
-
-[[package]]
 name = "psxrt-import"
 version = "0.1.0"
 dependencies = [
  "proptest",
- "psxrt-compat",
  "thiserror",
 ]
 
@@ -356,6 +348,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "severedchains-game"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "psxrt-import",
+ "thiserror",
 ]
 
 [[package]]

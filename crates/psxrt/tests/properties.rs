@@ -19,7 +19,10 @@
 
 use proptest::collection::vec;
 use proptest::prelude::*;
-use psxrt::{BlendMode, Bpp, FrameCadence, GameClock, Lcg15, Lcg16, RandStream, Random48, Rgb8, ScriptTickGate};
+use psxrt::{
+    BlendMode, Bpp, FrameCadence, GameClock, Lcg15, Lcg16, RandStream, Random48, Rgb8,
+    ScriptTickGate,
+};
 
 // ---------------------------------------------------------------------------
 // Random streams: replay, state domains, and call-form cross-checks
@@ -46,7 +49,9 @@ fn run_draw(op: Draw, stream: &mut Random48) -> u64 {
         Draw::Mixed => u64::from(stream.next_u32_mixed()),
         // A non-positive bound is a caller error, not a draw; recorded as such rather than
         // drawn from.
-        Draw::Bounded(bound) => stream.next_bounded_i32(bound).map_or(u64::MAX, |value| u64::from(value as u32)),
+        Draw::Bounded(bound) => stream
+            .next_bounded_i32(bound)
+            .map_or(u64::MAX, |value| u64::from(value as u32)),
         Draw::F32 => u64::from(stream.next_f32().to_bits()),
         Draw::F32Bounded(bound) => u64::from(stream.next_f32_bounded(bound).to_bits()),
         Draw::F64 => stream.next_f64().to_bits(),
@@ -307,12 +312,18 @@ proptest! {
 // ---------------------------------------------------------------------------
 
 /// Split `draws` samples into `bands` equal decades of the bound and count them.
-fn histogram<const BANDS: usize>(stream: &mut Random48, bound: i32, draws: usize) -> [usize; BANDS] {
+fn histogram<const BANDS: usize>(
+    stream: &mut Random48,
+    bound: i32,
+    draws: usize,
+) -> [usize; BANDS] {
     let mut counts = [0_usize; BANDS];
     let width = i64::from(bound) / BANDS as i64;
     for _ in 0..draws {
         let value = stream.next_bounded_i32(bound).expect("positive bound");
-        let band = usize::try_from(i64::from(value) / width).unwrap().min(BANDS - 1);
+        let band = usize::try_from(i64::from(value) / width)
+            .unwrap()
+            .min(BANDS - 1);
         counts[band] += 1;
     }
     counts
@@ -495,7 +506,6 @@ proptest! {
     }
 }
 
-
 /// Pack a line in the layout the depth uses, then read every texel back through the depth's
 /// addressing. Returns the first disagreement, if any.
 ///
@@ -512,7 +522,9 @@ fn round_trip_failure(depth: Bpp, indices: &[u8]) -> Option<String> {
         let word = words[x / per_word];
         let read = depth.index_in_word(word, u32::try_from(x).unwrap());
         if read != Some(u32::from(*index)) {
-            return Some(format!("{depth:?} at x {x} in word {word:#06x}: packed {index}, read {read:?}"));
+            return Some(format!(
+                "{depth:?} at x {x} in word {word:#06x}: packed {index}, read {read:?}"
+            ));
         }
     }
     None
@@ -612,7 +624,11 @@ fn raising_the_frame_rate_with_the_gate_keeps_the_logic_pace() {
             }
             gate.advance();
         }
-        assert_eq!(ticks, rate / usize::try_from(divisor).unwrap(), "vsync {vsync}");
+        assert_eq!(
+            ticks,
+            rate / usize::try_from(divisor).unwrap(),
+            "vsync {vsync}"
+        );
     }
 }
 
@@ -627,10 +643,15 @@ fn addressing_two_slots_of_one_word_keeps_their_values_apart() {
             let slots: Vec<u32> = (0..per_word)
                 .map(|slot| (u32::from(word) >> (slot * width)) & ((1 << width) - 1))
                 .collect();
-            let addressed: Vec<Option<u32>> =
-                (0..per_word).map(|slot| depth.index_in_word(word, u32::try_from(slot).unwrap())).collect();
+            let addressed: Vec<Option<u32>> = (0..per_word)
+                .map(|slot| depth.index_in_word(word, u32::try_from(slot).unwrap()))
+                .collect();
             for (slot, value) in slots.into_iter().enumerate() {
-                assert_eq!(addressed[slot], Some(value), "{depth:?} slot {slot} in word {word:#06x}");
+                assert_eq!(
+                    addressed[slot],
+                    Some(value),
+                    "{depth:?} slot {slot} in word {word:#06x}"
+                );
             }
         }
     }
@@ -650,7 +671,10 @@ fn an_index_wider_than_the_field_does_not_survive_the_packing() {
             Bpp::Bits4.index_in_word(word, u32::try_from(x).unwrap())
         })
         .collect();
-    let expected: Vec<Option<u32>> = indices.iter().map(|index| Some(u32::from(*index) & 0xf)).collect();
+    let expected: Vec<Option<u32>> = indices
+        .iter()
+        .map(|index| Some(u32::from(*index) & 0xf))
+        .collect();
     assert_eq!(read_back, expected, "a four-bit field keeps four bits");
 
     // And at eight bits the same sweep *is* in domain, which is what makes the four-bit case a

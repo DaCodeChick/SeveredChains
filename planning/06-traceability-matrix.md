@@ -336,18 +336,25 @@ the grounds that an unreachable-code comment is not a structure. `tests/adversar
 cases) is the guard, and its oracle is deliberately a different mechanism from the reader's — see
 `planning/05` §2.1, which also records the three mutations that prove the file can fail.
 
-**The dependency rule is now mechanical, not declarative.** No runtime crate lists `psxrt-compat`
-in `[dependencies]`; the one edge into it is a `dev-dependency` from `psxrt-import`, used only by
-the round-trip tests. Cargo rejects a package-level cycle including dev edges, so the manifest
-direction is enforced by the build, and `psxrt-import/tests/dependency_direction.rs` (5 cases)
-covers what cargo cannot see — a path expression written by hand, and a `dev-dependency` added by a
-crate that has no business testing against the escape hatch.
+**The dependency rule is mechanical in two ways, and declarative in neither.** Cargo enforces part
+of it: a package-level cycle is refused even when the back-edge is a `dev-dependency`, so a
+`psxrt-import → severedchains-game` edge cannot be written at all while `severedchains-game`
+depends on `psxrt-import`. What cargo cannot see is a *forbidden* edge that introduces no cycle —
+`psxrt → psxrt-import` is the case in point, since `psxrt` currently declares no dependencies at
+all and adding one would be perfectly legal to the build. That half is covered by
+`psxrt-import/tests/architecture.rs` and `severedchains-game/tests/architecture.rs`, 14 cases,
+which read the `[dependencies]` and `[dev-dependencies]` tables rather than grepping the manifest.
+
+`dependency_direction.rs`, which did this job at I1a by matching on crate names as text, was
+retired with `psxrt-compat`. Its own replacement was blind on the first pass — it read table keys
+only, and missed a dependency renamed through `package = "..."` — which is why five of the fourteen
+cases test the manifest parser itself instead of the live graph. See `planning/05` §2.
 
 **Row dispositions.**
 
 | Row | Status after I1a | Check | What is missing before it can be called verified |
 |---|---|---|---|
-| CL-AST-02 (MRG container) | implemented, **not** verified | `psxrt-import/tests/mrg_round_trip.rs` (13), the reader's own unit tests | An oracle independent of this repository. Both the reader and `psxrt-compat`'s writer were written from `MrgArchive.java`; the round trip proves the two readings of that file do not contradict each other, which is weaker than the §3 rule wants and is recorded here rather than presented as satisfaction. The "split fixture suite" this row named is not built |
+| CL-AST-02 (MRG container) | implemented, **not** verified | `psxrt-import/tests/mrg_round_trip.rs` (13), the reader's own unit tests | An oracle independent of this repository. Both the reader and `tests/support/mrg_writer.rs` (which lived in `psxrt-compat` until 2026-11-16) were written from `MrgArchive.java`; the round trip proves the two readings of that file do not contradict each other, which is weaker than the §3 rule wants and is recorded here rather than presented as satisfaction. The "split fixture suite" this row named is not built |
 | CL-AST-01 (4 discs, ISO9660, in-place reading) | **moved to I1b**, not closed | — | Real or synthetic disc images; the file-space model (`planning/08` §5) |
 | CL-AST-03 (unpack pipeline) | **moved to I1b**, not closed | — | The transform registry, and the byte-stability run that is this row's whole test |
 | CL-SCR-02, CL-SCR-04 (orchestration half) | implemented, unverified | `psxrt-import/tests/patch_orchestration.rs` (21) | The real toolchain (I4). The 21 cases drive a recording stub, so they verify *when a file is touched*, which is the orchestrator's contract, and verify nothing about reassembly |

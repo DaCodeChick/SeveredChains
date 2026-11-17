@@ -66,8 +66,7 @@ fn target_dir() -> PathBuf {
     if let Ok(set) = std::env::var("CARGO_TARGET_DIR") {
         return PathBuf::from(set).join("testdata").join("psxrt");
     }
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../target/testdata/psxrt")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/testdata/psxrt")
 }
 
 /// FNV-1a over 64 bits. Test-only, and deliberately not a hash function worth trusting with
@@ -117,9 +116,21 @@ fn the_fixture_inventory_is_exactly_what_is_pinned() {
         "fixtures present in {} but not pinned: {unlisted:?}",
         dir.display()
     );
-    assert!(missing.is_empty(), "pinned fixtures missing from {}: {missing:?}", dir.display());
-    assert_eq!(on_disk.len(), 7, "the number of fixtures is part of the contract");
-    assert_eq!(on_disk.len(), PINNED.len(), "PINNED and the directory must be the same census");
+    assert!(
+        missing.is_empty(),
+        "pinned fixtures missing from {}: {missing:?}",
+        dir.display()
+    );
+    assert_eq!(
+        on_disk.len(),
+        7,
+        "the number of fixtures is part of the contract"
+    );
+    assert_eq!(
+        on_disk.len(),
+        PINNED.len(),
+        "PINNED and the directory must be the same census"
+    );
 }
 
 /// Every fixture's bytes are the bytes it was generated with — on disk and as embedded.
@@ -138,7 +149,11 @@ fn every_fixtures_bytes_are_the_bytes_it_was_generated_with() {
         let bytes = fs::read(&path)
             .unwrap_or_else(|error| panic!("{} is not readable: {error}", path.display()));
         if bytes.len() as u64 != *size || fingerprint(&bytes) != *digest {
-            drift.push(format!("{name}: on disk is {} bytes {}", bytes.len(), fingerprint(&bytes)));
+            drift.push(format!(
+                "{name}: on disk is {} bytes {}",
+                bytes.len(),
+                fingerprint(&bytes)
+            ));
         }
     }
 
@@ -156,7 +171,11 @@ fn every_fixtures_bytes_are_the_bytes_it_was_generated_with() {
         let (size, digest) = pinned(name)
             .map(|entry| (entry.1, entry.2))
             .unwrap_or_else(|| panic!("{name} is embedded but not pinned"));
-        assert_eq!(contents.len() as u64, size, "{name}: embedded length is not the pinned size");
+        assert_eq!(
+            contents.len() as u64,
+            size,
+            "{name}: embedded length is not the pinned size"
+        );
         assert_eq!(
             fingerprint(contents.as_bytes()),
             digest,
@@ -166,7 +185,11 @@ fn every_fixtures_bytes_are_the_bytes_it_was_generated_with() {
         );
     }
 
-    assert!(drift.is_empty(), "fixtures that drifted from their recorded fingerprints:\n{}", drift.join("\n"));
+    assert!(
+        drift.is_empty(),
+        "fixtures that drifted from their recorded fingerprints:\n{}",
+        drift.join("\n")
+    );
 }
 
 /// The manifest and the pinned inventory say the same thing.
@@ -195,11 +218,7 @@ fn the_manifest_agrees_with_the_pinned_inventory() {
                 if fields[1] != size.to_string() || fields[2] != *digest {
                     problems.push(format!(
                         "{}: manifest says {} bytes {}, the suite pins {} bytes {}",
-                        fields[0],
-                        fields[1],
-                        fields[2],
-                        size,
-                        digest
+                        fields[0], fields[1], fields[2], size, digest
                     ));
                 }
             }
@@ -207,7 +226,11 @@ fn the_manifest_agrees_with_the_pinned_inventory() {
     }
 
     assert_eq!(lines, PINNED.len(), "one manifest line per pinned fixture");
-    assert!(problems.is_empty(), "the manifest and the suite disagree:\n{}", problems.join("\n"));
+    assert!(
+        problems.is_empty(),
+        "the manifest and the suite disagree:\n{}",
+        problems.join("\n")
+    );
 }
 
 /// If a target-directory copy exists, it is the canonical data.
@@ -245,16 +268,24 @@ fn a_target_copy_never_disagrees_with_the_canonical_data() {
                 wanted.len()
             ));
         }
-        assert_eq!(fingerprint(&wanted), *digest, "{name}: the canonical file drifted");
+        assert_eq!(
+            fingerprint(&wanted),
+            *digest,
+            "{name}: the canonical file drifted"
+        );
     }
 
-    assert!(problems.is_empty(), "target copies that cannot be trusted:\n{}", problems.join("\n"));
+    assert!(
+        problems.is_empty(),
+        "target copies that cannot be trusted:\n{}",
+        problems.join("\n")
+    );
 }
 
 /// The per-crate fixture census, read across the whole workspace.
 ///
-/// "Seven fixtures, all in `psxrt`, none in `psxrt-compat`" is a claim in `README.md`, and a
-/// claim in a document is only true until somebody drops a file somewhere. This walks every
+/// "Seven fixtures, all in `psxrt`, and no other crate carries any" is a claim in `README.md`,
+/// and a claim in a document is only true until somebody drops a file somewhere. This walks every
 /// crate's `testdata/` so the README and the disk cannot be describing different things, and it
 /// requires any crate that carries fixtures to register them: data with no manifest is data
 /// whose provenance nobody can re-check.
@@ -276,7 +307,11 @@ fn the_fixture_counts_are_the_expected_ones() {
         if !data.is_dir() {
             continue;
         }
-        let name = crate_dir.file_name().unwrap().to_string_lossy().into_owned();
+        let name = crate_dir
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
         let files: Vec<String> = fs::read_dir(&data)
             .expect("testdata is readable")
             .map(|item| item.expect("a readable directory entry").path())
@@ -327,16 +362,25 @@ fn every_fixture_records_where_its_expected_values_came_from() {
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        if let Some(name) = line.strip_prefix('[').and_then(|rest| rest.strip_suffix(']')) {
+        if let Some(name) = line
+            .strip_prefix('[')
+            .and_then(|rest| rest.strip_suffix(']'))
+        {
             records.insert(name.to_string(), BTreeMap::new());
             open = Some(name.to_string());
             continue;
         }
         let Some((key, value)) = line.split_once('=') else {
-            panic!("{}: {line} is neither a block header nor a key = value line", path.display());
+            panic!(
+                "{}: {line} is neither a block header nor a key = value line",
+                path.display()
+            );
         };
         match open.as_deref().and_then(|name| records.get_mut(name)) {
-            None => panic!("{}: `{line}` appears before any [fixture] header", path.display()),
+            None => panic!(
+                "{}: `{line}` appears before any [fixture] header",
+                path.display()
+            ),
             Some(block) => {
                 block.insert(key.trim().to_string(), value.trim().to_string());
             }
@@ -351,18 +395,27 @@ fn every_fixture_records_where_its_expected_values_came_from() {
         };
         for key in ["oracle", "seed"] {
             if !record.get(key).is_some_and(|value| !value.is_empty()) {
-                problems.push(format!("{name}: `{key}` is missing, so the file cannot be re-made"));
+                problems.push(format!(
+                    "{name}: `{key}` is missing, so the file cannot be re-made"
+                ));
             }
         }
-        if !record.get("derivation").is_some_and(|value| value.len() >= 20) {
+        if !record
+            .get("derivation")
+            .is_some_and(|value| value.len() >= 20)
+        {
             problems.push(format!(
                 "{name}: `derivation` is missing or too short to be steps — a one-word note is \
                  not a derivation"
             ));
         }
         if let Some(oracle) = record.get("oracle") {
-            let first =
-                oracle.split_whitespace().next().unwrap_or("").trim_end_matches(',').to_string();
+            let first = oracle
+                .split_whitespace()
+                .next()
+                .unwrap_or("")
+                .trim_end_matches(',')
+                .to_string();
             if first.contains('/') {
                 let crate_root = Path::new(env!("CARGO_MANIFEST_DIR"));
                 if !crate_root.join(&first).is_file() {
@@ -376,7 +429,9 @@ fn every_fixture_records_where_its_expected_values_came_from() {
 
     for name in records.keys() {
         if pinned(name).is_none() {
-            problems.push(format!("{name} has a provenance block but is not a registered fixture"));
+            problems.push(format!(
+                "{name} has a provenance block but is not a registered fixture"
+            ));
         }
     }
 

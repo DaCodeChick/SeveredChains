@@ -7,29 +7,32 @@ immediately: how to run the tests, and how the golden test data gets to a test.
 
 ## Crates in the workspace
 
-Three crates exist. This table is the tree as it stands after I1a, not the target layout.
+Three crates exist. This table is the tree as it stands after the 2026-11-16 restructure, not the
+target layout.
 
 | Crate | What it holds today | Depends on |
 |---|---|---|
-| `psxrt` | PSX platform mechanisms: fixed-point and trig, the three RNG streams, texture-depth addressing, blend arithmetic, frame cadence | nothing |
-| `psxrt-compat` | Three writers, all of them test oracles: a BPE encoder, an MRG container writer, a `files/` cache index writer | nothing |
-| `psxrt-import` | Import-side readers: the MRG container, the BPE decoder and its passthrough, the `files/` cache index, and the patch orchestration layer | `thiserror`; and for tests only, `psxrt-compat` and `proptest` |
+| `psxrt` | PSX platform mechanisms: the two trig primitives and the angular unit (`math::trig`), the three RNG streams, texture-depth addressing (`gpu::pixel`), blend arithmetic, frame cadence | nothing |
+| `psxrt-import` | Import-side readers, format-generic: the MRG container, the BPE decoder and its passthrough | `thiserror`; for tests only `proptest` |
+| `severedchains-game` | Legend of Dragoon knowledge: the sector-aligned container names, the `files/` cache index, the `scripts.csv` patch walk | `psxrt-import` |
 
-**The dependency rule, and why it is a test.** No crate whose purpose is running the game may
-depend on `psxrt-compat`. The `psxrt-compat → psxrt` edge that existed at I0 is gone, deleted with
-the nine policy files the 2026-11-15 revision retired, so the crate restarts with zero project
-dependencies. The only edge into it is a `dev-dependency`, and its direction is enforced twice:
-cargo rejects a package-level dependency cycle outright, and
-`crates/psxrt-import/tests/dependency_direction.rs` fails if any runtime crate names
-`psxrt_compat` in a code path. A toolchain crate that depends on nothing cannot be dragged down to
-a device; one that a runtime crate depends on can.
+**The dependency rule, and why it is a test.** `psxrt` may not depend on `psxrt-import`, and
+neither may depend on `severedchains-game`. A runtime crate that reads files, or a format crate
+that asks a game question, has started deciding at the wrong layer, and the divergence that follows
+is invisible from either side on its own.
 
-`psxrt-compat` is still not a place to put a runtime switch, and it is not on the boot path. What
-it holds is now the thing its name asks for — original-format output — rather than a scaffold
-describing that intention.
+`psxrt-compat` was retired in this restructure. It had drifted into being the place things went
+when their placement was awkward — three test-only writers, a policy enum with no caller, and
+supporting text — and it documented its own reason for existing as "readers only", a rule that
+described its contents rather than explaining them. The three writers moved to the test trees of
+the crates that use them (`psxrt-import/tests/support/`, `severedchains-game/tests/support/`),
+where they are still not allowed to import the reader they are tested against. `crates/psxrt-import/tests/architecture.rs`
+fails if the crate comes back, and `crates/severedchains-game/tests/architecture.rs` fails if a
+support module starts importing its own subject or if a game filename appears in a reusable crate.
 
-The other three names in the approved layout (`severedchains`, `severedchains-sdk`,
-`severedchains-game`) are not created yet; nothing is stubbed for them.
+The other two names in the approved layout (`severedchains`, `severedchains-sdk`) are not created
+yet, and nothing is stubbed for them: a crate whose `lib.rs` says only "this will hold X" is a
+placeholder, not a boundary.
 
 ## Running the tests
 
@@ -115,11 +118,13 @@ kept so the identity can be re-established on a different JDK.
 
 ## Test data inventory
 
-Seven fixtures, all in `crates/psxrt/testdata/`, all consumed by `psxrt` tests.
-`psxrt-compat` has none: its one test file reads two research documents for citation
-traceability, which is not test data in that sense. **Expected total: 7. Expected in `psxrt`: 7.
-Expected in `psxrt-compat`: 0.** Pinned in `fixtures.rs` (`PINNED`, and a count assertion) and
-in `fixtures.manifest`. A later milestone may give an export module a fixture — a TIM written from
+Seven fixtures, all in `crates/psxrt/testdata/`, all consumed by `psxrt` tests. No other crate
+carries fixture data: the two writers that used to live in `psxrt-compat` and read research
+documents for citation traceability were moved into test `support/` modules in the 2026-11-16
+restructure, which is not test data in that sense. **Expected total: 7. Expected in `psxrt`: 7.
+Expected anywhere else: 0.** Pinned in `fixtures.rs` (`PINNED`, a count assertion that walks every
+crate's `testdata/`, and a rule that any crate carrying fixtures must register them) and in
+`fixtures.manifest`. A later milestone may give an export module a fixture — a TIM written from
 a known image, a CTMD re-encoded from a known model — and that would be the crate's first real
 test data; the census assertion is the place that expectation lives, so it changes with the
 milestone rather than silently.
@@ -146,9 +151,10 @@ point: a digest computed by the code it checks would be worth nothing.
 
 ### Fixtures shared between crates
 
-None today: `psxrt-compat` has no fixture-reading test, and `crates/psxrt-compat/testdata/` does
-not exist. `tests/fixtures.rs::the_fixture_counts_are_the_expected_ones` pins that, so the
-numbers above are checked rather than remembered.
+None today: no crate outside `psxrt` has a `testdata/` directory at all.
+`crates/psxrt/tests/fixtures.rs::the_fixture_counts_are_the_expected_ones` walks every crate under
+`crates/` and pins that, so the numbers above are checked rather than remembered, and a crate that
+adds fixtures has to declare them or the census fails.
 
 The rule for when later milestones add data is explicit, because the roadmap already schedules
 fixture data in two crates for one and the same mechanism: the ADPCM core. The worked example in
@@ -177,15 +183,19 @@ never inherited from a filename.
   results, and the map itself live in `crates/psxrt/src/REMAP.md`; an original identifier cited in
   a comment needs a line there. A mechanical scanner is an open item, recorded in the I0 gate
   record in `planning/05` §6.
-- `crates/psxrt-compat/tests/policy_ledger.rs` embeds the two research documents its ledger cites
-  (`research/cross/02-compatibility-checklist.md` and `research/04-unresolved-questions.md`) and
-  fails if a citation stops resolving, so a policy cannot quietly outlive its evidence. That job
-  survives the ledger's retirement in two pieces: the same citation resolution, taken over the whole
-  corpus by `scripts/citation_audit.py`, and a dependency-direction guard that fails if any runtime
-  crate names `psxrt-compat` — see `planning/03` §6 and `planning/07` §4/F10.
-- Line-number citations in `research/` name a reference revision. **925 of 1 330 were verified
-  byte-identical against the reference at `d47ac8637` on 2026-11-15; 154 are open** and itemised in
-  `research/citation-exceptions.md` — check there before trusting a quoted line. `make citations`
+- The independence of a test oracle is a checked property, not a convention.
+  `crates/severedchains-game/tests/architecture.rs` and
+  `crates/psxrt-import/tests/architecture.rs` fail if a module under `tests/support/` names the
+  crate whose reader it exists to feed. That is the property the retired
+  `crates/psxrt-compat/tests/policy_ledger.rs` protected by accident of layout: an oracle that
+  imports its own subject reports agreement, not correctness, and `planning/05` §2.1 says a
+  round-trip agreement proves only that.
+- Line-number citations in `research/` name a reference revision. The last full run (2026-11-16)
+  resolved **953 of 1 333 byte-identical, 201 needing a human**, which does not reconcile with the
+  925/154 census taken on 2026-11-15; the non-reconciliation is a declared item in
+  `research/citation-exceptions.md` §2. Do not quote either pair of numbers without re-running the
+  check. Itemised exceptions live in `research/citation-exceptions.md` — check there before trusting
+  a quoted line. `make citations`
   re-runs that check (add `SEVERED_CHAINS_REPOS=/path/to/parent`), and it is deliberately **not** part
   of `make check`: with no reference checkout configured it exits 0 having done nothing, so a reference
   checkout can never become a build or test dependency (TD-25). Its `--apply` mode rewrites relocated

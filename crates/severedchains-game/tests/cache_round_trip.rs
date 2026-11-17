@@ -3,7 +3,7 @@
 //! Two independent things read and write this format, which is why it needs its own test file:
 //! [`Table::index_text`] writes it from a parsed container, and [`Index::parse`] reads it back on
 //! the next launch, or reads one that a mod shipped, or reads one a person edited by hand. They
-//! live in different modules and neither knows about the other. If they disagree, the failure shows
+//! live in different crates and neither knows about the other. If they disagree, the failure shows
 //! up as a game that loads the wrong file, on a machine where nobody remembers unpacking anything.
 //!
 //! The strong property here is not "the strings match". It is that *both* ways of answering "which
@@ -11,11 +11,45 @@
 //! computed while reading the table, and following the index chain, which the cache reader computes
 //! while reading text. Those are different computations over different data, and they have to land
 //! in the same place.
+//!
+//! # How the fixture is built, and what that does and does not prove
+//!
+//! [`fixture`] assembles the container bytes directly from the layout stated at the head of
+//! `psxrt-import/src/container/mrg.rs` — magic word, entry count, then `(offset, size)` pairs. It
+//! is not the MRG writer oracle, which lives in `psxrt-import`'s own test tree and stays there.
+//!
+//! That is a deliberate downgrade in one place and it should be read as one. Here the container is
+//! *scaffolding*: what is under test is who-owns-what, and the container exists to have somewhere
+//! to put six entries. The pairing that could actually fail — a second description of the index
+//! text, independent of `Index::parse` — is `tests/support/index_writer.rs`, and
+//! `tests/index_round_trip.rs` is where it is exercised. Do not read this file as evidence about
+//! MRG parsing; that is `psxrt-import/tests/mrg_round_trip.rs`, which does have an oracle.
 
-use psxrt_compat::container::mrg as write;
-use psxrt_import::ImportError;
-use psxrt_import::cache::{INDEX_FILE, Index, VERSION, VERSION_FILE};
 use psxrt_import::container::mrg::{OffsetScale, Table};
+use severedchains_game::tooling::cache::{CacheError, INDEX_FILE, Index, VERSION, VERSION_FILE};
+
+/// The container's leading word, written out rather than imported.
+///
+/// The layout this file assembles comes from the format description; this constant is part of that
+/// description. `tests/architecture.rs` checks it against `psxrt_import::container::mrg::MAGIC`, so
+/// writing it by hand cannot quietly drift into testing a different format.
+const MAGIC: u32 = 0x1a47_524d;
+
+/// Assemble a container: the magic, an entry count, then the `(offset, size)` pairs.
+///
+/// Written from that description and not from the parser's control flow. `psxrt_import` is a
+/// dev-dependency of this crate for `Table`, which means a fixture that called into the parser to
+/// build its own input would prove nothing at all, so this does not.
+fn container(entries: &[(u32, u32)], payload: &[u8]) -> Vec<u8> {
+    let mut store = MAGIC.to_le_bytes().to_vec();
+    store.extend_from_slice(&(entries.len() as u32).to_le_bytes());
+    for &(offset, size) in entries {
+        store.extend_from_slice(&offset.to_le_bytes());
+        store.extend_from_slice(&size.to_le_bytes());
+    }
+    store.extend_from_slice(payload);
+    store
+}
 
 /// A container exercising every shape an index line can take: an owner, a duplicate of it, a
 /// zero-size pointer at the same offset, two plain files, and a pointer that names nothing.
@@ -36,8 +70,7 @@ fn fixture() -> (Vec<u8>, Table) {
         (9000u32, 0), // 5 — pointer into nowhere
     ];
     let store = {
-        let mut store = write::write(&entries);
-        store.extend_from_slice(&payload);
+        let store = container(&entries, &payload);
         assert_eq!(
             store.len(),
             80,
@@ -104,12 +137,12 @@ fn index_text_survives_a_write_read_cycle() {
     assert_eq!(Index::parse(&read_back.text()).unwrap(), read_back);
 }
 
-/// A cache file written by the Java toolchain has to parse without ceremony, including the shapes
-/// a generated one never produces. `7=;0` in particular is real: it is how "no file here" is
-/// recorded, and the reader has to treat it as an answer rather than as a short line.
+/// A cache file written by the original toolchain has to parse without ceremony, including the
+/// shapes a generated one never produces. `7=;0` in particular is real: it is how "no file here"
+/// is recorded, and the reader has to treat it as an answer rather than as a short line.
 #[test]
 fn a_hand_written_cache_file_parses() {
-    // Taken in shape from what the reference's FileMap produces: `name=target;size`, US-ASCII,
+    // Taken in shape from what the original's own map file produces: `name=target;size`, US-ASCII,
     // newline-terminated, with the name being a positional number for a container directory.
     let text = "0=0;4\n1=1;4\n2=0;0\n3=;0\n4=4;0\n";
     let index = Index::parse(text).unwrap();
@@ -134,15 +167,12 @@ fn a_hand_written_cache_file_parses() {
     assert_eq!(index.resolve(4).unwrap(), None);
 }
 
-/// Two lines that point at each other. The reference spins forever on this input; a cache file is
+/// Two lines that point at each other. The original spins forever on this input; a cache file is
 /// attacker-writable in any install where somebody can reach the `files/` directory.
 #[test]
 fn a_cyclic_cache_file_is_refused_instead_of_followed() {
     let index = Index::parse("0=1;0\n1=0;0\n").unwrap();
-    assert!(matches!(
-        index.resolve(0),
-        Err(ImportError::IndexCycle { start: 0 })
-    ));
+    assert!(matches!(index.resolve(0), Err(CacheError::Cycle(0))));
 }
 
 /// Damage is named, with the line it came from. "Malformed input" is not actionable when a cache
@@ -151,7 +181,7 @@ fn a_cyclic_cache_file_is_refused_instead_of_followed() {
 fn damage_names_the_line_that_caused_it() {
     let text = "0=0;4\n1=1;4\ngarbage\n";
     match Index::parse(text) {
-        Err(ImportError::MalformedIndex { line, text }) => {
+        Err(CacheError::Malformed(line, text)) => {
             assert_eq!(line, 2);
             assert!(
                 text.contains("garbage"),

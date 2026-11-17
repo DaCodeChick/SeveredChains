@@ -16,7 +16,8 @@
 //! `slot` is the position inside the directory. `target` is the position whose bytes this entry
 //! uses, and it equals `slot` for the ordinary case where an entry owns its own bytes. `size` is
 //! the length the *table* declared, which for a pointer entry is zero even though the bytes it
-//! points at have a length — see [`crate::container::mrg::Entry::index_length`] for why those are
+//! points at have a length — see
+//! [`psxrt_import::container::mrg::Entry::index_length`] for why those are
 //! kept apart. A blank target, `7=;0`, means "nothing here at all", which is different from a
 //! target that points somewhere.
 //!
@@ -24,8 +25,8 @@
 //!
 //! The index codec: [`Index::parse`] to read one, [`Index::text`] to write one, and
 //! [`Index::resolve`] to answer "which entry actually owns the bytes for slot *n*". Those three are
-//! the whole of it, and they are here rather than inside `container::mrg` because the index is a
-//! format that outlives the parser — the toolchain writes it, the game reads it back on the next
+//! the whole of it, and they are not part of the MRG container: the index is a format that
+//! outlives the parser — the toolchain writes it, the game reads it back on the next
 //! launch, and a mod can ship one. Any change to it is a compatibility event, so it gets its own
 //! file and its own tests.
 //!
@@ -39,7 +40,37 @@
 //! document exists to decide. The cache codec above does not depend on the answer, which is why it
 //! is built and they are not.
 
-use crate::error::ImportError;
+use thiserror::Error;
+
+/// What can go wrong reading a cache index.
+///
+/// Owned here rather than carried in from `psxrt-import`: a malformed `mrg` file is a fact about
+/// this toolchain's cache convention, not about a container format, and the person who has to act
+/// on it is whoever is diffing a cache tree.
+///
+/// The two payload-carrying forms are tuples, and the position means something:
+///
+/// * [`CacheError::Malformed`] is `(zero-based line number within the index, what was wrong
+///   followed by the offending text)`.
+/// * [`CacheError::Cycle`] is `(the slot the pointer walk started from)`, which is not the slot
+///   where the repetition was noticed — the two differ whenever a chain runs into a cycle rather
+///   than starting in one.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum CacheError {
+    /// An index line that is not the three fields `slot=target;size`.
+    ///
+    /// Carries the line number and the text because an index is a hand-inspectable ASCII file, and
+    /// the person reading this is usually comparing it against a working one.
+    #[error("index line {0} is malformed ({1})")]
+    Malformed(usize, String),
+
+    /// An index whose pointers point at each other, so no slot owns the bytes.
+    ///
+    /// The toolchain's own unpacker follows the chain with an unbounded `while` loop and hangs.
+    /// Returning here instead is the difference between one bad cache file and a hung tool.
+    #[error("index slot {0} is part of a pointer cycle")]
+    Cycle(usize),
+}
 
 /// The version string this build reads and writes.
 ///
@@ -106,7 +137,7 @@ impl Index {
     /// and deliberate divergence rather than an unverified one; a reference-derived golden fixture
     /// would need the Java toolchain's own positional path to be run over adversarial input, which
     /// is not a thing this project currently has a harness for.
-    pub fn parse(text: &str) -> Result<Self, ImportError> {
+    pub fn parse(text: &str) -> Result<Self, CacheError> {
         let mut slots: Vec<Option<Slot>> = Vec::new();
 
         for (number, line) in text.lines().enumerate() {
@@ -114,10 +145,7 @@ impl Index {
                 continue;
             }
 
-            let damage = |what: &str| ImportError::MalformedIndex {
-                line: number,
-                text: format!("{what}: {line}"),
-            };
+            let damage = |what: &str| CacheError::Malformed(number, format!("{what}: {line}"));
 
             let (slot_text, rest) = line
                 .split_once('=')
@@ -212,7 +240,7 @@ impl Index {
     /// real)` and no limit, so an index whose lines point at each other — `5=6;0` beside `6=5;0` —
     /// spins forever. A corrupt or hand-edited cache file reaches that state without any help from
     /// the game, which is what makes it a defect rather than a curiosity.
-    pub fn resolve(&self, index: usize) -> Result<Option<usize>, ImportError> {
+    pub fn resolve(&self, index: usize) -> Result<Option<usize>, CacheError> {
         let Some(mut current) = self.slot(index).and_then(|slot| slot.target) else {
             return Ok(None);
         };
@@ -229,7 +257,7 @@ impl Index {
             }
         }
 
-        Err(ImportError::IndexCycle { start: index })
+        Err(CacheError::Cycle(index))
     }
 }
 
@@ -267,14 +295,8 @@ mod tests {
     #[test]
     fn a_cyclic_index_is_reported_rather_than_followed() {
         let index = Index::parse("5=6;0\n6=5;0\n").unwrap();
-        assert!(matches!(
-            index.resolve(5),
-            Err(ImportError::IndexCycle { start: 5 })
-        ));
-        assert!(matches!(
-            index.resolve(6),
-            Err(ImportError::IndexCycle { start: 6 })
-        ));
+        assert!(matches!(index.resolve(5), Err(CacheError::Cycle(5))));
+        assert!(matches!(index.resolve(6), Err(CacheError::Cycle(6))));
     }
 
     /// A blank target is a real answer meaning "nothing here".
