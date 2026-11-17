@@ -107,14 +107,25 @@ There is **no `psxrt::compat` module.** The first pass of this revision listed o
 
 ### `psxrt-import`
 
+**Corrected 2026-11-16, after I1a.** Three rows below specified a file-identity model that the
+reference does not use, and one named a codec path that does not exist. They are corrected here
+rather than left standing, because a module map is read as a build instruction and these four
+would have been built as written. The corrections are: the 63-bit address / four-namespace model
+is **retired**, not deferred (path-as-identity plus four read domains, `planning/08` D-1/D-2); the
+`planning/07 §3.1` citation attached to it named a section that does not exist; the raw-LZSS
+variant and three-mode flag never existed; and the cache writer lives at
+`psxrt-compat::container::index`, not `psxrt-compat::disc`. Milestone marks are as delivered —
+**I1a** is built, **I1b** is not.
+
 | Module | Owns | Layer | Milestone |
 | --- | --- | --- | --- |
-| `space` | the canonical file-space abstraction: the 63-bit address, the four kinds, the four namespaces, DRGN-name resolution, the `disc:`/`region:`/`object:` access path, the three error codes (planning/07 §3.1) | L2 | **I1a** |
-| `container::iso` | the `files/` cache reader — region-major 63-bit keys, the 4-byte size header, four depth levels, path-length-bound keys | L2 | I1a |
-| `container::mrg` | the MRG container; per-file *no*-compression rule | L2 | I1a |
-| `container::bpe` | the BPE **decoder**, the raw-LZSS variant, the three-mode flag. The encoder half is `psxrt-compat::container` and reaches these tests as a `dev-dependency` (§5 rule 3) — it is not a second half of this module | L2 | I1a |
-| `cache` | the `files/` cache **reader** (the derived-format side of §3 — a cache is not an original format, but it is still read, not written, here). The writer that regenerates cache entries is `psxrt-compat::disc`, which also owns `VERSION = 5` on the write side | L2 | I1a |
-| `pipeline` | the orchestrator, the rayon pool, the 63-bit key builder, the streaming decoder | L2 | I1a |
+| `space` | the file-space boundary: path-as-identity, and the four read domains (Disc, Tree, Slice, Alias) with their window rules, per `planning/08` D-1/D-2. **Corrected:** this row formerly specified "the 63-bit address, the four kinds, the four namespaces, DRGN-name resolution, the `disc:`/`region:`/`object:` access path", citing `planning/07 §3.1`. That section does not exist, no source shows a numeric file key, and the whole model is retired — see `planning/08` §2 for what was checked and what was found (zero hits for `disc:` across the reference) | L2 | **I1b** — cut from I1a; cannot be verified without real disc bytes |
+| `container::iso` | the `files/` cache reader — path-derived keys (a cache key is a path plus a size, not an encoded address), the 4-byte size header, four depth levels, path-length-bound keys. The "region-major 63-bit keys" wording is retired with the model above | L2 | I1b |
+| `container::mrg` | the MRG container; per-file *no*-compression rule | L2 | **I1a**, built |
+| `container::bpe` | the BPE **decoder** and byte passthrough. **Corrected: there is no raw-LZSS variant and no mode byte.** Selection is a four-byte marker at offset 4 (`0x1a455042` = BPE, anything else = copy); "mode 0 = raw" was a misreading of an unrelated comment, and no third path may be added (`planning/04` I1a). The encoder half is `psxrt-compat::container::bpe` and reaches these tests as a `dev-dependency` (§5 rule 3) — it is not a second half of this module | L2 | **I1a**, built |
+| `cache` | the `files/` cache **reader** (the derived-format side of §3 — a cache is not an original format, but it is still read, not written, here). The writer that regenerates cache entries is `psxrt-compat::container::index`, which carries the `VERSION` string on the write side; `psxrt-compat::disc` is not built and is not where that writer went | L2 | **I1a**, built |
+| `patch` | patch **orchestration** only: the 353-entry `scripts.csv` walk, the CRC32 gate over the `#include` closure, the one-time backup and the restore-on-removal, behind an injected `ScriptPatchToolchain` trait. I1a ships the trait and a recording stub; the real toolchain is I4. Listed here as built, since the table above is a module map and this module exists | L2 | **I1a**, built |
+| `pipeline` | the orchestrator, the rayon pool, the streaming decoder. The "63-bit key builder" is retired with the model above; what remains of it is decided in I1b | L2 | I1b |
 | `render::tmd` | TMD/CTMD **decode** to the working model, the `TmdFormat` vocabulary, `updateTmdPacketIlen`. The encoding half is `psxrt-compat::model`; this module supplies the model it encodes from | L2 | I1b |
 | `render::tim` | TIM parse, the PXL sheet, the MCQ strip, `decode_16_to_rgba`, `decode_4_to_16`/`decode_8_to_16`. **Read-only:** a working sheet, once edited, is handed to `psxrt-compat::texture` to be emitted as a TIM | L2 | I1b |
 | `effect::anim` | the ANIM family — plain, LMB (the only truly compressed member), CMB (a plain container of three plain sub-animations) | L2 | I1b |

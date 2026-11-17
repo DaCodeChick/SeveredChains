@@ -324,12 +324,17 @@ than passing on a coincidence. See `README.md` §Fixtures shared between crates.
 
 ## 13. The I1a record (2026-11-16, gate review pending)
 
-Three crates exist. `psxrt` is unchanged in behaviour — its 72 tests still pass and were not
-touched to make anything else pass. `psxrt-compat` was emptied and refilled: the eight I0 policy
+Three crates exist. `psxrt` is unchanged in behaviour — its 65 tests (7 suites) still pass and were
+not touched to make anything else pass; the 72 counted at I0 included 7 `psxrt-compat`
+policy-ledger tests that the revision deleted with the framework they covered. `psxrt-compat` was emptied and refilled: the eight I0 policy
 modules, the `lib.rs` framework and `tests/policy_ledger.rs` are gone, and in their place are three
 writers (`container/mrg.rs`, `container/bpe.rs`, `container/index.rs`) with 5 unit tests.
 `psxrt-import` is new: the MRG reader, the BPE decoder, the cache index reader/writer, the patch
-orchestrator. 186 tests run in total, zero clippy warnings.
+orchestrator. 193 tests run in total, zero clippy warnings. Production source carries no panic site:
+the one `.expect()` that `container/mrg.rs` shipped with was deleted rather than argued about, on
+the grounds that an unreachable-code comment is not a structure. `tests/adversarial_input.rs` (7
+cases) is the guard, and its oracle is deliberately a different mechanism from the reader's — see
+`planning/05` §2.1, which also records the three mutations that prove the file can fail.
 
 **The dependency rule is now mechanical, not declarative.** No runtime crate lists `psxrt-compat`
 in `[dependencies]`; the one edge into it is a `dev-dependency` from `psxrt-import`, used only by

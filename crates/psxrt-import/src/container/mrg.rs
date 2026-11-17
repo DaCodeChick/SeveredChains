@@ -245,20 +245,23 @@ impl Table {
                 })
             });
 
-            let entry = match owner {
-                Some(owner) => {
-                    // `expect` is sound: the search only returns indices holding a resolved entry,
-                    // and `Entry` is `Copy`, so this lifts the owner out before the write below.
-                    let owner_entry = parsed[owner].expect("owner resolved by the search above");
-                    Entry {
-                        start: owner_entry.start,
-                        length: owner_entry.length,
-                        // Zero, not the owner's length. The index records what the table said about
-                        // this entry, and the table said nothing.
-                        index_length: 0,
-                        shared_from: Some(owner),
-                    }
-                }
+            // Resolve the owner without a panic path. The `find` above only yields an index whose
+            // slot holds a resolved entry, so an empty owner slot is unreachable — but leaving an
+            // `expect` here (the previous form) would put a panic on a path driven by table bytes,
+            // where a future edit to the search could turn "refuse a malformed container" into
+            // "abort the run". Degrading an unresolved owner to the same entry as "no owner found"
+            // removes that class of failure, and `Entry` is `Copy` so the owner is read out before
+            // the write below.
+            let owner_entry = owner.and_then(|owner| parsed[owner].map(|entry| (owner, entry)));
+            let entry = match owner_entry {
+                Some((owner, owner_entry)) => Entry {
+                    start: owner_entry.start,
+                    length: owner_entry.length,
+                    // Zero, not the owner's length. The index records what the table said about
+                    // this entry, and the table said nothing.
+                    index_length: 0,
+                    shared_from: Some(owner),
+                },
                 None => Entry {
                     start: widen(offset),
                     length: 0,

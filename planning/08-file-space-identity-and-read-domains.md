@@ -234,17 +234,31 @@ signature because it is a change to a recorded risk disposition.
 
 ## 6. Documentation defects to correct
 
-Independent of the design decision, three text defects are real and should be fixed wherever they
-are relied on:
+**Status 2026-11-16: all three are corrected at source.** They are kept listed here because the
+point of the section is the defect class, not the three instances.
 
-1. `planning/01:112` cites `planning/07 §3.1` — does not exist.
-2. `planning/04:330` cites `planning/05 §5.6` — does not exist.
-3. `planning/04:125` attributes to `patches/scripts/DRGN1/254.diff` four properties the file does
-   not contain.
+1. `planning/01` §4, `space` row, cited `planning/07 §3.1` — does not exist. **Fixed:** the row now
+   states the 63-bit / four-namespace model is retired and carries no citation for it.
+2. `planning/04` §4 risk row 1 cited `planning/05 §5.6` — does not exist. **Fixed earlier:** that
+   row now reads "§A §3.1" and marks the 63-bit key retired. `grep` for `§5.6` in `planning/04`
+   returns nothing.
+3. `planning/04` §I1b, `fmv/mdec` row, attributed to `patches/scripts/DRGN1/254.diff` four
+   properties the file does not contain. **Fixed:** verified against the file itself on 2026-11-16
+   — it is an 85-line Fate script diff whose only changes are two `call 498, id[lod:burn_out]`
+   replacements, with zero occurrences of `disc:`, `FILE:`, `bin`, `0x800`, `compress` or `mode`.
+   The row now says the three properties are *unverified* and must be re-derived from real disc
+   bytes, which is the correction the "pointer needs a human read" rule was meant to force.
 
-These go to `research/citation-exceptions.md` under the "pointer needs a human read" rule, not
-silently patched: `citation_audit.py --apply` is documented as untrusted, and a wrong pointer
-replaced by an unverified one is worse than the wrong pointer.
+The rule those three went through is unchanged and still holds: they were routed to
+`research/citation-exceptions.md` rather than silently patched, because `citation_audit.py --apply`
+is documented as untrusted, and a wrong pointer replaced by an unverified one is worse than the
+wrong pointer. The fixes above replace each pointer with a statement of what was actually checked
+and what returned zero, not with a substitute citation.
+
+**A line-number caveat for readers of §2's table.** The "Where asserted" column cites `file:line`
+positions as they stood when this document was written. Three of them have since moved — the
+targets were edited, so the line numbers now land on unrelated text. Read the column as *which
+section*, not as an address.
 
 ---
 
